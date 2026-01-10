@@ -1,0 +1,11 @@
+# Optionale Backtesting-Frameworks
+# Installation: pip install -r requirements-backtesting.txt
+
+# VectorBT - Schnellster, Optuna-kompatibel (empfohlen)
+vectorbt>=0.26.0
+
+# Backtrader - Feature-reich, grosse Community
+backtrader>=1.9.78
+
+# Backtesting.py - Einfach, leichtgewichtig
+backtesting>=0.3.3

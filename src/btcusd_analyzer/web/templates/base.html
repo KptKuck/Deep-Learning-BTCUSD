@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}BTCUSD Analyzer{% endblock %}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+
+        /* Navigation */
+        nav {
+            background: #16213e;
+            padding: 15px 20px;
+            border-bottom: 1px solid #0f3460;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        nav .logo {
+            color: #4da8da;
+            font-size: 1.3em;
+            font-weight: bold;
+            text-decoration: none;
+        }
+        nav .nav-links {
+            display: flex;
+            gap: 20px;
+        }
+        nav .nav-links a {
+            color: #888;
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+        nav .nav-links a:hover,
+        nav .nav-links a.active {
+            color: #4da8da;
+        }
+
+        /* Container */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Common Elements */
+        .card {
+            background: #16213e;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border: 1px solid #0f3460;
+        }
+        .card h2 {
+            color: #4da8da;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: #4da8da;
+            color: #000;
+        }
+        .btn-primary:hover {
+            background: #5db8ea;
+        }
+        .btn-success {
+            background: #00ff88;
+            color: #000;
+        }
+        .btn-danger {
+            background: #ff4444;
+            color: #fff;
+        }
+        .btn-secondary {
+            background: #555;
+            color: #fff;
+        }
+
+        .badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .badge-success { background: #00ff88; color: #000; }
+        .badge-warning { background: #ffaa00; color: #000; }
+        .badge-danger { background: #ff4444; color: #fff; }
+        .badge-off { background: #555; color: #fff; }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 20px;
+            color: #555;
+            font-size: 12px;
+            border-top: 1px solid #0f3460;
+            margin-top: 40px;
+        }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            .container { padding: 10px; }
+            nav { flex-direction: column; gap: 10px; }
+            nav .nav-links { flex-wrap: wrap; justify-content: center; }
+        }
+
+        {% block extra_styles %}{% endblock %}
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="/" class="logo">BTCUSD Analyzer</a>
+        <div class="nav-links">
+            <a href="/" class="{% if active_page == 'dashboard' %}active{% endif %}">Dashboard</a>
+            <a href="/api/status">API</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+
+    <footer>
+        <p>BTCUSD Analyzer v0.1.0</p>
+    </footer>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <title>BTCUSD Analyzer - Status</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="refresh" content="{{ refresh_seconds }}">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .header {
+            text-align: center;
+            padding: 20px;
+            background: linear-gradient(135deg, #16213e, #1a1a2e);
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border: 1px solid #0f3460;
+        }
+        .header h1 {
+            color: #4da8da;
+            margin-bottom: 10px;
+        }
+        .header p {
+            color: #888;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .card {
+            background: #16213e;
+            border-radius: 10px;
+            padding: 20px;
+            border-left: 4px solid #0f3460;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        .card.active { border-left-color: #00ff88; }
+        .card.warning { border-left-color: #ffaa00; }
+        .card.danger { border-left-color: #ff4444; }
+        .card h3 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            color: #4da8da;
+            font-size: 1.1em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .card h3::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #555;
+        }
+        .card.active h3::before { background: #00ff88; }
+        .card.warning h3::before { background: #ffaa00; animation: pulse 1s infinite; }
+        .card.danger h3::before { background: #ff4444; animation: pulse 0.5s infinite; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #0f3460;
+        }
+        .status-row:last-child {
+            border-bottom: none;
+        }
+        .status-label {
+            color: #888;
+        }
+        .status-value {
+            font-weight: bold;
+            color: #fff;
+        }
+        .status-value.positive { color: #00ff88; }
+        .status-value.negative { color: #ff4444; }
+
+        .badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .badge-success { background: #00ff88; color: #000; }
+        .badge-warning { background: #ffaa00; color: #000; }
+        .badge-danger { background: #ff4444; color: #fff; }
+        .badge-off { background: #555; color: #fff; }
+
+        .progress-bar {
+            background: #0f3460;
+            border-radius: 10px;
+            height: 20px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        .progress-bar-fill {
+            background: linear-gradient(90deg, #4da8da, #00ff88);
+            height: 100%;
+            transition: width 0.5s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: bold;
+            color: #000;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 20px;
+            padding: 15px;
+            color: #555;
+            font-size: 12px;
+            border-top: 1px solid #0f3460;
+        }
+        .footer a {
+            color: #4da8da;
+            text-decoration: none;
+        }
+        .footer a:hover {
+            text-decoration: underline;
+        }
+
+        /* Mobile Anpassungen */
+        @media (max-width: 600px) {
+            body { padding: 10px; }
+            .header { padding: 15px; }
+            .header h1 { font-size: 1.5em; }
+            .card { padding: 15px; }
+            .grid { gap: 15px; }
+        }
+
+        /* API Link */
+        .api-links {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 10px;
+        }
+        .api-link {
+            color: #4da8da;
+            text-decoration: none;
+            font-size: 12px;
+            padding: 4px 8px;
+            border: 1px solid #4da8da;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+        .api-link:hover {
+            background: #4da8da;
+            color: #000;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>BTCUSD Analyzer</h1>
+        <p>Status-Dashboard | {{ status.server.ip }}:{{ status.server.port }} | Uptime: {{ status.server.uptime }}</p>
+        <div class="api-links">
+            <a href="/api/status" class="api-link">JSON API</a>
+            <a href="/api/health" class="api-link">Health Check</a>
+        </div>
+    </div>
+
+    <div class="grid">
+        <!-- Daten Status -->
+        <div class="card {% if status.data.loaded %}active{% endif %}">
+            <h3>Daten</h3>
+            <div class="status-row">
+                <span class="status-label">Status</span>
+                <span class="badge {% if status.data.loaded %}badge-success{% else %}badge-off{% endif %}">
+                    {{ 'Geladen' if status.data.loaded else 'Nicht geladen' }}
+                </span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">Datensaetze</span>
+                <span class="status-value">{{ '{:,}'.format(status.data.records) }}</span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">Zeitraum</span>
+                <span class="status-value">{{ status.data.date_range }}</span>
+            </div>
+        </div>
+
+        <!-- Modell Status -->
+        <div class="card {% if status.model.loaded %}active{% endif %}">
+            <h3>Modell</h3>
+            <div class="status-row">
+                <span class="status-label">Status</span>
+                <span class="badge {% if status.model.loaded %}badge-success{% else %}badge-off{% endif %}">
+                    {{ 'Geladen' if status.model.loaded else 'Nicht geladen' }}
+                </span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">Name</span>
+                <span class="status-value">{{ status.model.name }}</span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">Accuracy</span>
+                <span class="status-value">{{ '%.1f' % status.model.accuracy }}%</span>
+            </div>
+        </div>
+
+        <!-- Training Status -->
+        <div class="card {% if status.training.active %}warning{% endif %}">
+            <h3>Training</h3>
+            <div class="status-row">
+                <span class="status-label">Status</span>
+                <span class="badge {% if status.training.active %}badge-warning{% else %}badge-off{% endif %}">
+                    {{ 'Laeuft' if status.training.active else 'Inaktiv' }}
+                </span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">Epoch</span>
+                <span class="status-value">{{ status.training.epoch }} / {{ status.training.total_epochs }}</span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">Loss</span>
+                <span class="status-value">{{ '%.4f' % status.training.loss if status.training.loss else '-' }}</span>
+            </div>
+            {% if status.training.active and status.training.total_epochs > 0 %}
+            {% set progress = (status.training.epoch / status.training.total_epochs * 100)|int %}
+            <div class="progress-bar">
+                <div class="progress-bar-fill" style="width: {{ progress }}%">{{ progress }}%</div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Backtest Status -->
+        <div class="card {% if status.backtest.active %}warning{% endif %}">
+            <h3>Backtest</h3>
+            <div class="status-row">
+                <span class="status-label">Status</span>
+                <span class="badge {% if status.backtest.active %}badge-warning{% else %}badge-off{% endif %}">
+                    {{ 'Laeuft' if status.backtest.active else 'Inaktiv' }}
+                </span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">Fortschritt</span>
+                <span class="status-value">{{ '%.0f' % status.backtest.progress }}%</span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">P/L</span>
+                <span class="status-value {% if status.backtest.pnl >= 0 %}positive{% else %}negative{% endif %}">
+                    ${{ '%.2f' % status.backtest.pnl }}
+                </span>
+            </div>
+            {% if status.backtest.active %}
+            <div class="progress-bar">
+                <div class="progress-bar-fill" style="width: {{ status.backtest.progress|int }}%">{{ status.backtest.progress|int }}%</div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Trading Status -->
+        <div class="card {% if status.trading.active %}{% if status.trading.mode == 'LIVE' %}danger{% else %}active{% endif %}{% endif %}">
+            <h3>Live-Trading</h3>
+            <div class="status-row">
+                <span class="status-label">Modus</span>
+                <span class="badge {% if status.trading.mode == 'LIVE' %}badge-danger{% elif status.trading.mode == 'TESTNET' %}badge-success{% else %}badge-off{% endif %}">
+                    {{ status.trading.mode }}
+                </span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">Status</span>
+                <span class="badge {% if status.trading.active %}badge-warning{% else %}badge-off{% endif %}">
+                    {{ 'Aktiv' if status.trading.active else 'Inaktiv' }}
+                </span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">Position</span>
+                <span class="status-value">{{ status.trading.position }}</span>
+            </div>
+            <div class="status-row">
+                <span class="status-label">P/L</span>
+                <span class="status-value {% if status.trading.pnl >= 0 %}positive{% else %}negative{% endif %}">
+                    ${{ '%.2f' % status.trading.pnl }}
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>BTCUSD Analyzer v0.1.0 | Auto-Refresh: {{ refresh_seconds }}s | {{ now }}</p>
+        <p style="margin-top: 5px;">
+            <a href="https://github.com">GitHub</a>
+        </p>
+    </div>
+</body>
+</html>

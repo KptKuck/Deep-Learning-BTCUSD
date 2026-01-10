@@ -1,0 +1,45 @@
+# BTCUSD Analyzer - Python Dependencies
+# Basis-Installation: pip install -r requirements.txt
+
+# ML Framework
+torch>=2.0.0
+torchvision>=0.15.0
+
+# GUI
+PyQt6>=6.5.0
+
+# Datenverarbeitung
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Hyperparameter-Optimierung
+optuna>=3.0.0
+
+# Trading API
+python-binance>=1.0.0
+
+# Visualisierung
+matplotlib>=3.7.0
+
+# Machine Learning Utilities
+scikit-learn>=1.2.0
+
+# Fortgeschrittene Modelle (TFT, N-BEATS)
+pytorch-forecasting>=1.0.0
+
+# Tensor-Operationen fuer Transformer
+einops>=0.6.0
+
+# Web-Dashboard
+flask>=3.0.0
+werkzeug>=3.0.0
+
+# Umgebungsvariablen
+python-dotenv>=1.0.0
+
+# Websocket fuer Live-Trading
+websocket-client>=1.6.0
+websockets>=12.0
+
+# Logging
+colorlog>=6.7.0
