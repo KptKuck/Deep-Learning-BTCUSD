@@ -461,6 +461,9 @@ class PrepareDataWindow(QMainWindow):
             # Tabs aktualisieren
             self._update_tab_status()
 
+            # Stats-Tabelle aktualisieren
+            self._update_stats_table()
+
             self._log(f'Labels generiert: {num_buy} BUY, {num_sell} SELL', 'SUCCESS')
 
         except Exception as e:
@@ -503,6 +506,77 @@ class PrepareDataWindow(QMainWindow):
         else:
             self.status_label.setText('Alle Schritte abgeschlossen!')
             self.status_label.setStyleSheet('color: #33b34d;')
+
+    def _update_stats_table(self):
+        """Aktualisiert die Stats-Tabelle mit aktuellen Werten."""
+        if not hasattr(self, 'stats_table'):
+            return
+
+        # Label-Statistiken
+        num_buy = 0
+        num_sell = 0
+        num_hold = 0
+
+        if self.generated_labels is not None:
+            unique, counts = np.unique(self.generated_labels, return_counts=True)
+            label_stats = dict(zip(unique, counts))
+            num_buy = label_stats.get(1, 0)
+            num_sell = label_stats.get(2, 0)
+            num_hold = label_stats.get(0, 0)
+
+        total = num_buy + num_sell + num_hold
+
+        # Feature-Anzahl berechnen
+        num_features = 0
+        if hasattr(self, 'feature_checks'):
+            for name, cb in self.feature_checks.items():
+                if cb.isChecked():
+                    if name == 'Hour':
+                        num_features += 2  # hour_sin + hour_cos
+                    else:
+                        num_features += 1
+
+        # Lookback/Lookforward aus Params oder SpinBox
+        lookback = self.params.get('lookback', 100)
+        lookforward = self.params.get('lookforward', 100)
+        if hasattr(self, 'lookback_spin'):
+            lookback = self.lookback_spin.value()
+        if hasattr(self, 'lookforward_spin'):
+            lookforward = self.lookforward_spin.value()
+
+        # Balance berechnen
+        if total > 0 and num_buy > 0 and num_sell > 0:
+            balance = f'{num_buy / num_sell:.2f}' if num_sell > 0 else '-'
+        else:
+            balance = '-'
+
+        # Normalisierung
+        norm_method = 'Z-Score'
+        if hasattr(self, 'norm_combo'):
+            norm_method = self.norm_combo.currentText()
+
+        # Stats aktualisieren
+        stats_values = [
+            str(num_buy) if num_buy > 0 else '-',      # BUY Signale
+            str(num_sell) if num_sell > 0 else '-',    # SELL Signale
+            str(num_hold) if num_hold > 0 else '-',    # HOLD Samples
+            str(total) if total > 0 else '-',          # Gesamt
+            '---',                                      # Separator
+            str(lookback + lookforward),               # Sequenzlaenge
+            str(num_features) if num_features > 0 else '-',  # Features
+            f'({lookback}, {num_features})' if num_features > 0 else '-',  # Input Shape
+            balance,                                    # Balance
+            '---',                                      # Separator
+            str(lookback),                             # Lookback
+            str(lookforward),                          # Lookforward
+            norm_method,                               # Normalisierung
+        ]
+
+        # Tabellen-Zellen aktualisieren (nur Werte-Spalte)
+        for i, value in enumerate(stats_values):
+            item = self.stats_table.item(i, 1)
+            if item:
+                item.setText(value)
 
     # =========================================================================
     # Tab 2: Features
@@ -654,6 +728,7 @@ class PrepareDataWindow(QMainWindow):
         self.features_valid = True
         self.samples_valid = False
         self._update_tab_status()
+        self._update_stats_table()
         self.feature_info.setText(f'Features bestaetigt: {count}')
         self.feature_info.setStyleSheet('color: #33b34d; font-weight: bold;')
 
