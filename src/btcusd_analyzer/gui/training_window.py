@@ -839,6 +839,11 @@ class TrainingWindow(QMainWindow):
         self.progress_bar.setMaximum(config['epochs'])
         self._start_time = datetime.now()
 
+        # Timer fuer Zeit-Update (VOR Training initialisieren!)
+        self.timer = QTimer()
+        self.timer.timeout.connect(self._update_time)
+        self.timer.start(1000)
+
         # Synchrones oder asynchrones Training
         if self.sync_training_check.isChecked():
             # Synchrones Training im Main-Thread (stabiler fuer GPU)
@@ -853,11 +858,6 @@ class TrainingWindow(QMainWindow):
             self.worker.training_error.connect(self._on_training_error)
             self.worker.log_message.connect(lambda msg: self._log(msg, 'INFO'))
             self.worker.start()
-
-        # Timer fuer Zeit-Update
-        self.timer = QTimer()
-        self.timer.timeout.connect(self._update_time)
-        self.timer.start(1000)
 
     def _run_sync_training(self, config: dict):
         """
@@ -1057,7 +1057,8 @@ class TrainingWindow(QMainWindow):
 
     def _on_training_finished(self, results: dict):
         """Callback wenn Training abgeschlossen."""
-        self.timer.stop()
+        if hasattr(self, 'timer') and self.timer:
+            self.timer.stop()
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
 
@@ -1084,7 +1085,8 @@ class TrainingWindow(QMainWindow):
 
     def _on_training_error(self, error: str):
         """Callback bei Fehler."""
-        self.timer.stop()
+        if hasattr(self, 'timer') and self.timer:
+            self.timer.stop()
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
 
