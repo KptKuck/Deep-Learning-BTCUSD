@@ -1,20 +1,23 @@
 """
-Backtest Window - GUI fuer Backtesting mit Ergebnis-Visualisierung
+Backtest Window - GUI fuer Backtesting mit Live-Simulation (MATLAB-Style)
+
+Layout: 3-Spalten (280px | flexible | 280px)
+- Links: Steuerung (Start/Stop/Einzelschritt/Reset, Geschwindigkeit, Position-Info, Trade-Log)
+- Mitte: Charts (Preis+Signale, Equity-Kurve)
+- Rechts: Performance-Statistiken (P/L, Trade-Stats, Signal-Verteilung)
 """
 
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QGroupBox, QLabel, QPushButton, QComboBox, QSpinBox, QDoubleSpinBox,
-    QProgressBar, QTextEdit, QSplitter, QFileDialog, QMessageBox,
-    QCheckBox, QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
-    QScrollArea, QDateEdit
+    QGroupBox, QLabel, QPushButton, QSlider, QProgressBar, QTextEdit,
+    QSplitter, QCheckBox, QScrollArea
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QDate
-from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QFont
 
 import pandas as pd
 import numpy as np
@@ -22,708 +25,990 @@ import numpy as np
 from .styles import get_stylesheet, COLORS
 
 
-class BacktestWorker(QThread):
-    """Worker-Thread fuer Backtesting ohne GUI-Blockierung."""
-
-    progress_updated = pyqtSignal(int)  # progress percent
-    backtest_finished = pyqtSignal(object)  # BacktestResult
-    backtest_error = pyqtSignal(str)  # error message
-    log_message = pyqtSignal(str)  # log output
-
-    def __init__(
-        self,
-        backtester,
-        data: pd.DataFrame,
-        signals: pd.Series,
-        config: Dict[str, Any]
-    ):
-        super().__init__()
-        self.backtester = backtester
-        self.data = data
-        self.signals = signals
-        self.config = config
-
-    def run(self):
-        """Fuehrt den Backtest durch."""
-        try:
-            self.log_message.emit(f"Starte Backtest mit {self.backtester.name}")
-            self.log_message.emit(f"Datenpunkte: {len(self.data):,}")
-            self.log_message.emit(f"Startkapital: ${self.config.get('initial_capital', 10000):,.2f}")
-
-            self.progress_updated.emit(10)
-
-            # Backtester konfigurieren
-            self.backtester.set_params(
-                commission=self.config.get('commission', 0.001),
-                slippage=self.config.get('slippage', 0.0),
-            )
-
-            self.progress_updated.emit(30)
-
-            # Backtest ausfuehren
-            result = self.backtester.run(
-                self.data,
-                self.signals,
-                initial_capital=self.config.get('initial_capital', 10000)
-            )
-
-            self.progress_updated.emit(100)
-            self.backtest_finished.emit(result)
-
-        except Exception as e:
-            self.backtest_error.emit(str(e))
-
-
 class BacktestWindow(QMainWindow):
     """
-    Backtest-Fenster mit Ergebnis-Visualisierung.
+    Backtest-Fenster mit Live-Simulation (MATLAB-Style).
 
     Features:
-    - Backtester-Auswahl (Internal, VectorBT, Backtrader, etc.)
-    - Parameter-Konfiguration (Gebuehren, Slippage)
-    - Equity-Kurve Visualisierung
-    - Trade-Liste
-    - Performance-Metriken
-    - Export-Funktionen
+    - Schritt-fuer-Schritt Durchlauf der Daten
+    - Start/Stop/Einzelschritt Steuerung
+    - Gewinn/Verlust Berechnung
+    - Visualisierung von Trades und Equity-Kurve
+    - Performance-Statistiken
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("BTCUSD Analyzer - Backtest")
+        self.setWindowTitle("Backtester - BILSTM Trading Simulation")
         self.setMinimumSize(1200, 800)
 
-        # State
-        self.data = None
-        self.signals = None
-        self.result = None
-        self.worker = None
+        # Daten
+        self.data: Optional[pd.DataFrame] = None
+        self.signals: Optional[pd.Series] = None
+        self.model = None
+        self.model_info: Optional[Dict] = None
+
+        # Backtester-Status
+        self.is_running = False
+        self.is_paused = False
+        self.current_index = 0
+        self.sequence_length = 0
+
+        # Trading-Status
+        self.position = 'NONE'  # 'NONE', 'LONG', 'SHORT'
+        self.entry_price = 0.0
+        self.entry_index = 0
+        self.total_pnl = 0.0
+        self.trades: List[Dict] = []
+        self.signal_history: List[Dict] = []
+
+        # Kapital und Equity
+        self.initial_capital = 10000.0
+        self.current_equity = self.initial_capital
+        self.equity_curve: List[float] = [self.initial_capital]
+        self.equity_indices: List[int] = [0]
+
+        # Signal-Zaehler
+        self.buy_count = 0
+        self.sell_count = 0
+        self.hold_count = 0
+
+        # Geschwindigkeit
+        self.steps_per_second = 10
+        self.turbo_mode = False
+
+        # Timer
+        self.backtest_timer: Optional[QTimer] = None
 
         self._setup_ui()
         self.setStyleSheet(get_stylesheet())
 
     def _setup_ui(self):
-        """Erstellt die Benutzeroberflaeche."""
+        """Erstellt die 3-Spalten Benutzeroberflaeche."""
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QHBoxLayout(central)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
 
-        # Linke Seite: Konfiguration
-        left_panel = self._create_config_panel()
-        left_panel.setFixedWidth(320)
-
-        # Rechte Seite: Ergebnisse
-        right_panel = self._create_results_panel()
-
-        # Splitter
+        # 3-Spalten Splitter
         splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Linke Spalte: Steuerung (280px)
+        left_panel = self._create_control_panel()
+        left_panel.setFixedWidth(280)
+
+        # Mitte: Charts (flexibel)
+        center_panel = self._create_chart_panel()
+
+        # Rechte Spalte: Statistiken (280px)
+        right_panel = self._create_stats_panel()
+        right_panel.setFixedWidth(280)
+
         splitter.addWidget(left_panel)
+        splitter.addWidget(center_panel)
         splitter.addWidget(right_panel)
-        splitter.setSizes([320, 880])
+        splitter.setSizes([280, 640, 280])
 
         main_layout.addWidget(splitter)
 
-    def _create_config_panel(self) -> QWidget:
-        """Erstellt das Konfigurations-Panel."""
+    def _create_control_panel(self) -> QWidget:
+        """Erstellt das Steuerungs-Panel (linke Spalte)."""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         panel = QWidget()
+        panel.setStyleSheet(f"background-color: rgb(46, 46, 46);")
         layout = QVBoxLayout(panel)
         layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
 
-        # Backtester-Auswahl
-        bt_group = QGroupBox("Backtester")
-        bt_layout = QVBoxLayout(bt_group)
+        # Titel
+        title = QLabel("Backtester Steuerung")
+        title.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        title.setStyleSheet("color: white;")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
 
-        self.backtester_combo = QComboBox()
-        self._update_backtester_list()
-        bt_layout.addWidget(self.backtester_combo)
+        # === Steuerungs-Buttons ===
+        control_group = QGroupBox("Steuerung")
+        control_group.setStyleSheet(self._group_style((0.3, 0.7, 1)))
+        control_layout = QGridLayout(control_group)
+        control_layout.setSpacing(8)
 
-        # Info-Label
-        self.bt_info_label = QLabel("Interner Backtester")
-        self.bt_info_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 11px;")
-        bt_layout.addWidget(self.bt_info_label)
+        # Start Button
+        self.start_btn = QPushButton("Start")
+        self.start_btn.setStyleSheet(self._button_style((0.2, 0.7, 0.3)))
+        self.start_btn.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        self.start_btn.clicked.connect(self._start_backtest)
+        control_layout.addWidget(self.start_btn, 0, 0)
 
-        self.backtester_combo.currentTextChanged.connect(self._on_backtester_changed)
+        # Stop Button
+        self.stop_btn = QPushButton("Stop")
+        self.stop_btn.setStyleSheet(self._button_style((0.8, 0.3, 0.2)))
+        self.stop_btn.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        self.stop_btn.setEnabled(False)
+        self.stop_btn.clicked.connect(self._stop_backtest)
+        control_layout.addWidget(self.stop_btn, 0, 1)
 
-        layout.addWidget(bt_group)
+        # Einzelschritt Button
+        self.step_btn = QPushButton("Einzelschritt")
+        self.step_btn.setStyleSheet(self._button_style((0.5, 0.5, 0.7)))
+        self.step_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        self.step_btn.clicked.connect(self._single_step)
+        control_layout.addWidget(self.step_btn, 1, 0)
 
-        # Kapital & Kosten
-        capital_group = QGroupBox("Kapital & Kosten")
-        capital_layout = QGridLayout(capital_group)
+        # Reset Button
+        self.reset_btn = QPushButton("Reset")
+        self.reset_btn.setStyleSheet(self._button_style((0.5, 0.5, 0.5)))
+        self.reset_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        self.reset_btn.clicked.connect(self._reset_backtest)
+        control_layout.addWidget(self.reset_btn, 1, 1)
 
-        capital_layout.addWidget(QLabel("Startkapital ($):"), 0, 0)
-        self.capital_spin = QDoubleSpinBox()
-        self.capital_spin.setRange(100, 10000000)
-        self.capital_spin.setValue(10000)
-        self.capital_spin.setDecimals(2)
-        self.capital_spin.setSingleStep(1000)
-        capital_layout.addWidget(self.capital_spin, 0, 1)
+        layout.addWidget(control_group)
 
-        capital_layout.addWidget(QLabel("Gebuehren (%):"), 1, 0)
-        self.commission_spin = QDoubleSpinBox()
-        self.commission_spin.setRange(0, 5)
-        self.commission_spin.setValue(0.1)
-        self.commission_spin.setDecimals(3)
-        self.commission_spin.setSingleStep(0.01)
-        capital_layout.addWidget(self.commission_spin, 1, 1)
+        # === Geschwindigkeit ===
+        speed_group = QGroupBox("Geschwindigkeit")
+        speed_group.setStyleSheet(self._group_style((0.9, 0.7, 0.3)))
+        speed_layout = QVBoxLayout(speed_group)
 
-        capital_layout.addWidget(QLabel("Slippage (%):"), 2, 0)
-        self.slippage_spin = QDoubleSpinBox()
-        self.slippage_spin.setRange(0, 2)
-        self.slippage_spin.setValue(0)
-        self.slippage_spin.setDecimals(3)
-        self.slippage_spin.setSingleStep(0.01)
-        capital_layout.addWidget(self.slippage_spin, 2, 1)
+        # Slider mit Label
+        slider_row = QHBoxLayout()
+        slider_row.addWidget(QLabel("Schritte/Sek:"))
+        self.speed_slider = QSlider(Qt.Orientation.Horizontal)
+        self.speed_slider.setRange(1, 100)
+        self.speed_slider.setValue(10)
+        self.speed_slider.valueChanged.connect(self._update_speed)
+        slider_row.addWidget(self.speed_slider)
+        self.speed_label = QLabel("10")
+        self.speed_label.setStyleSheet("color: white; min-width: 30px;")
+        slider_row.addWidget(self.speed_label)
+        speed_layout.addLayout(slider_row)
 
-        layout.addWidget(capital_group)
+        # Turbo-Modus
+        self.turbo_check = QCheckBox("Turbo-Modus (keine Chart-Updates)")
+        self.turbo_check.setStyleSheet("color: rgb(128, 255, 128);")
+        self.turbo_check.toggled.connect(self._toggle_turbo)
+        speed_layout.addWidget(self.turbo_check)
 
-        # Zeitraum
-        period_group = QGroupBox("Zeitraum")
-        period_layout = QGridLayout(period_group)
+        # Aktuelle Geschwindigkeit
+        speed_info = QHBoxLayout()
+        speed_info.addWidget(QLabel("Aktuell:"))
+        self.actual_speed_label = QLabel("- Schritte/Sek")
+        self.actual_speed_label.setStyleSheet("color: rgb(77, 230, 255); font-weight: bold;")
+        speed_info.addWidget(self.actual_speed_label)
+        speed_layout.addLayout(speed_info)
 
-        self.use_full_period = QCheckBox("Gesamten Zeitraum verwenden")
-        self.use_full_period.setChecked(True)
-        self.use_full_period.toggled.connect(self._toggle_date_range)
-        period_layout.addWidget(self.use_full_period, 0, 0, 1, 2)
+        layout.addWidget(speed_group)
 
-        period_layout.addWidget(QLabel("Von:"), 1, 0)
-        self.start_date = QDateEdit()
-        self.start_date.setCalendarPopup(True)
-        self.start_date.setEnabled(False)
-        period_layout.addWidget(self.start_date, 1, 1)
+        # === Aktuelle Position ===
+        position_group = QGroupBox("Aktuelle Position")
+        position_group.setStyleSheet(self._group_style((0.5, 0.9, 0.5)))
+        pos_layout = QGridLayout(position_group)
+        pos_layout.setColumnStretch(1, 1)
 
-        period_layout.addWidget(QLabel("Bis:"), 2, 0)
-        self.end_date = QDateEdit()
-        self.end_date.setCalendarPopup(True)
-        self.end_date.setDate(QDate.currentDate())
-        self.end_date.setEnabled(False)
-        period_layout.addWidget(self.end_date, 2, 1)
+        labels = [
+            ("Position:", "position_label", "NONE"),
+            ("Einstiegspreis:", "entry_price_label", "-"),
+            ("Aktueller Preis:", "current_price_label", "-"),
+            ("Unrealisiert:", "unrealized_pnl_label", "-"),
+        ]
 
-        layout.addWidget(period_group)
+        for row, (text, attr, default) in enumerate(labels):
+            pos_layout.addWidget(QLabel(text), row, 0)
+            label = QLabel(default)
+            label.setStyleSheet("color: white;")
+            setattr(self, attr, label)
+            pos_layout.addWidget(label, row, 1)
 
-        # Daten-Info
-        data_group = QGroupBox("Daten")
-        data_layout = QVBoxLayout(data_group)
+        layout.addWidget(position_group)
 
-        self.data_status_label = QLabel("Keine Daten geladen")
-        self.data_status_label.setStyleSheet(f"color: {COLORS['warning']};")
-        data_layout.addWidget(self.data_status_label)
+        # === Fortschritt ===
+        progress_group = QGroupBox("Fortschritt")
+        progress_group.setStyleSheet(self._group_style((0.7, 0.7, 0.7)))
+        prog_layout = QGridLayout(progress_group)
+        prog_layout.setColumnStretch(1, 1)
 
-        self.signals_status_label = QLabel("Keine Signale")
-        self.signals_status_label.setStyleSheet(f"color: {COLORS['warning']};")
-        data_layout.addWidget(self.signals_status_label)
+        prog_labels = [
+            ("Datenpunkt:", "datapoint_label", "0 / 0"),
+            ("Datum:", "date_label", "-"),
+            ("Letztes Signal:", "signal_label", "-"),
+        ]
 
-        layout.addWidget(data_group)
+        for row, (text, attr, default) in enumerate(prog_labels):
+            prog_layout.addWidget(QLabel(text), row, 0)
+            label = QLabel(default)
+            label.setStyleSheet("color: white;" if row < 2 else "color: gray; font-weight: bold;")
+            setattr(self, attr, label)
+            prog_layout.addWidget(label, row, 1)
 
-        # Buttons
-        btn_layout = QVBoxLayout()
+        layout.addWidget(progress_group)
 
-        self.run_btn = QPushButton("Backtest starten")
-        self.run_btn.setStyleSheet(f"background-color: {COLORS['success']}; font-weight: bold;")
-        self.run_btn.clicked.connect(self._run_backtest)
-        btn_layout.addWidget(self.run_btn)
+        # === Trade-Log ===
+        tradelog_group = QGroupBox("Trade-Log")
+        tradelog_group.setStyleSheet(self._group_style((0.9, 0.5, 0.9)))
+        tradelog_layout = QVBoxLayout(tradelog_group)
 
-        self.export_btn = QPushButton("Ergebnisse exportieren")
-        self.export_btn.clicked.connect(self._export_results)
-        self.export_btn.setEnabled(False)
-        btn_layout.addWidget(self.export_btn)
+        self.tradelog_text = QTextEdit()
+        self.tradelog_text.setReadOnly(True)
+        self.tradelog_text.setStyleSheet("""
+            QTextEdit {
+                background-color: rgb(38, 38, 38);
+                color: rgb(204, 204, 204);
+                font-family: 'Consolas', monospace;
+                font-size: 10px;
+            }
+        """)
+        self.tradelog_text.setPlainText("Kein Trade")
+        self.tradelog_text.setMaximumHeight(150)
+        tradelog_layout.addWidget(self.tradelog_text)
 
-        layout.addLayout(btn_layout)
+        layout.addWidget(tradelog_group)
 
-        # Progress
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        layout.addWidget(self.progress_bar)
+        layout.addStretch()
+
+        # Schliessen Button
+        close_btn = QPushButton("Schliessen")
+        close_btn.setStyleSheet(self._button_style((0.4, 0.4, 0.4)))
+        close_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        close_btn.clicked.connect(self.close)
+        layout.addWidget(close_btn)
+
+        scroll.setWidget(panel)
+        return scroll
+
+    def _create_chart_panel(self) -> QWidget:
+        """Erstellt das Chart-Panel (mittlere Spalte)."""
+        panel = QWidget()
+        panel.setStyleSheet(f"background-color: rgb(46, 46, 46);")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(10)
+
+        try:
+            from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+            from matplotlib.figure import Figure
+
+            # Preis-Chart (2/3 der Hoehe)
+            self.price_figure = Figure(figsize=(8, 4), facecolor='#262626')
+            self.price_canvas = FigureCanvas(self.price_figure)
+            self.ax_price = self.price_figure.add_subplot(111)
+            self._setup_price_chart()
+            layout.addWidget(self.price_canvas, stretch=2)
+
+            # Equity-Chart (1/3 der Hoehe)
+            self.equity_figure = Figure(figsize=(8, 2), facecolor='#262626')
+            self.equity_canvas = FigureCanvas(self.equity_figure)
+            self.ax_equity = self.equity_figure.add_subplot(111)
+            self._setup_equity_chart()
+            layout.addWidget(self.equity_canvas, stretch=1)
+
+        except ImportError:
+            layout.addWidget(QLabel("matplotlib nicht installiert"))
+
+        return panel
+
+    def _setup_price_chart(self):
+        """Konfiguriert den Preis-Chart."""
+        ax = self.ax_price
+        ax.set_facecolor('#1a1a1a')
+        ax.tick_params(colors='white')
+        for spine in ax.spines.values():
+            spine.set_color('#4d4d4d')
+        ax.set_title('Preis und Signale', color='white', fontsize=12)
+        ax.set_ylabel('Preis (USD)', color='white')
+        ax.grid(True, alpha=0.3, color='#4d4d4d')
+
+    def _setup_equity_chart(self):
+        """Konfiguriert den Equity-Chart."""
+        ax = self.ax_equity
+        ax.set_facecolor('#1a1a1a')
+        ax.tick_params(colors='white')
+        for spine in ax.spines.values():
+            spine.set_color('#4d4d4d')
+        ax.set_title('Equity-Kurve', color='white', fontsize=12)
+        ax.set_ylabel('Equity (USD)', color='white')
+        ax.grid(True, alpha=0.3, color='#4d4d4d')
+
+    def _create_stats_panel(self) -> QWidget:
+        """Erstellt das Statistik-Panel (rechte Spalte)."""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        panel = QWidget()
+        panel.setStyleSheet(f"background-color: rgb(46, 46, 46);")
+        layout = QVBoxLayout(panel)
+        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
+
+        # Titel
+        title = QLabel("Performance")
+        title.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        title.setStyleSheet("color: white;")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+
+        # === Gewinn/Verlust ===
+        pnl_group = QGroupBox("Gewinn / Verlust")
+        pnl_group.setStyleSheet(self._group_style((0.3, 0.9, 0.3)))
+        pnl_layout = QGridLayout(pnl_group)
+        pnl_layout.setColumnStretch(1, 1)
+
+        pnl_labels = [
+            ("Startkapital:", "start_capital_label", f"${self.initial_capital:,.2f}"),
+            ("Aktuell:", "equity_label", f"${self.current_equity:,.2f}"),
+            ("Gesamt P/L:", "total_pnl_label", "$0.00"),
+            ("P/L %:", "pnl_percent_label", "0.00%"),
+            ("Max Drawdown:", "drawdown_label", "0.00%"),
+        ]
+
+        for row, (text, attr, default) in enumerate(pnl_labels):
+            lbl = QLabel(text)
+            lbl.setStyleSheet("color: rgb(179, 179, 179);")
+            pnl_layout.addWidget(lbl, row, 0)
+            value_lbl = QLabel(default)
+            if row == 1:  # Aktuell
+                value_lbl.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+            elif row in [2, 3]:  # P/L
+                value_lbl.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+                value_lbl.setStyleSheet("color: gray;")
+            else:
+                value_lbl.setStyleSheet("color: white;")
+            setattr(self, attr, value_lbl)
+            pnl_layout.addWidget(value_lbl, row, 1)
+
+        layout.addWidget(pnl_group)
+
+        # === Trade-Statistik ===
+        stats_group = QGroupBox("Trade-Statistik")
+        stats_group.setStyleSheet(self._group_style((0.9, 0.7, 0.3)))
+        stats_layout = QGridLayout(stats_group)
+        stats_layout.setColumnStretch(1, 1)
+
+        trade_labels = [
+            ("Anzahl Trades:", "num_trades_label", "0", "white"),
+            ("Gewinner:", "winners_label", "0", "rgb(77, 230, 77)"),
+            ("Verlierer:", "losers_label", "0", "rgb(230, 77, 77)"),
+            ("Win-Rate:", "winrate_label", "0.00%", "white"),
+            ("Avg. Gewinn:", "avg_win_label", "$0.00", "rgb(77, 230, 77)"),
+            ("Avg. Verlust:", "avg_loss_label", "$0.00", "rgb(230, 77, 77)"),
+        ]
+
+        for row, (text, attr, default, color) in enumerate(trade_labels):
+            lbl = QLabel(text)
+            lbl.setStyleSheet("color: rgb(179, 179, 179);")
+            stats_layout.addWidget(lbl, row, 0)
+            value_lbl = QLabel(default)
+            value_lbl.setStyleSheet(f"color: {color};")
+            setattr(self, attr, value_lbl)
+            stats_layout.addWidget(value_lbl, row, 1)
+
+        layout.addWidget(stats_group)
+
+        # === Signal-Verteilung ===
+        signal_group = QGroupBox("Signal-Verteilung")
+        signal_group.setStyleSheet(self._group_style((0.7, 0.7, 0.9)))
+        signal_layout = QGridLayout(signal_group)
+        signal_layout.setColumnStretch(1, 1)
+
+        signal_labels = [
+            ("BUY:", "buy_count_label", "0", "rgb(77, 230, 77)"),
+            ("SELL:", "sell_count_label", "0", "rgb(230, 77, 77)"),
+            ("HOLD:", "hold_count_label", "0", "gray"),
+        ]
+
+        for row, (text, attr, default, color) in enumerate(signal_labels):
+            lbl = QLabel(text)
+            lbl.setStyleSheet("color: rgb(179, 179, 179);")
+            signal_layout.addWidget(lbl, row, 0)
+            value_lbl = QLabel(default)
+            value_lbl.setStyleSheet(f"color: {color};")
+            setattr(self, attr, value_lbl)
+            signal_layout.addWidget(value_lbl, row, 1)
+
+        layout.addWidget(signal_group)
 
         layout.addStretch()
 
         scroll.setWidget(panel)
         return scroll
 
-    def _create_results_panel(self) -> QWidget:
-        """Erstellt das Ergebnis-Panel."""
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
+    def _group_style(self, color: tuple) -> str:
+        """Generiert GroupBox-Style mit farbigem Titel."""
+        r, g, b = [int(c * 255) for c in color]
+        return f"""
+            QGroupBox {{
+                background-color: rgb(51, 51, 51);
+                border: 1px solid rgb(68, 68, 68);
+                border-radius: 4px;
+                margin-top: 12px;
+                padding-top: 10px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+                color: rgb({r}, {g}, {b});
+                font-weight: bold;
+            }}
+        """
 
-        # Tabs
-        tabs = QTabWidget()
+    def _button_style(self, color: tuple) -> str:
+        """Generiert Button-Style aus RGB-Tuple (0-1 Range)."""
+        r, g, b = [int(c * 255) for c in color]
+        r_h, g_h, b_h = [min(255, int(c * 255 * 1.2)) for c in color]
+        r_p, g_p, b_p = [int(c * 255 * 0.8) for c in color]
+        return f"""
+            QPushButton {{
+                background-color: rgb({r}, {g}, {b});
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: rgb({r_h}, {g_h}, {b_h});
+            }}
+            QPushButton:pressed {{
+                background-color: rgb({r_p}, {g_p}, {b_p});
+            }}
+            QPushButton:disabled {{
+                background-color: rgb(80, 80, 80);
+                color: rgb(150, 150, 150);
+            }}
+        """
 
-        # Tab 1: Uebersicht
-        overview_tab = self._create_overview_tab()
-        tabs.addTab(overview_tab, "Uebersicht")
+    def set_data(self, data: pd.DataFrame, signals: pd.Series = None,
+                 model=None, model_info: Dict = None):
+        """Setzt die Backtest-Daten."""
+        self.data = data
+        self.signals = signals
+        self.model = model
+        self.model_info = model_info
 
-        # Tab 2: Equity-Kurve
-        equity_tab = self._create_equity_tab()
-        tabs.addTab(equity_tab, "Equity-Kurve")
+        if model_info:
+            lookback = model_info.get('lookback_size', 60)
+            lookforward = model_info.get('lookforward_size', 5)
+            self.sequence_length = lookback + lookforward
+            self.current_index = self.sequence_length + 1
 
-        # Tab 3: Trade-Liste
-        trades_tab = self._create_trades_tab()
-        tabs.addTab(trades_tab, "Trades")
+        self._update_datapoint_label()
+        self._initialize_charts()
 
-        # Tab 4: Log
-        log_tab = self._create_log_tab()
-        tabs.addTab(log_tab, "Log")
-
-        layout.addWidget(tabs)
-        return panel
-
-    def _create_overview_tab(self) -> QWidget:
-        """Erstellt den Uebersicht-Tab."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        # Haupt-Metriken (gross)
-        main_metrics = QGroupBox("Haupt-Metriken")
-        main_layout = QGridLayout(main_metrics)
-
-        self.metric_labels = {}
-        metrics = [
-            ('total_return', 'Gesamt-Return', '%'),
-            ('total_pnl', 'Gesamt P/L', '$'),
-            ('win_rate', 'Win Rate', '%'),
-            ('profit_factor', 'Profit Factor', ''),
-            ('sharpe_ratio', 'Sharpe Ratio', ''),
-            ('max_drawdown', 'Max Drawdown', '%'),
-            ('num_trades', 'Anzahl Trades', ''),
-            ('avg_trade', 'Avg Trade', '$'),
-        ]
-
-        for i, (key, label, suffix) in enumerate(metrics):
-            row, col = divmod(i, 4)
-
-            name_label = QLabel(label)
-            name_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 11px;")
-            main_layout.addWidget(name_label, row * 2, col)
-
-            value_label = QLabel("-")
-            value_label.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
-            value_label.setStyleSheet(f"color: {COLORS['text_primary']};")
-            main_layout.addWidget(value_label, row * 2 + 1, col)
-
-            self.metric_labels[key] = (value_label, suffix)
-
-        layout.addWidget(main_metrics)
-
-        # Zusaetzliche Metriken
-        extra_metrics = QGroupBox("Zusaetzliche Metriken")
-        extra_layout = QGridLayout(extra_metrics)
-
-        extra_items = [
-            ('avg_winner', 'Avg Winner', '$'),
-            ('avg_loser', 'Avg Loser', '$'),
-            ('largest_winner', 'Groesster Winner', '$'),
-            ('largest_loser', 'Groesster Loser', '$'),
-            ('sortino_ratio', 'Sortino Ratio', ''),
-            ('avg_duration', 'Avg Trade Dauer', ''),
-        ]
-
-        for i, (key, label, suffix) in enumerate(extra_items):
-            row, col = divmod(i, 3)
-
-            name_label = QLabel(label)
-            name_label.setStyleSheet(f"color: {COLORS['text_secondary']};")
-            extra_layout.addWidget(name_label, row * 2, col)
-
-            value_label = QLabel("-")
-            value_label.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
-            extra_layout.addWidget(value_label, row * 2 + 1, col)
-
-            self.metric_labels[key] = (value_label, suffix)
-
-        layout.addWidget(extra_metrics)
-        layout.addStretch()
-
-        return widget
-
-    def _create_equity_tab(self) -> QWidget:
-        """Erstellt den Equity-Kurve Tab."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        try:
-            from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-            from matplotlib.figure import Figure
-
-            self.equity_figure = Figure(figsize=(10, 6), facecolor=COLORS['bg_primary'])
-            self.equity_canvas = FigureCanvas(self.equity_figure)
-
-            self.equity_ax = self.equity_figure.add_subplot(111)
-            self._setup_equity_plot_style()
-
-            layout.addWidget(self.equity_canvas)
-
-        except ImportError:
-            layout.addWidget(QLabel("matplotlib nicht installiert"))
-
-        return widget
-
-    def _setup_equity_plot_style(self):
-        """Konfiguriert den Equity-Plot Style."""
-        ax = self.equity_ax
-        ax.set_facecolor(COLORS['bg_secondary'])
-        ax.tick_params(colors=COLORS['text_secondary'])
-        for spine in ax.spines.values():
-            spine.set_color(COLORS['border'])
-        ax.set_title('Equity-Kurve', color=COLORS['text_primary'], fontsize=14)
-        ax.set_xlabel('Zeit', color=COLORS['text_secondary'])
-        ax.set_ylabel('Portfolio-Wert ($)', color=COLORS['text_secondary'])
-        ax.grid(True, alpha=0.3, color=COLORS['border'])
-
-    def _update_equity_plot(self):
-        """Aktualisiert den Equity-Plot."""
-        if not hasattr(self, 'equity_ax') or self.result is None:
+    def _start_backtest(self):
+        """Startet den Backtest."""
+        if self.data is None:
             return
 
-        self.equity_ax.clear()
-        self._setup_equity_plot_style()
+        if self.is_running:
+            return
 
-        equity = self.result.equity_curve
-        if len(equity) > 0:
-            self.equity_ax.plot(equity.index, equity.values, color=COLORS['accent'], linewidth=2)
-            self.equity_ax.fill_between(equity.index, equity.values, alpha=0.3, color=COLORS['accent'])
+        self.is_running = True
+        self.is_paused = False
 
-            # Anfangskapital-Linie
-            initial = self.capital_spin.value()
-            self.equity_ax.axhline(y=initial, color=COLORS['text_secondary'],
-                                   linestyle='--', alpha=0.5, label=f'Start: ${initial:,.0f}')
-            self.equity_ax.legend(facecolor=COLORS['bg_tertiary'], labelcolor=COLORS['text_primary'])
+        # Buttons aktualisieren
+        self.start_btn.setEnabled(False)
+        self.stop_btn.setEnabled(True)
+        self.step_btn.setEnabled(False)
+        self.reset_btn.setEnabled(False)
+
+        # Timer starten
+        interval = int(1000 / self.steps_per_second)
+        self.backtest_timer = QTimer()
+        self.backtest_timer.timeout.connect(self._timer_callback)
+        self.backtest_timer.start(interval)
+
+        self._add_tradelog("Backtest gestartet")
+
+    def _stop_backtest(self):
+        """Stoppt den Backtest."""
+        self.is_running = False
+        self.is_paused = True
+
+        if self.backtest_timer:
+            self.backtest_timer.stop()
+            self.backtest_timer = None
+
+        # Buttons aktualisieren
+        self.start_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+        self.step_btn.setEnabled(True)
+        self.reset_btn.setEnabled(True)
+
+        self.actual_speed_label.setText("Gestoppt")
+        self._add_tradelog("Backtest gestoppt")
+
+        # Charts final aktualisieren
+        self._update_charts()
+
+    def _reset_backtest(self):
+        """Setzt den Backtest zurueck."""
+        # Timer stoppen
+        if self.backtest_timer:
+            self.backtest_timer.stop()
+            self.backtest_timer = None
+
+        # Status zuruecksetzen
+        self.is_running = False
+        self.is_paused = False
+        self.current_index = self.sequence_length + 1 if self.sequence_length > 0 else 0
+
+        self.position = 'NONE'
+        self.entry_price = 0.0
+        self.entry_index = 0
+        self.total_pnl = 0.0
+        self.trades = []
+        self.signal_history = []
+
+        self.current_equity = self.initial_capital
+        self.equity_curve = [self.initial_capital]
+        self.equity_indices = [self.current_index]
+
+        self.buy_count = 0
+        self.sell_count = 0
+        self.hold_count = 0
+
+        # UI zuruecksetzen
+        self.start_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+        self.step_btn.setEnabled(True)
+        self.reset_btn.setEnabled(True)
+
+        self._reset_labels()
+        self._initialize_charts()
+        self.tradelog_text.setPlainText("Kein Trade")
+
+    def _single_step(self):
+        """Fuehrt einen einzelnen Schritt aus."""
+        if self.data is None:
+            return
+
+        if self.current_index <= len(self.data):
+            self._process_step()
+            self._update_ui()
+            self._update_charts()
+
+    def _timer_callback(self):
+        """Timer-Callback fuer automatischen Durchlauf."""
+        if not self.is_running:
+            return
+
+        if self.data is None or self.current_index > len(self.data):
+            self._finalize_backtest()
+            return
+
+        self._process_step()
+        self._update_ui()
+
+        # Charts nur im Nicht-Turbo-Modus aktualisieren
+        if not self.turbo_mode and self.current_index % 10 == 0:
+            self._update_charts()
+
+    def _process_step(self):
+        """Verarbeitet einen einzelnen Backtest-Schritt."""
+        if self.data is None or self.current_index > len(self.data):
+            return
+
+        idx = self.current_index - 1  # 0-basiert
+
+        # Aktueller Preis
+        current_price = self.data['Close'].iloc[idx]
+
+        # Signal ermitteln (aus Signalen oder Modell)
+        signal = self._get_signal(idx)
+
+        # Signal speichern
+        self.signal_history.append({
+            'index': self.current_index,
+            'signal': signal,
+            'price': current_price
+        })
+
+        # Signal-Zaehler
+        if signal == 1:
+            self.buy_count += 1
+        elif signal == 2:
+            self.sell_count += 1
+        else:
+            self.hold_count += 1
+
+        # Trading-Logik
+        self._process_signal(signal, current_price, self.current_index)
+
+        # Equity aktualisieren
+        self._update_equity(current_price)
+
+        # Naechster Schritt
+        self.current_index += 1
+
+    def _get_signal(self, idx: int) -> int:
+        """Ermittelt das Signal fuer den aktuellen Index."""
+        # Wenn Signale vorhanden, diese verwenden
+        if self.signals is not None and idx < len(self.signals):
+            sig = self.signals.iloc[idx]
+            if sig == 'BUY' or sig == 1:
+                return 1
+            elif sig == 'SELL' or sig == 2:
+                return 2
+            else:
+                return 0
+
+        # TODO: Modell-Vorhersage implementieren
+        return 0  # HOLD als Default
+
+    def _process_signal(self, signal: int, price: float, idx: int):
+        """Verarbeitet ein Trading-Signal."""
+        # signal: 0=HOLD, 1=BUY, 2=SELL
+
+        if signal == 1:  # BUY
+            if self.position == 'SHORT':
+                self._close_trade(price, idx, 'BUY Signal')
+                self._open_trade('LONG', price, idx)
+            elif self.position == 'NONE':
+                self._open_trade('LONG', price, idx)
+
+        elif signal == 2:  # SELL
+            if self.position == 'LONG':
+                self._close_trade(price, idx, 'SELL Signal')
+                self._open_trade('SHORT', price, idx)
+            elif self.position == 'NONE':
+                self._open_trade('SHORT', price, idx)
+
+    def _open_trade(self, new_position: str, price: float, idx: int):
+        """Oeffnet eine neue Position."""
+        self.position = new_position
+        self.entry_price = price
+        self.entry_index = idx
+
+        if not self.turbo_mode:
+            self._add_tradelog(f"{new_position} @ ${price:,.2f}")
+
+    def _close_trade(self, price: float, idx: int, reason: str):
+        """Schliesst die aktuelle Position."""
+        if self.position == 'NONE':
+            return
+
+        # P/L berechnen
+        if self.position == 'LONG':
+            pnl = price - self.entry_price
+        else:  # SHORT
+            pnl = self.entry_price - price
+
+        # Trade speichern
+        trade = {
+            'entry_index': self.entry_index,
+            'exit_index': idx,
+            'position': self.position,
+            'entry_price': self.entry_price,
+            'exit_price': price,
+            'pnl': pnl,
+            'reason': reason
+        }
+        self.trades.append(trade)
+
+        # P/L aktualisieren
+        self.total_pnl += pnl
+        self.current_equity = self.initial_capital + self.total_pnl
+
+        # Trade-Log
+        pnl_str = f"+${pnl:,.2f}" if pnl >= 0 else f"-${abs(pnl):,.2f}"
+        self._add_tradelog(f"#{len(self.trades)} {self.position}: {self.entry_price:,.2f} -> {price:,.2f} ({pnl_str})")
+
+        self.position = 'NONE'
+        self.entry_price = 0.0
+        self.entry_index = 0
+
+    def _update_equity(self, current_price: float):
+        """Aktualisiert die Equity-Kurve."""
+        unrealized = 0.0
+        if self.position == 'LONG':
+            unrealized = current_price - self.entry_price
+        elif self.position == 'SHORT':
+            unrealized = self.entry_price - current_price
+
+        self.equity_curve.append(self.current_equity + unrealized)
+        self.equity_indices.append(self.current_index)
+
+    def _update_ui(self):
+        """Aktualisiert die UI-Elemente."""
+        self._update_datapoint_label()
+        self._update_position_labels()
+        self._update_pnl_labels()
+        self._update_trade_stats()
+        self._update_signal_counts()
+
+    def _update_datapoint_label(self):
+        """Aktualisiert die Fortschritts-Anzeige."""
+        total = len(self.data) if self.data is not None else 0
+        self.datapoint_label.setText(f"{self.current_index} / {total}")
+
+        if self.data is not None and self.current_index <= len(self.data):
+            idx = self.current_index - 1
+            if 'DateTime' in self.data.columns or self.data.index.name == 'DateTime':
+                dt = self.data.index[idx] if self.data.index.name else self.data['DateTime'].iloc[idx]
+                if hasattr(dt, 'strftime'):
+                    self.date_label.setText(dt.strftime('%d.%m.%Y %H:%M'))
+
+            self.current_price_label.setText(f"${self.data['Close'].iloc[idx]:,.2f}")
+
+        # Letztes Signal
+        if self.signal_history:
+            last_sig = self.signal_history[-1]['signal']
+            if last_sig == 1:
+                self.signal_label.setText("BUY")
+                self.signal_label.setStyleSheet("color: rgb(77, 230, 77); font-weight: bold;")
+            elif last_sig == 2:
+                self.signal_label.setText("SELL")
+                self.signal_label.setStyleSheet("color: rgb(230, 77, 77); font-weight: bold;")
+            else:
+                self.signal_label.setText("HOLD")
+                self.signal_label.setStyleSheet("color: gray; font-weight: bold;")
+
+    def _update_position_labels(self):
+        """Aktualisiert die Positions-Anzeige."""
+        self.position_label.setText(self.position)
+        if self.position == 'LONG':
+            self.position_label.setStyleSheet("color: rgb(77, 230, 77); font-weight: bold;")
+        elif self.position == 'SHORT':
+            self.position_label.setStyleSheet("color: rgb(230, 77, 77); font-weight: bold;")
+        else:
+            self.position_label.setStyleSheet("color: gray;")
+
+        if self.entry_price > 0:
+            self.entry_price_label.setText(f"${self.entry_price:,.2f}")
+        else:
+            self.entry_price_label.setText("-")
+
+        # Unrealisierter P/L
+        if self.position != 'NONE' and self.data is not None and self.current_index <= len(self.data):
+            current_price = self.data['Close'].iloc[self.current_index - 1]
+            if self.position == 'LONG':
+                unrealized = current_price - self.entry_price
+            else:
+                unrealized = self.entry_price - current_price
+
+            self.unrealized_pnl_label.setText(f"${unrealized:,.2f}")
+            if unrealized >= 0:
+                self.unrealized_pnl_label.setStyleSheet("color: rgb(77, 230, 77);")
+            else:
+                self.unrealized_pnl_label.setStyleSheet("color: rgb(230, 77, 77);")
+        else:
+            self.unrealized_pnl_label.setText("-")
+            self.unrealized_pnl_label.setStyleSheet("color: white;")
+
+    def _update_pnl_labels(self):
+        """Aktualisiert die P/L-Anzeige."""
+        self.equity_label.setText(f"${self.current_equity:,.2f}")
+        self.total_pnl_label.setText(f"${self.total_pnl:,.2f}")
+
+        pnl_pct = ((self.current_equity - self.initial_capital) / self.initial_capital) * 100
+        self.pnl_percent_label.setText(f"{pnl_pct:.2f}%")
+
+        # Farbe
+        color = "rgb(77, 230, 77)" if self.total_pnl >= 0 else "rgb(230, 77, 77)"
+        self.total_pnl_label.setStyleSheet(f"color: {color}; font-weight: bold;")
+        self.pnl_percent_label.setStyleSheet(f"color: {color}; font-weight: bold;")
+
+        # Drawdown
+        if len(self.equity_curve) > 1:
+            peak = max(self.equity_curve)
+            current = self.equity_curve[-1]
+            drawdown = ((peak - current) / peak) * 100 if peak > 0 else 0
+            self.drawdown_label.setText(f"{drawdown:.2f}%")
+
+    def _update_trade_stats(self):
+        """Aktualisiert die Trade-Statistiken."""
+        num_trades = len(self.trades)
+        self.num_trades_label.setText(str(num_trades))
+
+        if num_trades > 0:
+            pnls = [t['pnl'] for t in self.trades]
+            winners = sum(1 for p in pnls if p > 0)
+            losers = sum(1 for p in pnls if p <= 0)
+
+            self.winners_label.setText(str(winners))
+            self.losers_label.setText(str(losers))
+            self.winrate_label.setText(f"{(winners / num_trades) * 100:.2f}%")
+
+            winning_pnls = [p for p in pnls if p > 0]
+            losing_pnls = [p for p in pnls if p <= 0]
+
+            if winning_pnls:
+                self.avg_win_label.setText(f"${np.mean(winning_pnls):,.2f}")
+            if losing_pnls:
+                self.avg_loss_label.setText(f"${np.mean(losing_pnls):,.2f}")
+
+    def _update_signal_counts(self):
+        """Aktualisiert die Signal-Zaehler."""
+        self.buy_count_label.setText(str(self.buy_count))
+        self.sell_count_label.setText(str(self.sell_count))
+        self.hold_count_label.setText(str(self.hold_count))
+
+    def _reset_labels(self):
+        """Setzt alle Labels zurueck."""
+        self.position_label.setText("NONE")
+        self.position_label.setStyleSheet("color: gray;")
+        self.entry_price_label.setText("-")
+        self.current_price_label.setText("-")
+        self.unrealized_pnl_label.setText("-")
+        self.signal_label.setText("-")
+        self.signal_label.setStyleSheet("color: gray;")
+
+        self.equity_label.setText(f"${self.initial_capital:,.2f}")
+        self.total_pnl_label.setText("$0.00")
+        self.total_pnl_label.setStyleSheet("color: gray;")
+        self.pnl_percent_label.setText("0.00%")
+        self.pnl_percent_label.setStyleSheet("color: gray;")
+        self.drawdown_label.setText("0.00%")
+
+        self.num_trades_label.setText("0")
+        self.winners_label.setText("0")
+        self.losers_label.setText("0")
+        self.winrate_label.setText("0.00%")
+        self.avg_win_label.setText("$0.00")
+        self.avg_loss_label.setText("$0.00")
+
+        self.buy_count_label.setText("0")
+        self.sell_count_label.setText("0")
+        self.hold_count_label.setText("0")
+
+        self.actual_speed_label.setText("- Schritte/Sek")
+
+    def _initialize_charts(self):
+        """Initialisiert die Charts."""
+        if not hasattr(self, 'ax_price'):
+            return
+
+        # Preis-Chart
+        self.ax_price.clear()
+        self._setup_price_chart()
+
+        if self.data is not None:
+            self.ax_price.plot(self.data.index, self.data['Close'],
+                              color='#6699e6', linewidth=1)
+
+        self.price_figure.tight_layout()
+        self.price_canvas.draw()
+
+        # Equity-Chart
+        self.ax_equity.clear()
+        self._setup_equity_chart()
+
+        self.ax_equity.axhline(y=self.initial_capital, color='gray',
+                               linestyle='--', linewidth=1)
 
         self.equity_figure.tight_layout()
         self.equity_canvas.draw()
 
-    def _create_trades_tab(self) -> QWidget:
-        """Erstellt den Trades-Tab."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        # Filter
-        filter_layout = QHBoxLayout()
-        filter_layout.addWidget(QLabel("Filter:"))
-
-        self.trade_filter_combo = QComboBox()
-        self.trade_filter_combo.addItems(['Alle', 'Nur Gewinner', 'Nur Verlierer'])
-        self.trade_filter_combo.currentTextChanged.connect(self._filter_trades)
-        filter_layout.addWidget(self.trade_filter_combo)
-        filter_layout.addStretch()
-
-        layout.addLayout(filter_layout)
-
-        # Tabelle
-        self.trades_table = QTableWidget()
-        self.trades_table.setColumnCount(8)
-        self.trades_table.setHorizontalHeaderLabels([
-            'Entry', 'Exit', 'Position', 'Entry $', 'Exit $', 'P/L $', 'P/L %', 'Dauer'
-        ])
-        self.trades_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-
-        layout.addWidget(self.trades_table)
-        return widget
-
-    def _create_log_tab(self) -> QWidget:
-        """Erstellt den Log-Tab."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        self.log_text = QTextEdit()
-        self.log_text.setReadOnly(True)
-        self.log_text.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {COLORS['bg_secondary']};
-                color: {COLORS['text_primary']};
-                font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 12px;
-            }}
-        """)
-        layout.addWidget(self.log_text)
-
-        return widget
-
-    def _update_backtester_list(self):
-        """Aktualisiert die Liste verfuegbarer Backtester."""
-        try:
-            from ..backtesting.adapters import BacktesterFactory
-            available = BacktesterFactory.available()
-        except Exception:
-            available = ['internal']
-
-        self.backtester_combo.clear()
-        self.backtester_combo.addItems(available)
-
-    def _on_backtester_changed(self, name: str):
-        """Callback wenn Backtester geaendert wird."""
-        info_texts = {
-            'internal': 'Interner Backtester (Referenz-Implementierung)',
-            'vectorbt': 'VectorBT - Schnellstes Framework, vektorisiert',
-            'backtrader': 'Backtrader - Feature-reich, grosse Community',
-            'backtestingpy': 'Backtesting.py - Einfach, gute Visualisierung'
-        }
-        self.bt_info_label.setText(info_texts.get(name, ''))
-
-    def _toggle_date_range(self, use_full: bool):
-        """Aktiviert/Deaktiviert die Datumauswahl."""
-        self.start_date.setEnabled(not use_full)
-        self.end_date.setEnabled(not use_full)
-
-    def set_data(self, data: pd.DataFrame, signals: pd.Series = None):
-        """Setzt die Backtest-Daten."""
-        self.data = data
-        self.signals = signals
-
-        # Status aktualisieren
-        if data is not None:
-            n = len(data)
-            start = data.index[0].strftime('%Y-%m-%d') if hasattr(data.index[0], 'strftime') else str(data.index[0])
-            end = data.index[-1].strftime('%Y-%m-%d') if hasattr(data.index[-1], 'strftime') else str(data.index[-1])
-            self.data_status_label.setText(f"{n:,} Datenpunkte ({start} - {end})")
-            self.data_status_label.setStyleSheet(f"color: {COLORS['success']};")
-
-            # Datumsbereich setzen
-            if hasattr(data.index[0], 'to_pydatetime'):
-                self.start_date.setDate(QDate(data.index[0].year, data.index[0].month, data.index[0].day))
-                self.end_date.setDate(QDate(data.index[-1].year, data.index[-1].month, data.index[-1].day))
-
-        if signals is not None:
-            n_buys = (signals == 'BUY').sum()
-            n_sells = (signals == 'SELL').sum()
-            self.signals_status_label.setText(f"{n_buys} BUY, {n_sells} SELL Signale")
-            self.signals_status_label.setStyleSheet(f"color: {COLORS['success']};")
-
-        self._log("Daten geladen")
-
-    def _run_backtest(self):
-        """Startet den Backtest."""
-        if self.data is None:
-            QMessageBox.warning(self, "Fehler", "Keine Daten geladen!")
+    def _update_charts(self):
+        """Aktualisiert die Charts."""
+        if not hasattr(self, 'ax_price'):
             return
 
-        if self.signals is None:
-            QMessageBox.warning(self, "Fehler", "Keine Signale vorhanden!")
-            return
+        # Preis-Chart
+        self.ax_price.clear()
+        self._setup_price_chart()
 
-        # Backtester erstellen
-        try:
-            from ..backtesting.adapters import BacktesterFactory
-            backtester = BacktesterFactory.create(self.backtester_combo.currentText())
-        except Exception as e:
-            QMessageBox.critical(self, "Fehler", f"Backtester-Erstellung fehlgeschlagen:\n{e}")
-            return
+        if self.data is not None:
+            self.ax_price.plot(self.data.index, self.data['Close'],
+                              color='#6699e6', linewidth=1)
 
-        # Config
-        config = {
-            'initial_capital': self.capital_spin.value(),
-            'commission': self.commission_spin.value() / 100,
-            'slippage': self.slippage_spin.value() / 100,
-        }
+            # BUY Signale
+            buy_indices = [s['index'] - 1 for s in self.signal_history if s['signal'] == 1]
+            if buy_indices:
+                buy_prices = [self.data['Close'].iloc[i] for i in buy_indices if i < len(self.data)]
+                buy_dates = [self.data.index[i] for i in buy_indices if i < len(self.data)]
+                self.ax_price.scatter(buy_dates, buy_prices, marker='^', c='lime', s=50, zorder=5)
 
-        # Daten filtern nach Zeitraum
-        data = self.data
-        signals = self.signals
-        if not self.use_full_period.isChecked():
-            start = pd.Timestamp(self.start_date.date().toPyDate())
-            end = pd.Timestamp(self.end_date.date().toPyDate())
-            mask = (data.index >= start) & (data.index <= end)
-            data = data[mask]
-            signals = signals[mask]
+            # SELL Signale
+            sell_indices = [s['index'] - 1 for s in self.signal_history if s['signal'] == 2]
+            if sell_indices:
+                sell_prices = [self.data['Close'].iloc[i] for i in sell_indices if i < len(self.data)]
+                sell_dates = [self.data.index[i] for i in sell_indices if i < len(self.data)]
+                self.ax_price.scatter(sell_dates, sell_prices, marker='v', c='red', s=50, zorder=5)
 
-        # Worker starten
-        self.worker = BacktestWorker(backtester, data, signals, config)
-        self.worker.progress_updated.connect(self._on_progress)
-        self.worker.backtest_finished.connect(self._on_backtest_finished)
-        self.worker.backtest_error.connect(self._on_backtest_error)
-        self.worker.log_message.connect(self._log)
-        self.worker.start()
+            # Aktuelle Position markieren
+            if self.current_index <= len(self.data):
+                idx = self.current_index - 1
+                self.ax_price.axvline(x=self.data.index[idx], color='yellow',
+                                      linestyle='--', linewidth=1, alpha=0.7)
 
-        # UI
-        self.run_btn.setEnabled(False)
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setValue(0)
+        self.ax_price.set_title(f'Preis und Signale | BUY: {self.buy_count}, SELL: {self.sell_count}, HOLD: {self.hold_count}',
+                                color='white', fontsize=11)
+        self.price_figure.tight_layout()
+        self.price_canvas.draw()
 
-    def _on_progress(self, value: int):
-        """Callback fuer Fortschritt."""
-        self.progress_bar.setValue(value)
+        # Equity-Chart
+        self.ax_equity.clear()
+        self._setup_equity_chart()
 
-    def _on_backtest_finished(self, result):
-        """Callback wenn Backtest abgeschlossen."""
-        self.result = result
-        self.run_btn.setEnabled(True)
-        self.progress_bar.setVisible(False)
-        self.export_btn.setEnabled(True)
+        if len(self.equity_indices) > 1 and self.data is not None:
+            valid_indices = [i - 1 for i in self.equity_indices if i - 1 < len(self.data) and i > 0]
+            if valid_indices:
+                dates = [self.data.index[i] for i in valid_indices]
+                equity_vals = self.equity_curve[:len(valid_indices)]
+                self.ax_equity.plot(dates, equity_vals, color='lime', linewidth=1.5)
 
-        # Metriken aktualisieren
-        self._update_metrics()
+        self.ax_equity.axhline(y=self.initial_capital, color='gray',
+                               linestyle='--', linewidth=1)
 
-        # Equity-Plot
-        self._update_equity_plot()
+        pnl_pct = ((self.current_equity - self.initial_capital) / self.initial_capital) * 100
+        self.ax_equity.set_title(f'Equity-Kurve | P/L: ${self.total_pnl:,.2f} ({pnl_pct:.2f}%)',
+                                 color='white', fontsize=11)
+        self.equity_figure.tight_layout()
+        self.equity_canvas.draw()
 
-        # Trades-Tabelle
-        self._update_trades_table()
+    def _finalize_backtest(self):
+        """Finalisiert den Backtest."""
+        self._stop_backtest()
 
-        # Log
-        self._log("\n" + result.summary())
+        # Offene Position schliessen
+        if self.position != 'NONE' and self.data is not None:
+            final_price = self.data['Close'].iloc[-1]
+            self._close_trade(final_price, len(self.data), 'Backtest Ende')
 
-        QMessageBox.information(
-            self, "Backtest abgeschlossen",
-            f"Backtest erfolgreich!\n\n"
-            f"Trades: {result.num_trades}\n"
-            f"Return: {result.total_return_pct:.2f}%\n"
-            f"Win Rate: {result.win_rate:.1f}%"
-        )
+        self._update_charts()
+        self._add_tradelog("=== Backtest abgeschlossen ===")
+        self._add_tradelog(f"Gesamt P/L: ${self.total_pnl:,.2f}")
+        self._add_tradelog(f"Trades: {len(self.trades)}")
 
-    def _on_backtest_error(self, error: str):
-        """Callback bei Fehler."""
-        self.run_btn.setEnabled(True)
-        self.progress_bar.setVisible(False)
+    def _update_speed(self, value: int):
+        """Aktualisiert die Geschwindigkeit."""
+        self.steps_per_second = value
+        self.speed_label.setText(str(value))
 
-        self._log(f"FEHLER: {error}")
-        QMessageBox.critical(self, "Backtest-Fehler", error)
+        # Timer neu starten falls aktiv
+        if self.is_running and self.backtest_timer:
+            self.backtest_timer.setInterval(int(1000 / value))
 
-    def _update_metrics(self):
-        """Aktualisiert die Metriken-Anzeige."""
-        if self.result is None:
-            return
+    def _toggle_turbo(self, checked: bool):
+        """Schaltet den Turbo-Modus um."""
+        self.turbo_mode = checked
+        if not checked:
+            self._update_charts()
 
-        r = self.result
+    def _add_tradelog(self, message: str):
+        """Fuegt eine Nachricht zum Trade-Log hinzu."""
+        current = self.tradelog_text.toPlainText()
+        if current == "Kein Trade":
+            self.tradelog_text.setPlainText(message)
+        else:
+            lines = current.split('\n')
+            lines.append(message)
+            # Nur letzte 20 Zeilen behalten
+            if len(lines) > 20:
+                lines = lines[-20:]
+            self.tradelog_text.setPlainText('\n'.join(lines))
 
-        # Werte setzen
-        updates = {
-            'total_return': r.total_return_pct,
-            'total_pnl': r.total_pnl,
-            'win_rate': r.win_rate,
-            'profit_factor': r.profit_factor,
-            'sharpe_ratio': r.sharpe_ratio,
-            'max_drawdown': r.max_drawdown_pct,
-            'num_trades': r.num_trades,
-            'avg_trade': r.avg_trade_pnl,
-            'avg_winner': r.avg_winner,
-            'avg_loser': r.avg_loser,
-            'largest_winner': r.largest_winner,
-            'largest_loser': r.largest_loser,
-            'sortino_ratio': r.sortino_ratio,
-            'avg_duration': str(r.avg_trade_duration).split('.')[0] if r.avg_trade_duration else '-',
-        }
+        # Scroll nach unten
+        scrollbar = self.tradelog_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
 
-        for key, value in updates.items():
-            if key in self.metric_labels:
-                label, suffix = self.metric_labels[key]
-
-                if isinstance(value, float):
-                    if suffix == '$':
-                        text = f"${value:,.2f}"
-                    elif suffix == '%':
-                        text = f"{value:.2f}%"
-                    else:
-                        text = f"{value:.2f}"
-                else:
-                    text = str(value)
-
-                label.setText(text)
-
-                # Farbe basierend auf Wert
-                if key in ['total_return', 'total_pnl', 'avg_trade']:
-                    if isinstance(value, (int, float)) and value > 0:
-                        label.setStyleSheet(f"color: {COLORS['success']};")
-                    elif isinstance(value, (int, float)) and value < 0:
-                        label.setStyleSheet(f"color: {COLORS['error']};")
-
-    def _update_trades_table(self):
-        """Aktualisiert die Trades-Tabelle."""
-        self.trades_table.setRowCount(0)
-
-        if self.result is None or not self.result.trades:
-            return
-
-        for trade in self.result.trades:
-            row = self.trades_table.rowCount()
-            self.trades_table.insertRow(row)
-
-            # Entry/Exit Time
-            entry_str = trade.entry_time.strftime('%Y-%m-%d %H:%M') if hasattr(trade.entry_time, 'strftime') else str(trade.entry_time)
-            exit_str = trade.exit_time.strftime('%Y-%m-%d %H:%M') if hasattr(trade.exit_time, 'strftime') else str(trade.exit_time)
-
-            self.trades_table.setItem(row, 0, QTableWidgetItem(entry_str))
-            self.trades_table.setItem(row, 1, QTableWidgetItem(exit_str))
-            self.trades_table.setItem(row, 2, QTableWidgetItem(trade.position))
-            self.trades_table.setItem(row, 3, QTableWidgetItem(f"${trade.entry_price:,.2f}"))
-            self.trades_table.setItem(row, 4, QTableWidgetItem(f"${trade.exit_price:,.2f}"))
-
-            # P/L mit Farbe
-            pnl_item = QTableWidgetItem(f"${trade.pnl:,.2f}")
-            pnl_pct_item = QTableWidgetItem(f"{trade.pnl_pct:.2f}%")
-
-            if trade.pnl > 0:
-                pnl_item.setForeground(QColor(COLORS['success']))
-                pnl_pct_item.setForeground(QColor(COLORS['success']))
-            else:
-                pnl_item.setForeground(QColor(COLORS['error']))
-                pnl_pct_item.setForeground(QColor(COLORS['error']))
-
-            self.trades_table.setItem(row, 5, pnl_item)
-            self.trades_table.setItem(row, 6, pnl_pct_item)
-
-            # Dauer
-            duration_str = str(trade.duration).split('.')[0] if trade.duration else '-'
-            self.trades_table.setItem(row, 7, QTableWidgetItem(duration_str))
-
-    def _filter_trades(self, filter_type: str):
-        """Filtert die Trades-Tabelle."""
-        if self.result is None:
-            return
-
-        for row in range(self.trades_table.rowCount()):
-            pnl_text = self.trades_table.item(row, 5).text()
-            pnl = float(pnl_text.replace('$', '').replace(',', ''))
-
-            show = True
-            if filter_type == 'Nur Gewinner' and pnl <= 0:
-                show = False
-            elif filter_type == 'Nur Verlierer' and pnl >= 0:
-                show = False
-
-            self.trades_table.setRowHidden(row, not show)
-
-    def _export_results(self):
-        """Exportiert die Ergebnisse."""
-        if self.result is None:
-            return
-
-        filepath, _ = QFileDialog.getSaveFileName(
-            self, "Ergebnisse speichern", "", "JSON (*.json);;CSV (*.csv)"
-        )
-
-        if not filepath:
-            return
-
-        try:
-            if filepath.endswith('.json'):
-                import json
-                with open(filepath, 'w') as f:
-                    json.dump(self.result.to_dict(), f, indent=2)
-            else:
-                # Trades als CSV
-                trades_data = [{
-                    'entry_time': t.entry_time,
-                    'exit_time': t.exit_time,
-                    'position': t.position,
-                    'entry_price': t.entry_price,
-                    'exit_price': t.exit_price,
-                    'pnl': t.pnl,
-                    'pnl_pct': t.pnl_pct
-                } for t in self.result.trades]
-                pd.DataFrame(trades_data).to_csv(filepath, index=False)
-
-            self._log(f"Ergebnisse exportiert: {filepath}")
-            QMessageBox.information(self, "Export", f"Ergebnisse gespeichert:\n{filepath}")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Export-Fehler", str(e))
-
-    def _log(self, message: str):
-        """Fuegt eine Nachricht zum Log hinzu."""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.log_text.append(f"[{timestamp}] {message}")
-
-    def get_result(self):
-        """Gibt das Backtest-Ergebnis zurueck."""
-        return self.result
+    def closeEvent(self, event):
+        """Behandelt das Schliessen des Fensters."""
+        if self.backtest_timer:
+            self.backtest_timer.stop()
+        event.accept()

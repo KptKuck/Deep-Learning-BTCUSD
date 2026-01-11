@@ -281,16 +281,57 @@ class TrainingWindow(QMainWindow):
 
         layout.addWidget(save_group)
 
-        # Device Info
-        device_group = QGroupBox("Hardware")
+        # Device Info (GPU Status wie MATLAB)
+        device_group = QGroupBox("GPU Status & Speicher")
         device_layout = QVBoxLayout(device_group)
 
+        # GPU/CPU Switch
+        switch_layout = QHBoxLayout()
+        switch_layout.addWidget(QLabel("Device:"))
+        self.use_gpu_check = QCheckBox("GPU verwenden")
+        self.use_gpu_check.setChecked(torch.cuda.is_available())
+        self.use_gpu_check.setEnabled(torch.cuda.is_available())
+        self.use_gpu_check.stateChanged.connect(self._update_device)
+        switch_layout.addWidget(self.use_gpu_check)
+        device_layout.addLayout(switch_layout)
+
+        # GPU Name
         device_text = "GPU (CUDA)" if torch.cuda.is_available() else "CPU"
         if torch.cuda.is_available():
-            device_text += f"\n{torch.cuda.get_device_name(0)}"
+            device_text = f"{torch.cuda.get_device_name(0)}"
         self.device_label = QLabel(device_text)
         self.device_label.setStyleSheet(f"color: {'#33b34d' if torch.cuda.is_available() else '#e6b333'};")
         device_layout.addWidget(self.device_label)
+
+        # GPU Memory Bar (wie MATLAB)
+        if torch.cuda.is_available():
+            mem_layout = QGridLayout()
+
+            # Progress Bar fuer GPU-Speicher
+            self.gpu_memory_bar = QProgressBar()
+            self.gpu_memory_bar.setMinimum(0)
+            self.gpu_memory_bar.setMaximum(100)
+            self.gpu_memory_bar.setValue(0)
+            self.gpu_memory_bar.setTextVisible(True)
+            self.gpu_memory_bar.setFormat("%p% belegt")
+            mem_layout.addWidget(self.gpu_memory_bar, 0, 0, 1, 2)
+
+            # Speicher-Labels
+            self.gpu_used_label = QLabel("Belegt: - GB")
+            self.gpu_used_label.setStyleSheet("color: #aaaaaa;")
+            mem_layout.addWidget(self.gpu_used_label, 1, 0)
+
+            self.gpu_free_label = QLabel("Frei: - GB")
+            self.gpu_free_label.setStyleSheet("color: #33b34d;")
+            mem_layout.addWidget(self.gpu_free_label, 1, 1)
+
+            device_layout.addLayout(mem_layout)
+
+            # GPU Memory Timer starten
+            self.gpu_timer = QTimer()
+            self.gpu_timer.timeout.connect(self._update_gpu_memory)
+            self.gpu_timer.start(1000)
+            self._update_gpu_memory()
 
         layout.addWidget(device_group)
 
@@ -659,6 +700,66 @@ class TrainingWindow(QMainWindow):
     def get_model(self):
         """Gibt das trainierte Modell zurueck."""
         return self.model
+
+    def _update_device(self, state: int):
+        """Aktualisiert das Device basierend auf GPU-Checkbox."""
+        if state == Qt.CheckState.Checked.value and torch.cuda.is_available():
+            self.device = torch.device('cuda')
+            self.device_label.setText(torch.cuda.get_device_name(0))
+            self.device_label.setStyleSheet("color: #33b34d;")
+            self._log("Device gewechselt: GPU (CUDA)")
+        else:
+            self.device = torch.device('cpu')
+            self.device_label.setText("CPU")
+            self.device_label.setStyleSheet("color: #e6b333;")
+            self._log("Device gewechselt: CPU")
+
+    def _update_gpu_memory(self):
+        """Aktualisiert die GPU-Speicheranzeige."""
+        if not torch.cuda.is_available() or not hasattr(self, 'gpu_memory_bar'):
+            return
+
+        try:
+            # Speicher-Informationen abrufen
+            allocated = torch.cuda.memory_allocated(0) / (1024 ** 3)  # GB
+            reserved = torch.cuda.memory_reserved(0) / (1024 ** 3)  # GB
+            total = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)  # GB
+            free = total - reserved
+
+            # Prozent berechnen (reserved statt allocated fuer genauere Anzeige)
+            percent = int((reserved / total) * 100)
+
+            # Progress Bar aktualisieren
+            self.gpu_memory_bar.setValue(percent)
+
+            # Farbe basierend auf Auslastung
+            if percent < 50:
+                color = "#33b34d"  # Gruen
+            elif percent < 80:
+                color = "#e6b333"  # Orange
+            else:
+                color = "#cc4d33"  # Rot
+
+            self.gpu_memory_bar.setStyleSheet(f"""
+                QProgressBar {{
+                    border: 1px solid #555555;
+                    border-radius: 3px;
+                    background-color: #1a1a1a;
+                    text-align: center;
+                    color: white;
+                }}
+                QProgressBar::chunk {{
+                    background-color: {color};
+                }}
+            """)
+
+            # Labels aktualisieren
+            self.gpu_used_label.setText(f"Belegt: {reserved:.1f} GB")
+            self.gpu_free_label.setText(f"Frei: {free:.1f} GB")
+
+        except Exception as e:
+            # Bei Fehler stumm ignorieren
+            pass
 
     def closeEvent(self, event):
         """Behandelt das Schliessen des Fensters."""

@@ -64,13 +64,22 @@ class Logger:
 
         Args:
             name: Name des Loggers (z.B. 'btcusd_analyzer')
-            log_dir: Verzeichnis fuer Log-Dateien (default: ./log)
+            log_dir: Verzeichnis fuer Log-Dateien (default: <projekt>/log)
         """
         if hasattr(self, '_initialized'):
             return
 
         self.name = name
-        self.log_dir = Path(log_dir) if log_dir else Path.cwd() / 'log'
+
+        # Log-Verzeichnis: Entweder explizit angegeben oder im Projektverzeichnis
+        if log_dir:
+            self.log_dir = Path(log_dir)
+        else:
+            # Projektverzeichnis ermitteln (3 Ebenen hoch von dieser Datei)
+            # __file__ -> core/logger.py -> core -> btcusd_analyzer -> src -> btcusd_analyzer_python
+            project_dir = Path(__file__).parent.parent.parent.parent
+            self.log_dir = project_dir / 'log'
+
         self.log_file: Optional[Path] = None
 
         # Custom Log-Level registrieren

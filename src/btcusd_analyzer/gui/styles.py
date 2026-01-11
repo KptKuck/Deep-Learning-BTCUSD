@@ -3,25 +3,43 @@ GUI Styles - Dark Theme fuer PyQt6
 """
 
 # Dark Theme Farben (entsprechend MATLAB GUI)
-COLORS = {
-    'bg_primary': '#262626',      # Haupt-Hintergrund
-    'bg_secondary': '#1a1a1a',    # Sekundaerer Hintergrund
-    'bg_tertiary': '#333333',     # Tertiärer Hintergrund (Panels)
+# MATLAB verwendet RGB-Werte im Bereich 0-1, hier umgerechnet auf Hex
 
+COLORS = {
+    # Hintergruende (MATLAB: [0.15, 0.15, 0.15], [0.18, 0.18, 0.18], [0.1, 0.1, 0.1])
+    'bg_primary': '#262626',      # Haupt-Hintergrund (0.15 * 255 = 38)
+    'bg_secondary': '#1a1a1a',    # Sekundaerer Hintergrund / Input (0.1 * 255 = 26)
+    'bg_tertiary': '#2e2e2e',     # Panel-Hintergrund (0.18 * 255 = 46)
+    'bg_panel': '#333333',        # GroupBox-Hintergrund (0.2 * 255 = 51)
+
+    # Text
     'text_primary': '#ffffff',     # Primaerer Text
     'text_secondary': '#aaaaaa',   # Sekundaerer Text
     'text_disabled': '#666666',    # Deaktivierter Text
 
-    'accent': '#4da8da',          # Akzentfarbe (Blau)
-    'accent_hover': '#5db8ea',    # Akzent Hover
+    # Akzent (MATLAB: [0.3, 0.6, 0.9] = Blau)
+    'accent': '#4d99e6',          # Akzentfarbe (Blau)
+    'accent_hover': '#5da9f6',    # Akzent Hover
 
-    'success': '#33b34d',         # Erfolg (Gruen)
-    'warning': '#e6b333',         # Warnung (Orange)
-    'error': '#cc4d33',           # Fehler (Rot)
-    'neutral': '#808080',         # Neutral (Grau)
+    # Status-Farben (MATLAB)
+    'success': '#33b34d',         # Erfolg/BUY (0.2, 0.7, 0.3)
+    'warning': '#e6b333',         # Warnung (0.9, 0.7, 0.2)
+    'error': '#cc4d33',           # Fehler/SELL (0.8, 0.3, 0.2)
+    'neutral': '#808080',         # Neutral/HOLD (0.5, 0.5, 0.5)
+    'info': '#33cccc',            # Info (0.2, 0.8, 0.8)
+    'training': '#9933cc',        # Training (0.6, 0.2, 0.8)
 
+    # Signal-Farben (Trading)
+    'buy': '#33b34d',             # BUY Signal (Gruen)
+    'sell': '#cc4d33',            # SELL Signal (Rot)
+    'hold': '#808080',            # HOLD Signal (Grau)
+    'long': '#33b34d',            # LONG Position (Gruen)
+    'short': '#cc4d33',           # SHORT Position (Rot)
+
+    # UI-Elemente
     'border': '#404040',          # Rahmenfarbe
-    'border_focus': '#4da8da',    # Rahmen bei Fokus
+    'border_focus': '#4d99e6',    # Rahmen bei Fokus
+    'grid': '#4d4d4d',            # Chart-Grid
 
     # Trading-Modi
     'testnet_bg': '#1a2e1a',
@@ -31,6 +49,33 @@ COLORS = {
     'live_bg': '#3d1a1a',
     'live_border': '#ff3333',
     'live_text': '#ff6666',
+}
+
+# MATLAB RGB-Farben als Tupel (0-1 Range) fuer direkte Verwendung
+MATLAB_COLORS = {
+    # Hintergruende
+    'bg_main': (0.15, 0.15, 0.15),
+    'bg_panel': (0.18, 0.18, 0.18),
+    'bg_input': (0.1, 0.1, 0.1),
+    'bg_group': (0.2, 0.2, 0.2),
+
+    # Signale
+    'buy': (0.2, 0.7, 0.3),
+    'sell': (0.8, 0.3, 0.2),
+    'hold': (0.5, 0.5, 0.5),
+
+    # Buttons
+    'success': (0.2, 0.7, 0.3),
+    'primary': (0.3, 0.6, 0.9),
+    'warning': (0.9, 0.7, 0.2),
+    'error': (0.8, 0.3, 0.2),
+    'neutral': (0.5, 0.5, 0.5),
+    'info': (0.2, 0.8, 0.8),
+    'training': (0.6, 0.2, 0.8),
+
+    # Spezielle Button-Farben
+    'step': (0.5, 0.5, 0.7),
+    'close': (0.4, 0.4, 0.4),
 }
 
 
