@@ -193,7 +193,7 @@ class TrainingWindow(QMainWindow):
 
         panel = QWidget()
         layout = QVBoxLayout(panel)
-        layout.setSpacing(10)
+        layout.setSpacing(5)
 
         # Modell-Auswahl
         model_group = QGroupBox("Modell")
@@ -256,91 +256,87 @@ class TrainingWindow(QMainWindow):
 
         layout.addWidget(train_group)
 
+        # Early Stopping & Speichern kombiniert
+        options_group = QGroupBox("Optionen")
+        options_layout = QGridLayout(options_group)
+        options_layout.setVerticalSpacing(3)
+
         # Early Stopping
-        es_group = QGroupBox("Early Stopping")
-        es_layout = QGridLayout(es_group)
-
-        self.early_stopping_check = QCheckBox("Aktivieren")
+        self.early_stopping_check = QCheckBox("Early Stopping")
         self.early_stopping_check.setChecked(True)
-        es_layout.addWidget(self.early_stopping_check, 0, 0, 1, 2)
+        options_layout.addWidget(self.early_stopping_check, 0, 0)
 
-        es_layout.addWidget(QLabel("Patience:"), 1, 0)
+        options_layout.addWidget(QLabel("Patience:"), 0, 1)
         self.patience_spin = QSpinBox()
         self.patience_spin.setRange(1, 50)
         self.patience_spin.setValue(10)
-        es_layout.addWidget(self.patience_spin, 1, 1)
-
-        layout.addWidget(es_group)
+        options_layout.addWidget(self.patience_spin, 0, 2)
 
         # Speicher-Optionen
-        save_group = QGroupBox("Speichern")
-        save_layout = QVBoxLayout(save_group)
-
-        self.save_best_check = QCheckBox("Bestes Modell speichern")
+        self.save_best_check = QCheckBox("Modell speichern")
         self.save_best_check.setChecked(True)
-        save_layout.addWidget(self.save_best_check)
+        options_layout.addWidget(self.save_best_check, 1, 0, 1, 3)
 
-        self.save_history_check = QCheckBox("Training-History speichern")
+        self.save_history_check = QCheckBox("History speichern")
         self.save_history_check.setChecked(True)
-        save_layout.addWidget(self.save_history_check)
+        options_layout.addWidget(self.save_history_check, 2, 0, 1, 3)
 
-        save_path_layout = QHBoxLayout()
+        # Speicherpfad kompakt
+        options_layout.addWidget(QLabel("Pfad:"), 3, 0)
         self.save_path_edit = QLabel("models/")
+        self.save_path_edit.setStyleSheet("font-size: 9px; color: #aaaaaa;")
+        options_layout.addWidget(self.save_path_edit, 3, 1)
         self.save_path_btn = QPushButton("...")
-        self.save_path_btn.setFixedWidth(40)
+        self.save_path_btn.setFixedWidth(30)
         self.save_path_btn.clicked.connect(self._select_save_path)
-        save_path_layout.addWidget(QLabel("Pfad:"))
-        save_path_layout.addWidget(self.save_path_edit, 1)
-        save_path_layout.addWidget(self.save_path_btn)
-        save_layout.addLayout(save_path_layout)
+        options_layout.addWidget(self.save_path_btn, 3, 2)
 
-        layout.addWidget(save_group)
+        layout.addWidget(options_group)
 
-        # Device Info (GPU Status wie MATLAB)
-        device_group = QGroupBox("GPU Status & Speicher")
-        device_layout = QVBoxLayout(device_group)
+        # Device Info (GPU Status wie MATLAB) - kompakter
+        device_group = QGroupBox("Device")
+        device_layout = QGridLayout(device_group)
+        device_layout.setVerticalSpacing(3)
 
         # GPU/CPU Switch
-        switch_layout = QHBoxLayout()
-        switch_layout.addWidget(QLabel("Device:"))
-        self.use_gpu_check = QCheckBox("GPU verwenden")
+        device_layout.addWidget(QLabel("GPU:"), 0, 0)
+        self.use_gpu_check = QCheckBox("Aktiv")
         self.use_gpu_check.setChecked(torch.cuda.is_available())
         self.use_gpu_check.setEnabled(torch.cuda.is_available())
         self.use_gpu_check.stateChanged.connect(self._update_device)
-        switch_layout.addWidget(self.use_gpu_check)
-        device_layout.addLayout(switch_layout)
+        device_layout.addWidget(self.use_gpu_check, 0, 1)
 
         # GPU Name
         device_text = "GPU (CUDA)" if torch.cuda.is_available() else "CPU"
         if torch.cuda.is_available():
             device_text = f"{torch.cuda.get_device_name(0)}"
         self.device_label = QLabel(device_text)
-        self.device_label.setStyleSheet(f"color: {'#33b34d' if torch.cuda.is_available() else '#e6b333'};")
-        device_layout.addWidget(self.device_label)
+        self.device_label.setStyleSheet(f"color: {'#33b34d' if torch.cuda.is_available() else '#e6b333'}; font-size: 10px;")
+        device_layout.addWidget(self.device_label, 1, 0, 1, 2)
 
         # GPU Memory Bar (wie MATLAB)
         if torch.cuda.is_available():
-            mem_layout = QGridLayout()
-
             # Progress Bar fuer GPU-Speicher
             self.gpu_memory_bar = QProgressBar()
             self.gpu_memory_bar.setMinimum(0)
             self.gpu_memory_bar.setMaximum(100)
             self.gpu_memory_bar.setValue(0)
             self.gpu_memory_bar.setTextVisible(True)
-            self.gpu_memory_bar.setFormat("%p% belegt")
-            mem_layout.addWidget(self.gpu_memory_bar, 0, 0, 1, 2)
+            self.gpu_memory_bar.setFormat("%p%")
+            self.gpu_memory_bar.setMaximumHeight(18)
+            device_layout.addWidget(self.gpu_memory_bar, 2, 0, 1, 2)
 
-            # Speicher-Labels
+            # Speicher-Labels kompakt
+            mem_label_layout = QHBoxLayout()
             self.gpu_used_label = QLabel("Belegt: - GB")
-            self.gpu_used_label.setStyleSheet("color: #aaaaaa;")
-            mem_layout.addWidget(self.gpu_used_label, 1, 0)
+            self.gpu_used_label.setStyleSheet("color: #aaaaaa; font-size: 9px;")
+            mem_label_layout.addWidget(self.gpu_used_label)
 
             self.gpu_free_label = QLabel("Frei: - GB")
-            self.gpu_free_label.setStyleSheet("color: #33b34d;")
-            mem_layout.addWidget(self.gpu_free_label, 1, 1)
+            self.gpu_free_label.setStyleSheet("color: #33b34d; font-size: 9px;")
+            mem_label_layout.addWidget(self.gpu_free_label)
 
-            device_layout.addLayout(mem_layout)
+            device_layout.addLayout(mem_label_layout, 3, 0, 1, 2)
 
             # GPU Memory Timer starten
             self.gpu_timer = QTimer()
