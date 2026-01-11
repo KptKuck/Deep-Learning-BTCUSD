@@ -86,6 +86,10 @@ models/
 # OS
 .DS_Store
 Thumbs.db
+nul
+
+# Claude Code
+.claude/
 
 # Secrets
 .env
