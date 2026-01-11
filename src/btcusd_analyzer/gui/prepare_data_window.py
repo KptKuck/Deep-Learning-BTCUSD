@@ -10,7 +10,8 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QGroupBox, QScrollArea, QFrame,
     QCheckBox, QComboBox, QSlider, QSpinBox, QDoubleSpinBox,
-    QTableWidget, QTableWidgetItem, QHeaderView, QSplitter
+    QTableWidget, QTableWidgetItem, QHeaderView, QSplitter,
+    QTabWidget
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -70,6 +71,14 @@ class PrepareDataWindow(QMainWindow):
         self.result_info = {}
         self.preview_computed = False
 
+        # Tab-Validierungsstatus (Pipeline)
+        self.labels_valid = False      # Tab 1: Labels generiert?
+        self.features_valid = False    # Tab 2: Features gewaehlt?
+        self.samples_valid = False     # Tab 3: Samples berechnet?
+
+        # Generierte Labels speichern
+        self.generated_labels = None
+
         # UI initialisieren
         self._init_ui()
         self._update_seq_info()
@@ -115,55 +124,571 @@ class PrepareDataWindow(QMainWindow):
         splitter.setSizes([380, 800, 320])
 
     def _create_param_panel(self) -> QWidget:
-        """Erstellt das linke Parameter-Panel."""
+        """Erstellt das linke Parameter-Panel mit Tab-Struktur."""
         panel = QWidget()
         panel.setMinimumWidth(380)
-        panel.setMaximumWidth(400)
+        panel.setMaximumWidth(420)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
 
-        # Scroll Area
+        # Titel
+        title = QLabel('Trainingsdaten Vorbereitung')
+        title.setFont(QFont('Segoe UI', 14, QFont.Weight.Bold))
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet('color: white;')
+        layout.addWidget(title)
+
+        # Tab Widget
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setStyleSheet('''
+            QTabWidget::pane {
+                border: 1px solid #333;
+                background-color: #2a2a2a;
+            }
+            QTabBar::tab {
+                background: #333;
+                color: #aaa;
+                padding: 8px 16px;
+                margin-right: 2px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }
+            QTabBar::tab:selected {
+                background: #4da8da;
+                color: white;
+            }
+            QTabBar::tab:hover:!selected {
+                background: #444;
+            }
+            QTabBar::tab:disabled {
+                background: #222;
+                color: #555;
+            }
+        ''')
+
+        # Tab 1: Labeling
+        labeling_tab = self._create_labeling_tab()
+        self.tab_widget.addTab(labeling_tab, "Labeling")
+
+        # Tab 2: Features
+        features_tab = self._create_features_tab()
+        self.tab_widget.addTab(features_tab, "Features")
+
+        # Tab 3: Samples
+        samples_tab = self._create_samples_tab()
+        self.tab_widget.addTab(samples_tab, "Samples")
+
+        layout.addWidget(self.tab_widget)
+
+        # Status Label (unter den Tabs)
+        self.status_label = QLabel('1. Labeling-Methode waehlen und Labels generieren')
+        self.status_label.setWordWrap(True)
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setStyleSheet('color: #aaaaaa; padding: 5px;')
+        layout.addWidget(self.status_label)
+
+        # Initial: Tabs 2 und 3 deaktiviert
+        self.tab_widget.setTabEnabled(1, False)
+        self.tab_widget.setTabEnabled(2, False)
+
+        return panel
+
+    # =========================================================================
+    # Tab 1: Labeling
+    # =========================================================================
+
+    def _create_labeling_tab(self) -> QWidget:
+        """Tab fuer Label-Generierung mit Methoden-Auswahl."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(10)
+
+        # Scroll Area fuer den Tab-Inhalt
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
 
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)
-        scroll_layout.setSpacing(10)
+        scroll_layout.setSpacing(8)
 
-        # Titel
-        title = QLabel('Parameter Einstellungen')
-        title.setFont(QFont('Segoe UI', 16, QFont.Weight.Bold))
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet('color: white;')
-        scroll_layout.addWidget(title)
+        # Labeling-Methode Gruppe
+        method_group = QGroupBox('Labeling-Methode')
+        method_group.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
+        method_group.setStyleSheet('''
+            QGroupBox { color: #4da8da; border: 1px solid #333; border-radius: 5px;
+                        margin-top: 10px; padding-top: 10px; }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }
+        ''')
+        method_layout = QVBoxLayout(method_group)
 
-        # Gruppe 1: Sequenz-Parameter
+        # Methoden-Dropdown
+        method_row = QHBoxLayout()
+        method_row.addWidget(QLabel('Methode:'))
+        self.labeling_method_combo = QComboBox()
+        self.labeling_method_combo.addItems([
+            'Future Return',
+            'ZigZag',
+            'Peak Detection',
+            'Williams Fractals',
+            'Pivot Points',
+            'Tages-Extrema',
+            'Binary'
+        ])
+        self.labeling_method_combo.currentIndexChanged.connect(self._on_labeling_method_changed)
+        method_row.addWidget(self.labeling_method_combo)
+        method_layout.addLayout(method_row)
+
+        scroll_layout.addWidget(method_group)
+
+        # Gemeinsame Parameter Gruppe
+        common_group = QGroupBox('Gemeinsame Parameter')
+        common_group.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
+        common_group.setStyleSheet('''
+            QGroupBox { color: #7fe6b3; border: 1px solid #333; border-radius: 5px;
+                        margin-top: 10px; padding-top: 10px; }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }
+        ''')
+        common_layout = QGridLayout(common_group)
+
+        # Lookforward
+        common_layout.addWidget(QLabel('Lookforward:'), 0, 0)
+        self.label_lookforward_spin = QSpinBox()
+        self.label_lookforward_spin.setRange(1, 500)
+        self.label_lookforward_spin.setValue(100)
+        self.label_lookforward_spin.valueChanged.connect(self._on_labeling_param_changed)
+        common_layout.addWidget(self.label_lookforward_spin, 0, 1)
+
+        # Threshold
+        common_layout.addWidget(QLabel('Threshold %:'), 1, 0)
+        self.label_threshold_spin = QDoubleSpinBox()
+        self.label_threshold_spin.setRange(0.1, 20.0)
+        self.label_threshold_spin.setValue(2.0)
+        self.label_threshold_spin.setSingleStep(0.1)
+        self.label_threshold_spin.valueChanged.connect(self._on_labeling_param_changed)
+        common_layout.addWidget(self.label_threshold_spin, 1, 1)
+
+        scroll_layout.addWidget(common_group)
+
+        # Methoden-spezifische Parameter (dynamisch sichtbar)
+        self.method_params_group = QGroupBox('Methoden-Parameter')
+        self.method_params_group.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
+        self.method_params_group.setStyleSheet('''
+            QGroupBox { color: #ffb366; border: 1px solid #333; border-radius: 5px;
+                        margin-top: 10px; padding-top: 10px; }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }
+        ''')
+        method_params_layout = QGridLayout(self.method_params_group)
+
+        # ZigZag Threshold
+        self.zigzag_label = QLabel('ZigZag Threshold %:')
+        method_params_layout.addWidget(self.zigzag_label, 0, 0)
+        self.zigzag_threshold_spin = QDoubleSpinBox()
+        self.zigzag_threshold_spin.setRange(1.0, 20.0)
+        self.zigzag_threshold_spin.setValue(5.0)
+        self.zigzag_threshold_spin.setSingleStep(0.5)
+        method_params_layout.addWidget(self.zigzag_threshold_spin, 0, 1)
+
+        # Peak Prominence
+        self.prominence_label = QLabel('Prominenz %:')
+        method_params_layout.addWidget(self.prominence_label, 1, 0)
+        self.prominence_spin = QDoubleSpinBox()
+        self.prominence_spin.setRange(0.1, 5.0)
+        self.prominence_spin.setValue(0.5)
+        self.prominence_spin.setSingleStep(0.1)
+        method_params_layout.addWidget(self.prominence_spin, 1, 1)
+
+        # Peak Distance
+        self.distance_label = QLabel('Min. Abstand:')
+        method_params_layout.addWidget(self.distance_label, 2, 0)
+        self.peak_distance_spin = QSpinBox()
+        self.peak_distance_spin.setRange(1, 100)
+        self.peak_distance_spin.setValue(10)
+        method_params_layout.addWidget(self.peak_distance_spin, 2, 1)
+
+        # Fractal Order
+        self.fractal_label = QLabel('Fractal Order:')
+        method_params_layout.addWidget(self.fractal_label, 3, 0)
+        self.fractal_order_spin = QSpinBox()
+        self.fractal_order_spin.setRange(1, 5)
+        self.fractal_order_spin.setValue(2)
+        method_params_layout.addWidget(self.fractal_order_spin, 3, 1)
+
+        # Pivot Lookback
+        self.pivot_label = QLabel('Pivot Lookback:')
+        method_params_layout.addWidget(self.pivot_label, 4, 0)
+        self.pivot_lookback_spin = QSpinBox()
+        self.pivot_lookback_spin.setRange(1, 20)
+        self.pivot_lookback_spin.setValue(5)
+        method_params_layout.addWidget(self.pivot_lookback_spin, 4, 1)
+
+        scroll_layout.addWidget(self.method_params_group)
+
+        # Initial: Zeige nur relevante Parameter
+        self._update_method_params_visibility()
+
+        # Labels generieren Button
+        self.generate_labels_btn = QPushButton('Labels generieren')
+        self.generate_labels_btn.setFont(QFont('Segoe UI', 12, QFont.Weight.Bold))
+        self.generate_labels_btn.setFixedHeight(45)
+        self.generate_labels_btn.setStyleSheet(self._button_style((0.2, 0.7, 0.3)))
+        self.generate_labels_btn.clicked.connect(self._generate_labels)
+        scroll_layout.addWidget(self.generate_labels_btn)
+
+        # Label-Status
+        self.labels_status = QLabel('Keine Labels generiert')
+        self.labels_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.labels_status.setStyleSheet('color: #aaa; padding: 5px;')
+        scroll_layout.addWidget(self.labels_status)
+
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll)
+
+        return widget
+
+    def _on_labeling_method_changed(self, index: int):
+        """Wird aufgerufen wenn die Labeling-Methode geaendert wird."""
+        self._update_method_params_visibility()
+        self._on_labeling_param_changed()
+
+    def _update_method_params_visibility(self):
+        """Zeigt/versteckt Methoden-spezifische Parameter."""
+        method_idx = self.labeling_method_combo.currentIndex()
+
+        # Alle verstecken
+        self.zigzag_label.hide()
+        self.zigzag_threshold_spin.hide()
+        self.prominence_label.hide()
+        self.prominence_spin.hide()
+        self.distance_label.hide()
+        self.peak_distance_spin.hide()
+        self.fractal_label.hide()
+        self.fractal_order_spin.hide()
+        self.pivot_label.hide()
+        self.pivot_lookback_spin.hide()
+
+        # Methoden-spezifisch anzeigen
+        if method_idx == 1:  # ZigZag
+            self.zigzag_label.show()
+            self.zigzag_threshold_spin.show()
+            self.method_params_group.show()
+        elif method_idx == 2:  # Peak Detection
+            self.prominence_label.show()
+            self.prominence_spin.show()
+            self.distance_label.show()
+            self.peak_distance_spin.show()
+            self.method_params_group.show()
+        elif method_idx == 3:  # Fractals
+            self.fractal_label.show()
+            self.fractal_order_spin.show()
+            self.method_params_group.show()
+        elif method_idx == 4:  # Pivots
+            self.pivot_label.show()
+            self.pivot_lookback_spin.show()
+            self.method_params_group.show()
+        else:
+            # Future Return, Tages-Extrema, Binary - keine extra Parameter
+            self.method_params_group.hide()
+
+    def _on_labeling_param_changed(self):
+        """Wird aufgerufen wenn sich ein Labeling-Parameter aendert."""
+        if self.labels_valid:
+            # Labels werden ungueltig
+            self.labels_valid = False
+            self.features_valid = False
+            self.samples_valid = False
+            self.labels_status.setText('Labels ungueltig - neu generieren!')
+            self.labels_status.setStyleSheet('color: #cc4d33;')
+            self._update_tab_status()
+
+    def _generate_labels(self):
+        """Generiert Labels basierend auf der gewaehlten Methode."""
+        from ..training.labeler import DailyExtremaLabeler, LabelingConfig, LabelingMethod
+
+        self.labels_status.setText('Generiere Labels...')
+        self.labels_status.setStyleSheet('color: #4da8da;')
+
+        try:
+            # Methoden-Mapping
+            method_map = {
+                0: LabelingMethod.FUTURE_RETURN,
+                1: LabelingMethod.ZIGZAG,
+                2: LabelingMethod.PEAKS,
+                3: LabelingMethod.FRACTALS,
+                4: LabelingMethod.PIVOTS,
+                5: LabelingMethod.EXTREMA_DAILY,
+                6: LabelingMethod.BINARY,
+            }
+
+            # Config erstellen
+            config = LabelingConfig(
+                method=method_map[self.labeling_method_combo.currentIndex()],
+                lookforward=self.label_lookforward_spin.value(),
+                threshold_pct=self.label_threshold_spin.value(),
+                zigzag_threshold=self.zigzag_threshold_spin.value(),
+                prominence=self.prominence_spin.value(),
+                distance=self.peak_distance_spin.value(),
+                fractal_order=self.fractal_order_spin.value(),
+                pivot_lookback=self.pivot_lookback_spin.value(),
+            )
+
+            # Labeler erstellen und Labels generieren
+            labeler = DailyExtremaLabeler(
+                lookforward=config.lookforward,
+                threshold_pct=config.threshold_pct
+            )
+            self.generated_labels = labeler.generate_labels(self.data, config=config)
+
+            # Statistik berechnen
+            unique, counts = np.unique(self.generated_labels, return_counts=True)
+            label_stats = dict(zip(unique, counts))
+            num_buy = label_stats.get(1, 0)
+            num_sell = label_stats.get(2, 0)
+            num_hold = label_stats.get(0, 0)
+
+            # Status aktualisieren
+            self.labels_valid = True
+            self.features_valid = False
+            self.samples_valid = False
+            self.labels_status.setText(f'Labels generiert: {num_buy} BUY, {num_sell} SELL, {num_hold} HOLD')
+            self.labels_status.setStyleSheet('color: #33b34d;')
+
+            # Chart aktualisieren
+            self._update_chart_with_labels()
+
+            # Tabs aktualisieren
+            self._update_tab_status()
+
+            self._log(f'Labels generiert: {num_buy} BUY, {num_sell} SELL', 'SUCCESS')
+
+        except Exception as e:
+            self.labels_status.setText(f'Fehler: {e}')
+            self.labels_status.setStyleSheet('color: #cc4d33;')
+            self._log(f'Label-Generierung fehlgeschlagen: {e}', 'ERROR')
+
+    def _update_chart_with_labels(self):
+        """Aktualisiert den Chart mit den generierten Labels."""
+        if self.generated_labels is None:
+            return
+
+        close_col = 'Close' if 'Close' in self.data.columns else 'close'
+        prices = self.data[close_col].values
+
+        # Finde Signal-Indizes
+        buy_indices = np.where(self.generated_labels == 1)[0]
+        sell_indices = np.where(self.generated_labels == 2)[0]
+
+        self._update_chart(prices, list(buy_indices), list(sell_indices))
+
+    def _update_tab_status(self):
+        """Aktualisiert Tab-Status basierend auf Validitaet."""
+        # Tab 2: Features (nur wenn Labels valid)
+        self.tab_widget.setTabEnabled(1, self.labels_valid)
+
+        # Tab 3: Samples (nur wenn Features valid)
+        self.tab_widget.setTabEnabled(2, self.features_valid)
+
+        # Status-Text aktualisieren
+        if not self.labels_valid:
+            self.status_label.setText('1. Labeling-Methode waehlen und Labels generieren')
+            self.status_label.setStyleSheet('color: #aaa;')
+        elif not self.features_valid:
+            self.status_label.setText('2. Features auswaehlen')
+            self.status_label.setStyleSheet('color: #e6b333;')
+        elif not self.samples_valid:
+            self.status_label.setText('3. Samples konfigurieren und generieren')
+            self.status_label.setStyleSheet('color: #e6b333;')
+        else:
+            self.status_label.setText('Alle Schritte abgeschlossen!')
+            self.status_label.setStyleSheet('color: #33b34d;')
+
+    # =========================================================================
+    # Tab 2: Features
+    # =========================================================================
+
+    def _create_features_tab(self) -> QWidget:
+        """Tab fuer Feature-Auswahl."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(10)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(8)
+
+        # Preis-Features Gruppe
+        price_group = QGroupBox('Preis-Features')
+        price_group.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
+        price_group.setStyleSheet('''
+            QGroupBox { color: #4da8da; border: 1px solid #333; border-radius: 5px;
+                        margin-top: 10px; padding-top: 10px; }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }
+        ''')
+        price_layout = QVBoxLayout(price_group)
+        self.feature_checks = {}
+
+        price_features = [
+            ('Close', True), ('High', True), ('Low', True), ('Open', True),
+            ('PriceChange', True), ('PriceChangePct', True)
+        ]
+        for feat, default in price_features:
+            cb = QCheckBox(feat)
+            cb.setChecked(default)
+            cb.setStyleSheet('color: white;')
+            cb.stateChanged.connect(self._on_feature_changed)
+            self.feature_checks[feat] = cb
+            price_layout.addWidget(cb)
+        scroll_layout.addWidget(price_group)
+
+        # Volumen-Features Gruppe
+        vol_group = QGroupBox('Volumen-Features')
+        vol_group.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
+        vol_group.setStyleSheet('''
+            QGroupBox { color: #7fe6b3; border: 1px solid #333; border-radius: 5px;
+                        margin-top: 10px; padding-top: 10px; }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }
+        ''')
+        vol_layout = QVBoxLayout(vol_group)
+        for feat in ['Volume', 'RelativeVolume']:
+            cb = QCheckBox(feat)
+            cb.setChecked(False)
+            cb.setStyleSheet('color: white;')
+            cb.stateChanged.connect(self._on_feature_changed)
+            self.feature_checks[feat] = cb
+            vol_layout.addWidget(cb)
+        scroll_layout.addWidget(vol_group)
+
+        # Zeit-Features Gruppe
+        time_group = QGroupBox('Zeit-Features (zyklisch)')
+        time_group.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
+        time_group.setStyleSheet('''
+            QGroupBox { color: #e680e6; border: 1px solid #333; border-radius: 5px;
+                        margin-top: 10px; padding-top: 10px; }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }
+        ''')
+        time_layout = QVBoxLayout(time_group)
+        cb = QCheckBox('Stunde (hour_sin, hour_cos)')
+        cb.setChecked(False)
+        cb.setStyleSheet('color: white;')
+        cb.stateChanged.connect(self._on_feature_changed)
+        self.feature_checks['Hour'] = cb
+        time_layout.addWidget(cb)
+        scroll_layout.addWidget(time_group)
+
+        # Normalisierung
+        norm_group = QGroupBox('Normalisierung')
+        norm_group.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
+        norm_group.setStyleSheet('''
+            QGroupBox { color: #ffb366; border: 1px solid #333; border-radius: 5px;
+                        margin-top: 10px; padding-top: 10px; }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }
+        ''')
+        norm_layout = QHBoxLayout(norm_group)
+        norm_layout.addWidget(QLabel('Methode:'))
+        self.norm_combo = QComboBox()
+        self.norm_combo.addItems(['zscore', 'minmax', 'none'])
+        self.norm_combo.currentIndexChanged.connect(self._on_feature_changed)
+        norm_layout.addWidget(self.norm_combo)
+        scroll_layout.addWidget(norm_group)
+
+        # Feature-Info
+        self.feature_info = QLabel('Aktive Features: 6')
+        self.feature_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.feature_info.setStyleSheet('color: #4da8da; font-weight: bold; padding: 10px;')
+        scroll_layout.addWidget(self.feature_info)
+
+        # Features bestaetigen Button
+        self.confirm_features_btn = QPushButton('Features bestaetigen')
+        self.confirm_features_btn.setFont(QFont('Segoe UI', 12, QFont.Weight.Bold))
+        self.confirm_features_btn.setFixedHeight(45)
+        self.confirm_features_btn.setStyleSheet(self._button_style((0.2, 0.7, 0.3)))
+        self.confirm_features_btn.clicked.connect(self._confirm_features)
+        scroll_layout.addWidget(self.confirm_features_btn)
+
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll)
+
+        return widget
+
+    def _on_feature_changed(self):
+        """Wird aufgerufen wenn sich die Feature-Auswahl aendert."""
+        # Feature-Anzahl aktualisieren
+        count = 0
+        for name, cb in self.feature_checks.items():
+            if cb.isChecked():
+                if name == 'Hour':
+                    count += 2  # hour_sin + hour_cos
+                else:
+                    count += 1
+        self.feature_info.setText(f'Aktive Features: {count}')
+
+        # Features werden ungueltig
+        if self.features_valid:
+            self.features_valid = False
+            self.samples_valid = False
+            self._update_tab_status()
+
+    def _confirm_features(self):
+        """Bestaetigt die Feature-Auswahl."""
+        # Zaehle aktive Features
+        count = 0
+        for name, cb in self.feature_checks.items():
+            if cb.isChecked():
+                if name == 'Hour':
+                    count += 2
+                else:
+                    count += 1
+
+        if count == 0:
+            self.feature_info.setText('Mindestens ein Feature auswaehlen!')
+            self.feature_info.setStyleSheet('color: #cc4d33; font-weight: bold;')
+            return
+
+        self.features_valid = True
+        self.samples_valid = False
+        self._update_tab_status()
+        self.feature_info.setText(f'Features bestaetigt: {count}')
+        self.feature_info.setStyleSheet('color: #33b34d; font-weight: bold;')
+
+        # Zu Tab 3 wechseln
+        self.tab_widget.setCurrentIndex(2)
+
+    # =========================================================================
+    # Tab 3: Samples
+    # =========================================================================
+
+    def _create_samples_tab(self) -> QWidget:
+        """Tab fuer Sample-Generierung."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(10)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(8)
+
+        # Sequenz-Parameter
         seq_group = self._create_seq_group()
         scroll_layout.addWidget(seq_group)
 
-        # Gruppe 2: Feature-Auswahl
-        feature_group = self._create_feature_group()
-        scroll_layout.addWidget(feature_group)
-
-        # Gruppe 3: HOLD-Samples
+        # HOLD-Samples
         hold_group = self._create_hold_group()
         scroll_layout.addWidget(hold_group)
 
-        # Gruppe 4: Normalisierung
-        norm_group = self._create_norm_group()
-        scroll_layout.addWidget(norm_group)
-
-        # Gruppe 5: Daten-Info
+        # Daten-Info
         data_group = self._create_data_info_group()
         scroll_layout.addWidget(data_group)
-
-        # Status Label
-        self.status_label = QLabel('Bitte Parameter einstellen und Vorschau berechnen.')
-        self.status_label.setWordWrap(True)
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_label.setStyleSheet('color: #aaaaaa;')
-        scroll_layout.addWidget(self.status_label)
 
         # Buttons
         self.preview_btn = QPushButton('Vorschau berechnen')
@@ -185,7 +710,11 @@ class PrepareDataWindow(QMainWindow):
         scroll.setWidget(scroll_content)
         layout.addWidget(scroll)
 
-        return panel
+        return widget
+
+    # =========================================================================
+    # Bestehende Gruppen (werden in Samples-Tab verwendet)
+    # =========================================================================
 
     def _create_seq_group(self) -> QGroupBox:
         """Erstellt die Sequenz-Parameter Gruppe."""
@@ -299,52 +828,6 @@ class PrepareDataWindow(QMainWindow):
         seq_len = self.params['lookback'] + self.params['lookforward']
         self.seq_info_label.setText(f'Sequenzlaenge: {seq_len} Datenpunkte')
 
-    def _create_feature_group(self) -> QGroupBox:
-        """Erstellt die Feature-Auswahl Gruppe."""
-        group = QGroupBox('Feature-Auswahl')
-        group.setFont(QFont('Segoe UI', 13, QFont.Weight.Bold))
-        group.setStyleSheet('''
-            QGroupBox {
-                color: #ffb366;
-                border: 1px solid #333333;
-                border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-            }
-        ''')
-        layout = QGridLayout(group)
-        layout.setSpacing(5)
-
-        features = [
-            ('use_close', 'Close'),
-            ('use_high', 'High'),
-            ('use_low', 'Low'),
-            ('use_open', 'Open'),
-            ('use_price_change', 'Preisaenderung'),
-            ('use_price_change_pct', 'Aenderung (%)'),
-        ]
-
-        for i, (key, label) in enumerate(features):
-            cb = QCheckBox(label)
-            cb.setChecked(self.params[key])
-            cb.setFont(QFont('Segoe UI', 12))
-            cb.setStyleSheet('color: white;')
-            cb.stateChanged.connect(lambda state, k=key: self._update_feature(k, state))
-            layout.addWidget(cb, i // 2, i % 2)
-
-        return group
-
-    def _update_feature(self, key: str, state: int):
-        """Aktualisiert eine Feature-Einstellung."""
-        self.params[key] = state == Qt.CheckState.Checked.value
-        self.preview_computed = False
-        self.generate_btn.setEnabled(False)
-
     def _create_hold_group(self) -> QGroupBox:
         """Erstellt die HOLD-Samples Gruppe."""
         group = QGroupBox('HOLD-Samples (Negativ-Beispiele)')
@@ -437,52 +920,6 @@ class PrepareDataWindow(QMainWindow):
         """Aktualisiert den Mindestabstand-Faktor."""
         self.params['min_distance_factor'] = value / 100.0
         self.distance_label.setText(f"{self.params['min_distance_factor']:.1f}")
-        self.preview_computed = False
-        self.generate_btn.setEnabled(False)
-
-    def _create_norm_group(self) -> QGroupBox:
-        """Erstellt die Normalisierung Gruppe."""
-        group = QGroupBox('Normalisierung')
-        group.setFont(QFont('Segoe UI', 13, QFont.Weight.Bold))
-        group.setStyleSheet('''
-            QGroupBox {
-                color: #7fe6b3;
-                border: 1px solid #333333;
-                border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-            }
-        ''')
-        layout = QGridLayout(group)
-        layout.setSpacing(5)
-
-        # Methode
-        layout.addWidget(QLabel('Methode:'), 0, 0)
-        self.norm_combo = QComboBox()
-        self.norm_combo.addItems(['Z-Score (Standard)', 'Min-Max [0,1]', 'Keine'])
-        self.norm_combo.setCurrentIndex(0)
-        self.norm_combo.currentIndexChanged.connect(self._update_norm_method)
-        layout.addWidget(self.norm_combo, 0, 1)
-
-        # Random Seed
-        layout.addWidget(QLabel('Random Seed:'), 1, 0)
-        self.seed_spin = QSpinBox()
-        self.seed_spin.setRange(0, 99999)
-        self.seed_spin.setValue(self.params['random_seed'])
-        self.seed_spin.valueChanged.connect(self._update_seed)
-        layout.addWidget(self.seed_spin, 1, 1)
-
-        return group
-
-    def _update_norm_method(self, index: int):
-        """Aktualisiert die Normalisierungsmethode."""
-        methods = ['zscore', 'minmax', 'none']
-        self.params['normalize_method'] = methods[index]
         self.preview_computed = False
         self.generate_btn.setEnabled(False)
 
