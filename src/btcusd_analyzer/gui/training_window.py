@@ -238,6 +238,7 @@ class TrainingWindow(QMainWindow):
         self.val_loader = None
         self.worker = None
         self.history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
+        self._stop_requested = False  # Fuer synchrones Training
 
         # Trainingsdaten (werden von MainWindow gesetzt)
         self.training_data = None
@@ -385,15 +386,21 @@ class TrainingWindow(QMainWindow):
         self.save_history_check.setChecked(True)
         options_layout.addWidget(self.save_history_check, 2, 0, 1, 3)
 
+        # Synchrones Training (stabiler fuer GPU)
+        self.sync_training_check = QCheckBox("Sync Training (GPU-stabil)")
+        self.sync_training_check.setChecked(True)  # Default: an (stabiler)
+        self.sync_training_check.setToolTip("Training im Main-Thread ausfuehren.\nStabiler fuer GPU, aber GUI blockiert waehrend Training.")
+        options_layout.addWidget(self.sync_training_check, 3, 0, 1, 3)
+
         # Speicherpfad kompakt
-        options_layout.addWidget(QLabel("Pfad:"), 3, 0)
+        options_layout.addWidget(QLabel("Pfad:"), 4, 0)
         self.save_path_edit = QLabel("models/")
         self.save_path_edit.setStyleSheet("font-size: 9px; color: #aaaaaa;")
-        options_layout.addWidget(self.save_path_edit, 3, 1)
+        options_layout.addWidget(self.save_path_edit, 4, 1)
         self.save_path_btn = QPushButton("...")
         self.save_path_btn.setFixedWidth(30)
         self.save_path_btn.clicked.connect(self._select_save_path)
-        options_layout.addWidget(self.save_path_btn, 3, 2)
+        options_layout.addWidget(self.save_path_btn, 4, 2)
 
         layout.addWidget(options_group)
 
@@ -826,32 +833,192 @@ class TrainingWindow(QMainWindow):
         self.history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
         self.metrics_table.setRowCount(0)
 
-        # Worker starten
-        self.worker = TrainingWorker(
-            self.model, self.train_loader, self.val_loader, config, self.device
-        )
-        self.worker.epoch_completed.connect(self._on_epoch_completed)
-        self.worker.training_finished.connect(self._on_training_finished)
-        self.worker.training_error.connect(self._on_training_error)
-        self.worker.log_message.connect(lambda msg: self._log(msg, 'INFO'))
-        self.worker.start()
-
         # UI aktualisieren
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self.progress_bar.setMaximum(config['epochs'])
         self._start_time = datetime.now()
 
+        # Synchrones oder asynchrones Training
+        if self.sync_training_check.isChecked():
+            # Synchrones Training im Main-Thread (stabiler fuer GPU)
+            self._run_sync_training(config)
+        else:
+            # Asynchrones Training im Worker-Thread
+            self.worker = TrainingWorker(
+                self.model, self.train_loader, self.val_loader, config, self.device
+            )
+            self.worker.epoch_completed.connect(self._on_epoch_completed)
+            self.worker.training_finished.connect(self._on_training_finished)
+            self.worker.training_error.connect(self._on_training_error)
+            self.worker.log_message.connect(lambda msg: self._log(msg, 'INFO'))
+            self.worker.start()
+
         # Timer fuer Zeit-Update
         self.timer = QTimer()
         self.timer.timeout.connect(self._update_time)
         self.timer.start(1000)
 
+    def _run_sync_training(self, config: dict):
+        """
+        Fuehrt Training synchron im Main-Thread aus.
+        Stabiler fuer GPU, da kein Thread-Wechsel bei CUDA-Operationen.
+        """
+        from PyQt6.QtWidgets import QApplication
+        from pathlib import Path
+        import gc
+
+        self._log("=== Synchrones Training gestartet ===")
+        self._stop_requested = False
+
+        try:
+            # Modell auf GPU verschieben
+            if self.device.type == 'cuda':
+                torch.cuda.empty_cache()
+                self.model = self.model.to(self.device)
+                self._log(f"Modell auf GPU verschoben: {self.device}")
+
+            # Loss und Optimizer
+            criterion = torch.nn.CrossEntropyLoss()
+            optimizer = torch.optim.Adam(
+                self.model.parameters(),
+                lr=config['learning_rate'],
+                weight_decay=1e-5
+            )
+
+            # Learning Rate Scheduler
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer, mode='min', factor=0.5, patience=5
+            )
+
+            epochs = config['epochs']
+            best_val_acc = 0.0
+            patience_counter = 0
+            patience = config.get('patience', 10)
+
+            for epoch in range(1, epochs + 1):
+                if self._stop_requested:
+                    self._log("Training durch Benutzer gestoppt")
+                    break
+
+                # === Training ===
+                self.model.train()
+                train_loss = 0.0
+                train_correct = 0
+                train_total = 0
+
+                for batch_idx, (data, target) in enumerate(self.train_loader):
+                    data = data.to(self.device, non_blocking=True)
+                    target = target.to(self.device, non_blocking=True)
+
+                    optimizer.zero_grad()
+                    output = self.model(data)
+                    loss = criterion(output, target)
+                    loss.backward()
+
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                    optimizer.step()
+
+                    train_loss += loss.item()
+                    _, predicted = output.max(1)
+                    train_total += target.size(0)
+                    train_correct += predicted.eq(target).sum().item()
+
+                    # GUI responsiv halten
+                    if batch_idx % 10 == 0:
+                        QApplication.processEvents()
+                        if self.device.type == 'cuda':
+                            torch.cuda.synchronize()
+
+                train_acc = 100.0 * train_correct / train_total
+                avg_train_loss = train_loss / len(self.train_loader)
+
+                # === Validierung ===
+                self.model.eval()
+                val_loss = 0.0
+                val_correct = 0
+                val_total = 0
+
+                with torch.no_grad():
+                    for data, target in self.val_loader:
+                        data = data.to(self.device)
+                        target = target.to(self.device)
+
+                        output = self.model(data)
+                        loss = criterion(output, target)
+
+                        val_loss += loss.item()
+                        _, predicted = output.max(1)
+                        val_total += target.size(0)
+                        val_correct += predicted.eq(target).sum().item()
+
+                val_acc = 100.0 * val_correct / val_total
+                avg_val_loss = val_loss / len(self.val_loader)
+
+                # Scheduler Step
+                scheduler.step(avg_val_loss)
+
+                # GUI Update
+                self._on_epoch_completed(epoch, avg_train_loss, train_acc, avg_val_loss, val_acc)
+                QApplication.processEvents()
+
+                # Early Stopping Check
+                if config.get('early_stopping', True):
+                    if val_acc > best_val_acc:
+                        best_val_acc = val_acc
+                        patience_counter = 0
+                    else:
+                        patience_counter += 1
+                        if patience_counter >= patience:
+                            self._log(f"Early Stopping nach {epoch} Epochen")
+                            break
+
+            # Modell speichern
+            if config.get('save_best', True):
+                save_path = Path(config.get('save_path', 'models'))
+                save_path.mkdir(parents=True, exist_ok=True)
+                model_name = self.model.name.lower().replace(' ', '_')
+                final_path = save_path / f'{model_name}_final_acc{best_val_acc:.1f}.pt'
+                self.model.save(final_path, metrics={
+                    'best_accuracy': best_val_acc,
+                    'epochs_trained': epoch
+                })
+                self._log(f"Modell gespeichert: {final_path}")
+
+            # Training beendet
+            self._on_training_finished({
+                'best_accuracy': best_val_acc,
+                'final_loss': avg_val_loss,
+                'stopped_early': patience_counter >= patience,
+                'model_path': str(final_path) if config.get('save_best', True) else ''
+            })
+
+        except torch.cuda.OutOfMemoryError as e:
+            torch.cuda.empty_cache()
+            self._on_training_error(f"GPU Out of Memory: {e}\n\nReduziere Batch Size.")
+
+        except Exception as e:
+            import traceback
+            self._on_training_error(f"Training Fehler: {e}\n\n{traceback.format_exc()}")
+
+        finally:
+            # Cleanup
+            if self.device.type == 'cuda':
+                if self.model is not None:
+                    try:
+                        self.model.cpu()
+                    except Exception:
+                        pass
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            gc.collect()
+
     def _stop_training(self):
         """Stoppt das Training."""
+        self._stop_requested = True  # Fuer synchrones Training
         if self.worker:
             self.worker.stop()
-            self._log("Training wird gestoppt...")
+        self._log("Training wird gestoppt...")
 
     def _on_epoch_completed(self, epoch: int, train_loss: float, train_acc: float,
                             val_loss: float, val_acc: float):
