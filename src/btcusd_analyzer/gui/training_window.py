@@ -662,11 +662,40 @@ class TrainingWindow(QMainWindow):
 
         self._log(f"DataLoader erstellt: {train_size} Training, {val_size} Validation (Batch: {batch_size})", level='SUCCESS')
 
+    def _cleanup_previous_training(self):
+        """Raeumt vorheriges Modell und GPU-Speicher auf vor neuem Training."""
+        import gc
+
+        # Worker beenden falls noch aktiv
+        if self.worker is not None:
+            if self.worker.isRunning():
+                self.worker.stop()
+                self.worker.wait(5000)  # Max 5 Sekunden warten
+            self.worker = None
+
+        # Altes Modell vom GPU entfernen
+        if self.model is not None:
+            self.model.cpu()  # Erst auf CPU verschieben
+            del self.model
+            self.model = None
+
+        # GPU Cache komplett leeren
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()  # Warten bis alles abgeschlossen
+            self._log("GPU-Speicher freigegeben fuer neues Training")
+
+        # Python Garbage Collection forcieren
+        gc.collect()
+
     def _start_training(self):
         """Startet das Training."""
         if self.train_loader is None or self.val_loader is None:
             QMessageBox.warning(self, "Fehler", "Keine Trainingsdaten geladen!")
             return
+
+        # Altes Modell und GPU-Speicher aufraeumen vor neuem Training
+        self._cleanup_previous_training()
 
         # Modell erstellen
         try:
