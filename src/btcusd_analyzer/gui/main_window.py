@@ -756,15 +756,8 @@ class MainWindow(QMainWindow):
         # Logger Textbereich (HTML-faehig)
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
-        self.log_text.setFont(QFont('Consolas', 10))
-        self.log_text.setStyleSheet('''
-            QTextEdit {
-                background-color: #1a1a1a;
-                color: #cccccc;
-                border: 1px solid #333333;
-                border-radius: 4px;
-            }
-        ''')
+        self._log_font_size = 10  # Initiale Schriftgroesse
+        self._update_log_stylesheet()
         layout.addWidget(self.log_text)
 
         return panel
@@ -1215,9 +1208,23 @@ class MainWindow(QMainWindow):
         """Aktualisiert die Timing-Einstellung."""
         self.enable_timing = state == Qt.CheckState.Checked.value
 
-    def _update_log_font_size(self, size):
+    def _update_log_font_size(self, size: int):
         """Aktualisiert die Log-Schriftgroesse."""
-        self.log_text.setFont(QFont('Consolas', size))
+        self._log_font_size = size
+        self._update_log_stylesheet()
+
+    def _update_log_stylesheet(self):
+        """Aktualisiert das Stylesheet des Log-Widgets mit aktueller Schriftgroesse."""
+        self.log_text.setStyleSheet(f'''
+            QTextEdit {{
+                background-color: #1a1a1a;
+                color: #cccccc;
+                border: 1px solid #333333;
+                border-radius: 4px;
+                font-family: Consolas, monospace;
+                font-size: {self._log_font_size}pt;
+            }}
+        ''')
 
     def _update_gpu_status(self):
         """Aktualisiert den GPU-Status."""
