@@ -270,6 +270,14 @@ class PrepareDataWindow(QMainWindow):
         self.label_threshold_spin.valueChanged.connect(self._on_labeling_param_changed)
         common_layout.addWidget(self.label_threshold_spin, 1, 1)
 
+        # Anzahl Klassen (2 oder 3)
+        common_layout.addWidget(QLabel('Klassen:'), 2, 0)
+        self.num_classes_combo = QComboBox()
+        self.num_classes_combo.addItems(['3 Klassen (BUY/HOLD/SELL)', '2 Klassen (BUY/SELL)'])
+        self.num_classes_combo.setToolTip('2 Klassen: Binaere Klassifikation ohne HOLD\n3 Klassen: Mit neutraler HOLD-Klasse')
+        self.num_classes_combo.currentIndexChanged.connect(self._on_labeling_param_changed)
+        common_layout.addWidget(self.num_classes_combo, 2, 1)
+
         scroll_layout.addWidget(common_group)
 
         # Methoden-spezifische Parameter (dynamisch sichtbar)
@@ -492,6 +500,9 @@ class PrepareDataWindow(QMainWindow):
             self.labels_status.setStyleSheet('color: #cc4d33;')
             self._update_tab_status()
 
+        # HOLD-Samples-Gruppe deaktivieren bei 2 Klassen
+        self._update_hold_visibility()
+
     def _generate_labels(self):
         """Generiert Labels basierend auf der gewaehlten Methode."""
         from ..training.labeler import DailyExtremaLabeler, LabelingConfig, LabelingMethod
@@ -511,11 +522,16 @@ class PrepareDataWindow(QMainWindow):
                 6: LabelingMethod.BINARY,
             }
 
+            # Anzahl Klassen aus ComboBox (0 = 3 Klassen, 1 = 2 Klassen)
+            num_classes = 3 if self.num_classes_combo.currentIndex() == 0 else 2
+            self.current_num_classes = num_classes  # Speichern fuer spaeter
+
             # Config erstellen mit allen Parametern
             config = LabelingConfig(
                 method=method_map[self.labeling_method_combo.currentIndex()],
                 lookforward=self.label_lookforward_spin.value(),
                 threshold_pct=self.label_threshold_spin.value(),
+                num_classes=num_classes,
                 zigzag_threshold=self.zigzag_threshold_spin.value(),
                 # Peak Detection Parameter (scipy.signal.find_peaks)
                 peak_distance=self.peak_distance_spin.value(),
@@ -534,22 +550,32 @@ class PrepareDataWindow(QMainWindow):
             # Labeler erstellen und Labels generieren
             labeler = DailyExtremaLabeler(
                 lookforward=config.lookforward,
-                threshold_pct=config.threshold_pct
+                threshold_pct=config.threshold_pct,
+                num_classes=num_classes
             )
             self.generated_labels = labeler.generate_labels(self.data, config=config)
 
-            # Statistik berechnen
+            # Statistik berechnen - unterschiedlich fuer 2 und 3 Klassen
             unique, counts = np.unique(self.generated_labels, return_counts=True)
             label_stats = dict(zip(unique, counts))
-            num_buy = label_stats.get(1, 0)
-            num_sell = label_stats.get(2, 0)
-            num_hold = label_stats.get(0, 0)
+
+            if num_classes == 2:
+                # 2 Klassen: BUY=0, SELL=1
+                num_buy = label_stats.get(0, 0)
+                num_sell = label_stats.get(1, 0)
+                status_text = f'Labels generiert: {num_buy} BUY, {num_sell} SELL (2 Klassen)'
+            else:
+                # 3 Klassen: HOLD=0, BUY=1, SELL=2
+                num_buy = label_stats.get(1, 0)
+                num_sell = label_stats.get(2, 0)
+                num_hold = label_stats.get(0, 0)
+                status_text = f'Labels generiert: {num_buy} BUY, {num_sell} SELL, {num_hold} HOLD'
 
             # Status aktualisieren
             self.labels_valid = True
             self.features_valid = False
             self.samples_valid = False
-            self.labels_status.setText(f'Labels generiert: {num_buy} BUY, {num_sell} SELL, {num_hold} HOLD')
+            self.labels_status.setText(status_text)
             self.labels_status.setStyleSheet('color: #33b34d;')
 
             # Chart aktualisieren
@@ -576,9 +602,16 @@ class PrepareDataWindow(QMainWindow):
         close_col = 'Close' if 'Close' in self.data.columns else 'close'
         prices = self.data[close_col].values
 
-        # Finde Signal-Indizes
-        buy_indices = np.where(self.generated_labels == 1)[0]
-        sell_indices = np.where(self.generated_labels == 2)[0]
+        # Finde Signal-Indizes - abhaengig von Klassenanzahl
+        num_classes = getattr(self, 'current_num_classes', 3)
+        if num_classes == 2:
+            # 2 Klassen: BUY=0, SELL=1
+            buy_indices = np.where(self.generated_labels == 0)[0]
+            sell_indices = np.where(self.generated_labels == 1)[0]
+        else:
+            # 3 Klassen: HOLD=0, BUY=1, SELL=2
+            buy_indices = np.where(self.generated_labels == 1)[0]
+            sell_indices = np.where(self.generated_labels == 2)[0]
 
         self._update_chart(prices, list(buy_indices), list(sell_indices))
 
@@ -609,17 +642,26 @@ class PrepareDataWindow(QMainWindow):
         if not hasattr(self, 'stats_table'):
             return
 
-        # Label-Statistiken
+        # Label-Statistiken - abhaengig von Klassenanzahl
         num_buy = 0
         num_sell = 0
         num_hold = 0
+        num_classes = getattr(self, 'current_num_classes', 3)
 
         if self.generated_labels is not None:
             unique, counts = np.unique(self.generated_labels, return_counts=True)
             label_stats = dict(zip(unique, counts))
-            num_buy = label_stats.get(1, 0)
-            num_sell = label_stats.get(2, 0)
-            num_hold = label_stats.get(0, 0)
+
+            if num_classes == 2:
+                # 2 Klassen: BUY=0, SELL=1
+                num_buy = label_stats.get(0, 0)
+                num_sell = label_stats.get(1, 0)
+                num_hold = 0  # Kein HOLD bei 2 Klassen
+            else:
+                # 3 Klassen: HOLD=0, BUY=1, SELL=2
+                num_buy = label_stats.get(1, 0)
+                num_sell = label_stats.get(2, 0)
+                num_hold = label_stats.get(0, 0)
 
         total = num_buy + num_sell + num_hold
 
@@ -1115,6 +1157,24 @@ class PrepareDataWindow(QMainWindow):
         self.preview_computed = False
         self.generate_btn.setEnabled(False)
 
+    def _update_hold_visibility(self):
+        """Deaktiviert HOLD-Samples-Gruppe bei 2 Klassen."""
+        if not hasattr(self, 'num_classes_combo') or not hasattr(self, 'include_hold_cb'):
+            return
+
+        num_classes = 3 if self.num_classes_combo.currentIndex() == 0 else 2
+
+        if num_classes == 2:
+            # Bei 2 Klassen: HOLD deaktivieren
+            self.include_hold_cb.setChecked(False)
+            self.include_hold_cb.setEnabled(False)
+            self.hold_ratio_slider.setEnabled(False)
+            self.params['include_hold'] = False
+        else:
+            # Bei 3 Klassen: HOLD aktivieren
+            self.include_hold_cb.setEnabled(True)
+            self.hold_ratio_slider.setEnabled(self.include_hold_cb.isChecked())
+
     def _update_distance(self, value: int):
         """Aktualisiert den Mindestabstand-Faktor."""
         self.params['min_distance_factor'] = value / 100.0
@@ -1455,20 +1515,34 @@ class PrepareDataWindow(QMainWindow):
 
             # Verwende die bereits generierten Labels aus Tab 1
             labels = self.generated_labels
+            num_classes = getattr(self, 'current_num_classes', 3)
 
-            # Finde Signal-Indizes (ohne Randbereich)
+            # Finde Signal-Indizes (ohne Randbereich) - abhaengig von Klassenanzahl
             buy_indices = []
             sell_indices = []
 
+            if num_classes == 2:
+                # 2 Klassen: BUY=0, SELL=1
+                buy_label = 0
+                sell_label = 1
+            else:
+                # 3 Klassen: BUY=1, SELL=2
+                buy_label = 1
+                sell_label = 2
+
             for i in range(lookback, len(prices) - lookforward):
-                if labels[i] == 1:  # BUY
+                if labels[i] == buy_label:
                     buy_indices.append(i)
-                elif labels[i] == 2:  # SELL
+                elif labels[i] == sell_label:
                     sell_indices.append(i)
 
             num_buy = len(buy_indices)
             num_sell = len(sell_indices)
-            num_hold = int((num_buy + num_sell) * self.params['hold_ratio']) if self.params['include_hold'] else 0
+            # Bei 2 Klassen: Kein HOLD
+            if num_classes == 2:
+                num_hold = 0
+            else:
+                num_hold = int((num_buy + num_sell) * self.params['hold_ratio']) if self.params['include_hold'] else 0
             total = num_buy + num_sell + num_hold
 
             # Feature-Anzahl aus der zentralen Methode
@@ -1476,7 +1550,7 @@ class PrepareDataWindow(QMainWindow):
 
             seq_len = lookback + lookforward
 
-            # Speichere Info
+            # Speichere Info (inkl. num_classes fuer TrainingWindow)
             self.result_info = {
                 'num_buy': num_buy,
                 'num_sell': num_sell,
@@ -1484,6 +1558,7 @@ class PrepareDataWindow(QMainWindow):
                 'total': total,
                 'seq_len': seq_len,
                 'num_features': num_features,
+                'num_classes': num_classes,
                 'buy_indices': buy_indices,
                 'sell_indices': sell_indices,
             }
@@ -1561,11 +1636,12 @@ class PrepareDataWindow(QMainWindow):
         try:
             # Hier wuerde die eigentliche Daten-Generierung stattfinden
             # Demo: Erstelle Dummy-Daten
+            num_classes = self.result_info.get('num_classes', 3)
             training_data = {
                 'X': np.random.randn(self.result_info['total'],
                                     self.result_info['seq_len'],
                                     self.result_info['num_features']),
-                'Y': np.random.randint(0, 3, self.result_info['total']),
+                'Y': np.random.randint(0, num_classes, self.result_info['total']),
                 'params': self.params,
             }
 

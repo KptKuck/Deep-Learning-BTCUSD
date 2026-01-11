@@ -38,6 +38,8 @@ class LabelingConfig:
     # Gemeinsame Parameter
     lookforward: int = 100
     threshold_pct: float = 2.0
+    # Anzahl Klassen: 2 (BUY/SELL) oder 3 (BUY/HOLD/SELL)
+    num_classes: int = 3
     # ZigZag Parameter
     zigzag_threshold: float = 5.0
 
@@ -75,28 +77,55 @@ class DailyExtremaLabeler:
     Die Labels werden basierend auf zukuenftigen Preisbewegungen generiert:
     - BUY: Preis steigt signifikant innerhalb des lookforward-Fensters
     - SELL: Preis faellt signifikant innerhalb des lookforward-Fensters
-    - HOLD: Keine signifikante Bewegung
+    - HOLD: Keine signifikante Bewegung (nur bei 3 Klassen)
+
+    Unterstuetzt 2 oder 3 Klassen:
+    - 2 Klassen: BUY (0), SELL (1) - binaere Klassifikation
+    - 3 Klassen: HOLD (0), BUY (1), SELL (2) - mit neutraler Klasse
 
     Attributes:
         lookforward: Anzahl Perioden fuer Label-Bestimmung
         threshold_pct: Minimale Preisaenderung fuer BUY/SELL (in %)
+        num_classes: Anzahl Klassen (2 oder 3)
     """
 
-    # Label-Mapping
-    LABELS = {'HOLD': 0, 'BUY': 1, 'SELL': 2}
-    LABEL_NAMES = ['HOLD', 'BUY', 'SELL']
+    # Label-Mapping fuer 3 Klassen (Standard)
+    LABELS_3 = {'HOLD': 0, 'BUY': 1, 'SELL': 2}
+    LABEL_NAMES_3 = ['HOLD', 'BUY', 'SELL']
 
-    def __init__(self, lookforward: int = 100, threshold_pct: float = 2.0):
+    # Label-Mapping fuer 2 Klassen (binaer)
+    LABELS_2 = {'BUY': 0, 'SELL': 1}
+    LABEL_NAMES_2 = ['BUY', 'SELL']
+
+    # Default (3 Klassen) - fuer Rueckwaertskompatibilitaet
+    LABELS = LABELS_3
+    LABEL_NAMES = LABEL_NAMES_3
+
+    def __init__(self, lookforward: int = 100, threshold_pct: float = 2.0, num_classes: int = 3):
         """
         Initialisiert den Labeler.
 
         Args:
             lookforward: Anzahl Perioden fuer Zukunftsbetrachtung
             threshold_pct: Schwellwert fuer signifikante Bewegung (%)
+            num_classes: Anzahl Klassen (2=BUY/SELL, 3=BUY/HOLD/SELL)
         """
         self.lookforward = lookforward
         self.threshold_pct = threshold_pct
+        self.num_classes = num_classes
         self.logger = get_logger()
+
+        # Label-Mapping basierend auf Klassenanzahl setzen
+        self._set_label_mapping(num_classes)
+
+    def _set_label_mapping(self, num_classes: int):
+        """Setzt das Label-Mapping basierend auf der Klassenanzahl."""
+        if num_classes == 2:
+            self.LABELS = self.LABELS_2
+            self.LABEL_NAMES = self.LABEL_NAMES_2
+        else:
+            self.LABELS = self.LABELS_3
+            self.LABEL_NAMES = self.LABEL_NAMES_3
 
     def find_daily_extrema(self, df: pd.DataFrame) -> Tuple[List[Extremum], List[Extremum]]:
         """
@@ -161,7 +190,9 @@ class DailyExtremaLabeler:
             config: LabelingConfig mit Methode und Parametern (bevorzugt)
 
         Returns:
-            NumPy Array mit Labels (0=HOLD, 1=BUY, 2=SELL)
+            NumPy Array mit Labels:
+            - 2 Klassen: 0=BUY, 1=SELL
+            - 3 Klassen: 0=HOLD, 1=BUY, 2=SELL
         """
         # Config erstellen falls nur method angegeben
         if config is None:
@@ -170,12 +201,17 @@ class DailyExtremaLabeler:
             config = LabelingConfig(
                 method=LabelingMethod(method) if method in [m.value for m in LabelingMethod] else LabelingMethod.FUTURE_RETURN,
                 lookforward=self.lookforward,
-                threshold_pct=self.threshold_pct
+                threshold_pct=self.threshold_pct,
+                num_classes=self.num_classes
             )
+
+        # Label-Mapping aktualisieren basierend auf Config
+        self._set_label_mapping(config.num_classes)
+        self.num_classes = config.num_classes
 
         # Methode ausfuehren
         if config.method == LabelingMethod.FUTURE_RETURN:
-            return self._label_by_future_return(df)
+            return self._label_by_future_return(df, config)
         elif config.method == LabelingMethod.ZIGZAG:
             return self._label_by_zigzag(df, config)
         elif config.method == LabelingMethod.PEAKS:
@@ -185,23 +221,29 @@ class DailyExtremaLabeler:
         elif config.method == LabelingMethod.PIVOTS:
             return self._label_by_pivots(df, config)
         elif config.method == LabelingMethod.EXTREMA_DAILY:
-            return self._label_by_extrema(df)
+            return self._label_by_extrema(df, config)
         elif config.method == LabelingMethod.BINARY:
-            return self._label_binary(df)
+            return self._label_binary(df, config)
         else:
             self.logger.error(f'Unbekannte Label-Methode: {config.method}')
             return np.zeros(len(df), dtype=np.int64)
 
-    def _label_by_future_return(self, df: pd.DataFrame) -> np.ndarray:
+    def _label_by_future_return(self, df: pd.DataFrame, config: Optional[LabelingConfig] = None) -> np.ndarray:
         """
         Labelt basierend auf zukuenftiger Rendite.
 
+        3 Klassen:
         - BUY: Max-Rendite > threshold
         - SELL: Min-Rendite < -threshold
         - HOLD: Sonst
+
+        2 Klassen (kein HOLD):
+        - BUY: Max-Rendite > abs(Min-Rendite)
+        - SELL: abs(Min-Rendite) >= Max-Rendite
         """
         n = len(df)
-        labels = np.zeros(n, dtype=np.int64)  # Default: HOLD
+        num_classes = config.num_classes if config else self.num_classes
+        labels = np.zeros(n, dtype=np.int64)
 
         close_prices = df['Close'].values
 
@@ -213,62 +255,77 @@ class DailyExtremaLabeler:
             max_return = ((future_prices.max() - current_price) / current_price) * 100
             min_return = ((future_prices.min() - current_price) / current_price) * 100
 
-            if max_return > self.threshold_pct and max_return > abs(min_return):
-                labels[i] = self.LABELS['BUY']
-            elif min_return < -self.threshold_pct and abs(min_return) > max_return:
-                labels[i] = self.LABELS['SELL']
-            # Sonst bleibt HOLD (0)
+            if num_classes == 2:
+                # Binaer: BUY oder SELL (kein HOLD)
+                if max_return > abs(min_return):
+                    labels[i] = self.LABELS['BUY']  # 0
+                else:
+                    labels[i] = self.LABELS['SELL']  # 1
+            else:
+                # 3 Klassen mit Threshold
+                if max_return > self.threshold_pct and max_return > abs(min_return):
+                    labels[i] = self.LABELS['BUY']  # 1
+                elif min_return < -self.threshold_pct and abs(min_return) > max_return:
+                    labels[i] = self.LABELS['SELL']  # 2
+                # Sonst bleibt HOLD (0)
 
-        # Logging der Label-Verteilung
-        unique, counts = np.unique(labels, return_counts=True)
-        for u, c in zip(unique, counts):
-            pct = c / n * 100
-            self.logger.debug(f'Label {self.LABEL_NAMES[u]}: {c} ({pct:.1f}%)')
-
+        self._log_label_distribution(labels)
         return labels
 
-    def _label_by_extrema(self, df: pd.DataFrame) -> np.ndarray:
+    def _label_by_extrema(self, df: pd.DataFrame, config: Optional[LabelingConfig] = None) -> np.ndarray:
         """
         Labelt basierend auf lokalen Extrema.
 
         - BUY: Nahe einem lokalen Tief
         - SELL: Nahe einem lokalen Hoch
-        - HOLD: Sonst
+        - HOLD: Sonst (nur bei 3 Klassen)
         """
         n = len(df)
-        labels = np.zeros(n, dtype=np.int64)
+        num_classes = config.num_classes if config else self.num_classes
+        # Erst mit 3-Klassen-Mapping arbeiten
+        labels_3class = np.zeros(n, dtype=np.int64)
 
         highs, lows = self.find_daily_extrema(df)
 
-        # Extrema-Indizes markieren
+        # Extrema-Indizes markieren (immer mit 3-Klassen-Mapping)
         for high in highs:
             if 0 <= high.index < n:
-                labels[high.index] = self.LABELS['SELL']
+                labels_3class[high.index] = self.LABELS_3['SELL']  # 2
 
         for low in lows:
             if 0 <= low.index < n:
-                labels[low.index] = self.LABELS['BUY']
+                labels_3class[low.index] = self.LABELS_3['BUY']  # 1
 
+        # Bei 2 Klassen: Konvertieren
+        if num_classes == 2:
+            labels = self._fill_hold_labels_binary(labels_3class, df)
+        else:
+            labels = labels_3class
+
+        self._log_label_distribution(labels)
         return labels
 
-    def _label_binary(self, df: pd.DataFrame) -> np.ndarray:
+    def _label_binary(self, df: pd.DataFrame, config: Optional[LabelingConfig] = None) -> np.ndarray:
         """
-        Binaeres Labeling: UP oder DOWN (kein HOLD).
+        Binaeres Labeling: UP oder DOWN (immer 2 Klassen, unabhaengig von config).
 
-        - BUY (1): Naechster Close > aktueller Close
-        - SELL (2): Naechster Close <= aktueller Close
+        - BUY: Naechster Close > aktueller Close
+        - SELL: Naechster Close <= aktueller Close
         """
         n = len(df)
+        # Binary-Methode erzwingt 2 Klassen
+        self._set_label_mapping(2)
         labels = np.zeros(n, dtype=np.int64)
 
         close_prices = df['Close'].values
 
         for i in range(n - 1):
             if close_prices[i + 1] > close_prices[i]:
-                labels[i] = self.LABELS['BUY']
+                labels[i] = self.LABELS['BUY']  # 0
             else:
-                labels[i] = self.LABELS['SELL']
+                labels[i] = self.LABELS['SELL']  # 1
 
+        self._log_label_distribution(labels)
         return labels
 
     # =========================================================================
@@ -581,7 +638,8 @@ class DailyExtremaLabeler:
     def _label_by_zigzag(self, df: pd.DataFrame, config: LabelingConfig) -> np.ndarray:
         """Labelt basierend auf ZigZag-Extrema."""
         n = len(df)
-        labels = np.zeros(n, dtype=np.int64)
+        # Erst mit 3-Klassen-Mapping arbeiten
+        labels_3class = np.zeros(n, dtype=np.int64)
 
         high_indices, low_indices = self.find_zigzag_extrema(
             df, threshold_pct=config.zigzag_threshold
@@ -589,11 +647,17 @@ class DailyExtremaLabeler:
 
         for idx in high_indices:
             if 0 <= idx < n:
-                labels[idx] = self.LABELS['SELL']
+                labels_3class[idx] = self.LABELS_3['SELL']
 
         for idx in low_indices:
             if 0 <= idx < n:
-                labels[idx] = self.LABELS['BUY']
+                labels_3class[idx] = self.LABELS_3['BUY']
+
+        # Bei 2 Klassen: Konvertieren
+        if config.num_classes == 2:
+            labels = self._fill_hold_labels_binary(labels_3class, df)
+        else:
+            labels = labels_3class
 
         self._log_label_distribution(labels)
         return labels
@@ -601,18 +665,25 @@ class DailyExtremaLabeler:
     def _label_by_peaks(self, df: pd.DataFrame, config: LabelingConfig) -> np.ndarray:
         """Labelt basierend auf Peak-Detection mit allen scipy.signal.find_peaks Parametern."""
         n = len(df)
-        labels = np.zeros(n, dtype=np.int64)
+        # Erst mit 3-Klassen-Mapping arbeiten
+        labels_3class = np.zeros(n, dtype=np.int64)
 
         # Verwende die volle Config mit allen Parametern
         high_indices, low_indices = self.find_peaks_extrema(df, config=config)
 
         for idx in high_indices:
             if 0 <= idx < n:
-                labels[idx] = self.LABELS['SELL']
+                labels_3class[idx] = self.LABELS_3['SELL']
 
         for idx in low_indices:
             if 0 <= idx < n:
-                labels[idx] = self.LABELS['BUY']
+                labels_3class[idx] = self.LABELS_3['BUY']
+
+        # Bei 2 Klassen: Konvertieren
+        if config.num_classes == 2:
+            labels = self._fill_hold_labels_binary(labels_3class, df)
+        else:
+            labels = labels_3class
 
         self._log_label_distribution(labels)
         return labels
@@ -620,7 +691,8 @@ class DailyExtremaLabeler:
     def _label_by_fractals(self, df: pd.DataFrame, config: LabelingConfig) -> np.ndarray:
         """Labelt basierend auf Williams Fractals."""
         n = len(df)
-        labels = np.zeros(n, dtype=np.int64)
+        # Erst mit 3-Klassen-Mapping arbeiten
+        labels_3class = np.zeros(n, dtype=np.int64)
 
         high_indices, low_indices = self.find_williams_fractals(
             df, order=config.fractal_order
@@ -628,11 +700,17 @@ class DailyExtremaLabeler:
 
         for idx in high_indices:
             if 0 <= idx < n:
-                labels[idx] = self.LABELS['SELL']
+                labels_3class[idx] = self.LABELS_3['SELL']
 
         for idx in low_indices:
             if 0 <= idx < n:
-                labels[idx] = self.LABELS['BUY']
+                labels_3class[idx] = self.LABELS_3['BUY']
+
+        # Bei 2 Klassen: Konvertieren
+        if config.num_classes == 2:
+            labels = self._fill_hold_labels_binary(labels_3class, df)
+        else:
+            labels = labels_3class
 
         self._log_label_distribution(labels)
         return labels
@@ -640,7 +718,8 @@ class DailyExtremaLabeler:
     def _label_by_pivots(self, df: pd.DataFrame, config: LabelingConfig) -> np.ndarray:
         """Labelt basierend auf Pivot Points."""
         n = len(df)
-        labels = np.zeros(n, dtype=np.int64)
+        # Erst mit 3-Klassen-Mapping arbeiten
+        labels_3class = np.zeros(n, dtype=np.int64)
 
         high_indices, low_indices = self.find_pivot_points(
             df, lookback=config.pivot_lookback
@@ -648,14 +727,61 @@ class DailyExtremaLabeler:
 
         for idx in high_indices:
             if 0 <= idx < n:
-                labels[idx] = self.LABELS['SELL']
+                labels_3class[idx] = self.LABELS_3['SELL']
 
         for idx in low_indices:
             if 0 <= idx < n:
-                labels[idx] = self.LABELS['BUY']
+                labels_3class[idx] = self.LABELS_3['BUY']
+
+        # Bei 2 Klassen: Konvertieren
+        if config.num_classes == 2:
+            labels = self._fill_hold_labels_binary(labels_3class, df)
+        else:
+            labels = labels_3class
 
         self._log_label_distribution(labels)
         return labels
+
+    def _fill_hold_labels_binary(self, labels: np.ndarray, df: pd.DataFrame) -> np.ndarray:
+        """
+        Fuer 2-Klassen: Fuellt ungelabelte Datenpunkte basierend auf Preistrend.
+
+        Bei Extrema-basierten Methoden bleiben viele Punkte ohne Label (urspruenglich HOLD).
+        Diese werden hier basierend auf dem Trend zum naechsten Extremum gelabelt.
+
+        Args:
+            labels: Array mit Labels (enthaelt noch 3-Klassen-Mapping)
+            df: DataFrame mit Preisdaten
+
+        Returns:
+            Array mit 2-Klassen Labels (0=BUY, 1=SELL)
+        """
+        n = len(labels)
+        close = df['Close'].values
+        result = np.zeros(n, dtype=np.int64)
+
+        # Finde alle Signal-Punkte (nicht HOLD)
+        # Bei 3-Klassen: BUY=1, SELL=2, HOLD=0
+        buy_indices = np.where(labels == 1)[0]  # BUY bei 3-Klassen
+        sell_indices = np.where(labels == 2)[0]  # SELL bei 3-Klassen
+
+        # Setze 2-Klassen Labels: BUY=0, SELL=1
+        result[buy_indices] = 0  # BUY
+        result[sell_indices] = 1  # SELL
+
+        # Fuell die Luecken basierend auf Preistrend
+        for i in range(n):
+            if labels[i] == 0:  # War HOLD
+                # Schau auf naechste Periode
+                if i < n - 1:
+                    if close[i + 1] > close[i]:
+                        result[i] = 0  # BUY
+                    else:
+                        result[i] = 1  # SELL
+                else:
+                    result[i] = 0  # Letzter Punkt: Default BUY
+
+        return result
 
     def _log_label_distribution(self, labels: np.ndarray) -> None:
         """Loggt die Label-Verteilung."""
@@ -663,7 +789,8 @@ class DailyExtremaLabeler:
         unique, counts = np.unique(labels, return_counts=True)
         for u, c in zip(unique, counts):
             pct = c / n * 100
-            self.logger.debug(f'Label {self.LABEL_NAMES[u]}: {c} ({pct:.1f}%)')
+            label_name = self.LABEL_NAMES[u] if u < len(self.LABEL_NAMES) else f'Unknown({u})'
+            self.logger.debug(f'Label {label_name}: {c} ({pct:.1f}%)')
 
     def get_label_weights(self, labels: np.ndarray) -> np.ndarray:
         """

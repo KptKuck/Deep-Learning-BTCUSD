@@ -803,14 +803,21 @@ class TrainingWindow(QMainWindow):
             sample = next(iter(self.train_loader))
             input_size = sample[0].shape[-1]
 
+            # num_classes aus training_info holen (falls vorhanden), sonst default 3
+            num_classes = 3
+            if self.training_info and 'num_classes' in self.training_info:
+                num_classes = self.training_info['num_classes']
+
             self.model = ModelFactory.create(
                 model_name,
                 input_size=input_size,
                 hidden_size=self.hidden_size_spin.value(),
                 num_layers=self.num_layers_spin.value(),
-                num_classes=3,
+                num_classes=num_classes,
                 dropout=self.dropout_spin.value()
             )
+
+            self._log(f"Klassenanzahl: {num_classes}")
 
             self._log(f"Modell erstellt: {self.model.name}")
             self._log(f"Parameter: {sum(p.numel() for p in self.model.parameters()):,}")
