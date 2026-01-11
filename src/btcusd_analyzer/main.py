@@ -21,7 +21,11 @@ def main():
 
     # GPU-Status pruefen
     from btcusd_analyzer.utils.helpers import get_gpu_info
+    logger.debug(f'Python: {sys.executable}')
     gpu_info = get_gpu_info()
+    logger.debug(f'PyTorch: {gpu_info.get("torch_version", "N/A")}, CUDA: {gpu_info.get("cuda_version", "N/A")}')
+    if gpu_info.get('error'):
+        logger.error(f'GPU-Fehler: {gpu_info["error"]}')
     if gpu_info['cuda_available']:
         logger.success(f'GPU verfuegbar: {gpu_info["devices"][0]["name"]}')
     else:
@@ -78,8 +82,13 @@ def cli_mode(base_dir: Path, logger):
         except KeyboardInterrupt:
             print('\nAbgebrochen')
             break
+        except EOFError:
+            # Kein interaktives Terminal verfuegbar
+            logger.info('Kein interaktives Terminal - CLI-Modus beendet')
+            break
         except Exception as e:
             logger.error(f'Fehler: {e}')
+            break  # Bei unerwarteten Fehlern beenden statt Endlosschleife
 
 
 def _cli_load_data(base_dir: Path, logger):

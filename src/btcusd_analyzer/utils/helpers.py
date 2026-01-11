@@ -206,6 +206,8 @@ def get_gpu_info() -> dict:
     try:
         import torch
         info['cuda_available'] = torch.cuda.is_available()
+        info['torch_version'] = torch.__version__
+        info['cuda_version'] = torch.version.cuda if torch.version.cuda else 'N/A'
 
         if info['cuda_available']:
             info['device_count'] = torch.cuda.device_count()
@@ -219,7 +221,9 @@ def get_gpu_info() -> dict:
                 })
 
     except ImportError:
-        pass
+        info['error'] = 'PyTorch nicht installiert'
+    except Exception as e:
+        info['error'] = str(e)
 
     return info
 

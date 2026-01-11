@@ -51,6 +51,10 @@ btc_analyzer_python/
 - Paket installieren: `pip install -e .`
 - PyTorch mit CUDA 12.8: `pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128`
 
+## Wichtige Pfade
+- **Log-Verzeichnis:** `C:\Work\MatLab\btc_analyzer_python\log`
+  - Bei Aufforderung "Log pruefen" immer zuerst hier nachschauen
+
 ## Praeferenzen
 - Keine Emojis im Code oder Kommentaren
 - Kompakte Antworten bevorzugt
