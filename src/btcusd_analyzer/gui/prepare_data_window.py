@@ -547,13 +547,13 @@ class PrepareDataWindow(QMainWindow):
                 pivot_lookback=self.pivot_lookback_spin.value(),
             )
 
-            # Labeler erstellen und Labels generieren
-            labeler = DailyExtremaLabeler(
+            # Labeler erstellen und Labels generieren (labeler speichern fuer Signal-Indizes)
+            self.labeler = DailyExtremaLabeler(
                 lookforward=config.lookforward,
                 threshold_pct=config.threshold_pct,
                 num_classes=num_classes
             )
-            self.generated_labels = labeler.generate_labels(self.data, config=config)
+            self.generated_labels = self.labeler.generate_labels(self.data, config=config)
 
             # Statistik berechnen - unterschiedlich fuer 2 und 3 Klassen
             unique, counts = np.unique(self.generated_labels, return_counts=True)
@@ -575,6 +575,7 @@ class PrepareDataWindow(QMainWindow):
             self.labels_valid = True
             self.features_valid = False
             self.samples_valid = False
+            self.result_info = {}  # Sample-Info zuruecksetzen bis zur Preview
             self.labels_status.setText(status_text)
             self.labels_status.setStyleSheet('color: #33b34d;')
 
@@ -602,18 +603,21 @@ class PrepareDataWindow(QMainWindow):
         close_col = 'Close' if 'Close' in self.data.columns else 'close'
         prices = self.data[close_col].values
 
-        # Finde Signal-Indizes - abhaengig von Klassenanzahl
-        num_classes = getattr(self, 'current_num_classes', 3)
-        if num_classes == 2:
-            # 2 Klassen: BUY=0, SELL=1
-            buy_indices = np.where(self.generated_labels == 0)[0]
-            sell_indices = np.where(self.generated_labels == 1)[0]
+        # Signal-Indizes aus dem Labeler verwenden (echte Extrema/Peaks)
+        if hasattr(self, 'labeler') and self.labeler:
+            buy_indices = self.labeler.buy_signal_indices
+            sell_indices = self.labeler.sell_signal_indices
         else:
-            # 3 Klassen: HOLD=0, BUY=1, SELL=2
-            buy_indices = np.where(self.generated_labels == 1)[0]
-            sell_indices = np.where(self.generated_labels == 2)[0]
+            # Fallback: Aus Labels berechnen
+            num_classes = getattr(self, 'current_num_classes', 3)
+            if num_classes == 2:
+                buy_indices = list(np.where(self.generated_labels == 0)[0])
+                sell_indices = list(np.where(self.generated_labels == 1)[0])
+            else:
+                buy_indices = list(np.where(self.generated_labels == 1)[0])
+                sell_indices = list(np.where(self.generated_labels == 2)[0])
 
-        self._update_chart(prices, list(buy_indices), list(sell_indices))
+        self._update_chart(prices, buy_indices, sell_indices)
 
     def _update_tab_status(self):
         """Aktualisiert Tab-Status basierend auf Validitaet."""
@@ -642,28 +646,33 @@ class PrepareDataWindow(QMainWindow):
         if not hasattr(self, 'stats_table'):
             return
 
-        # Label-Statistiken - abhaengig von Klassenanzahl
-        num_buy = 0
-        num_sell = 0
-        num_hold = 0
+        # Signal-Statistiken aus Labeler (echte Extrema/Peaks)
+        num_buy_signals = 0
+        num_sell_signals = 0
+        num_hold_signals = 0
         num_classes = getattr(self, 'current_num_classes', 3)
 
-        if self.generated_labels is not None:
-            unique, counts = np.unique(self.generated_labels, return_counts=True)
-            label_stats = dict(zip(unique, counts))
+        if hasattr(self, 'labeler') and self.labeler:
+            # Echte Signal-Indizes aus dem Labeler
+            num_buy_signals = len(self.labeler.buy_signal_indices)
+            num_sell_signals = len(self.labeler.sell_signal_indices)
+            # HOLD-Signale nur bei 3 Klassen (alle nicht BUY/SELL)
+            if num_classes == 3 and self.generated_labels is not None:
+                unique, counts = np.unique(self.generated_labels, return_counts=True)
+                label_stats = dict(zip(unique, counts))
+                num_hold_signals = label_stats.get(0, 0)
 
-            if num_classes == 2:
-                # 2 Klassen: BUY=0, SELL=1
-                num_buy = label_stats.get(0, 0)
-                num_sell = label_stats.get(1, 0)
-                num_hold = 0  # Kein HOLD bei 2 Klassen
-            else:
-                # 3 Klassen: HOLD=0, BUY=1, SELL=2
-                num_buy = label_stats.get(1, 0)
-                num_sell = label_stats.get(2, 0)
-                num_hold = label_stats.get(0, 0)
+        # Sample-Statistiken (aus result_info nach Preview) - nur gueltige Sequenzen
+        num_buy_samples = 0
+        num_sell_samples = 0
+        num_hold_samples = 0
+        total_samples = 0
 
-        total = num_buy + num_sell + num_hold
+        if hasattr(self, 'result_info') and self.result_info:
+            num_buy_samples = self.result_info.get('num_buy', 0)
+            num_sell_samples = self.result_info.get('num_sell', 0)
+            num_hold_samples = self.result_info.get('num_hold', 0)
+            total_samples = self.result_info.get('total', 0)
 
         # Feature-Anzahl berechnen
         num_features = self._count_selected_features()
@@ -676,9 +685,9 @@ class PrepareDataWindow(QMainWindow):
         if hasattr(self, 'lookforward_spin'):
             lookforward = self.lookforward_spin.value()
 
-        # Balance berechnen
-        if total > 0 and num_buy > 0 and num_sell > 0:
-            balance = f'{num_buy / num_sell:.2f}' if num_sell > 0 else '-'
+        # Balance berechnen (BUY/SELL Samples)
+        if num_buy_samples > 0 and num_sell_samples > 0:
+            balance = f'{num_buy_samples / num_sell_samples:.2f}'
         else:
             balance = '-'
 
@@ -687,21 +696,25 @@ class PrepareDataWindow(QMainWindow):
         if hasattr(self, 'norm_combo'):
             norm_method = self.norm_combo.currentText()
 
-        # Stats aktualisieren
+        # Stats aktualisieren - neue Struktur mit Signalen UND Samples
         stats_values = [
-            str(num_buy) if num_buy > 0 else '-',      # BUY Signale
-            str(num_sell) if num_sell > 0 else '-',    # SELL Signale
-            str(num_hold) if num_hold > 0 else '-',    # HOLD Samples
-            str(total) if total > 0 else '-',          # Gesamt
-            '---',                                      # Separator
-            str(lookback + lookforward),               # Sequenzlaenge
-            str(num_features) if num_features > 0 else '-',  # Features
+            str(num_buy_signals) if num_buy_signals > 0 else '-',      # BUY Signale
+            str(num_sell_signals) if num_sell_signals > 0 else '-',    # SELL Signale
+            str(num_hold_signals) if num_hold_signals > 0 else '-',    # HOLD Signale
+            '---',                                                      # Separator
+            str(num_buy_samples) if num_buy_samples > 0 else '-',      # BUY Samples
+            str(num_sell_samples) if num_sell_samples > 0 else '-',    # SELL Samples
+            str(num_hold_samples) if num_hold_samples > 0 else '-',    # HOLD Samples
+            str(total_samples) if total_samples > 0 else '-',          # Gesamt Samples
+            '---',                                                      # Separator
+            str(lookback + lookforward),                               # Sequenzlaenge
+            str(num_features) if num_features > 0 else '-',            # Features
             f'({lookback}, {num_features})' if num_features > 0 else '-',  # Input Shape
-            balance,                                    # Balance
-            '---',                                      # Separator
-            str(lookback),                             # Lookback
-            str(lookforward),                          # Lookforward
-            norm_method,                               # Normalisierung
+            balance,                                                    # Balance
+            '---',                                                      # Separator
+            str(lookback),                                             # Lookback
+            str(lookforward),                                          # Lookforward
+            norm_method,                                               # Normalisierung
         ]
 
         # Tabellen-Zellen aktualisieren (nur Werte-Spalte)
@@ -1444,8 +1457,12 @@ class PrepareDataWindow(QMainWindow):
         initial_stats = [
             ('BUY Signale', '-'),
             ('SELL Signale', '-'),
+            ('HOLD Signale', '-'),
+            ('---', '---'),
+            ('BUY Samples', '-'),
+            ('SELL Samples', '-'),
             ('HOLD Samples', '-'),
-            ('Gesamt', '-'),
+            ('Gesamt Samples', '-'),
             ('---', '---'),
             ('Sequenzlaenge', str(self.params['lookback'] + self.params['lookforward'])),
             ('Features', '-'),

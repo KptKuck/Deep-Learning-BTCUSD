@@ -115,6 +115,10 @@ class DailyExtremaLabeler:
         self.num_classes = num_classes
         self.logger = get_logger()
 
+        # Signal-Indizes (echte Extrema/Peaks vor dem Fill)
+        self.buy_signal_indices: List[int] = []
+        self.sell_signal_indices: List[int] = []
+
         # Label-Mapping basierend auf Klassenanzahl setzen
         self._set_label_mapping(num_classes)
 
@@ -247,6 +251,10 @@ class DailyExtremaLabeler:
 
         close_prices = df['Close'].values
 
+        # Temporaere Listen fuer Signal-Indizes
+        buy_indices = []
+        sell_indices = []
+
         for i in range(n - self.lookforward):
             future_prices = close_prices[i + 1:i + 1 + self.lookforward]
             current_price = close_prices[i]
@@ -259,15 +267,23 @@ class DailyExtremaLabeler:
                 # Binaer: BUY oder SELL (kein HOLD)
                 if max_return > abs(min_return):
                     labels[i] = self.LABELS['BUY']  # 0
+                    buy_indices.append(i)
                 else:
                     labels[i] = self.LABELS['SELL']  # 1
+                    sell_indices.append(i)
             else:
                 # 3 Klassen mit Threshold
                 if max_return > self.threshold_pct and max_return > abs(min_return):
                     labels[i] = self.LABELS['BUY']  # 1
+                    buy_indices.append(i)
                 elif min_return < -self.threshold_pct and abs(min_return) > max_return:
                     labels[i] = self.LABELS['SELL']  # 2
+                    sell_indices.append(i)
                 # Sonst bleibt HOLD (0)
+
+        # Signal-Indizes speichern
+        self.buy_signal_indices = buy_indices
+        self.sell_signal_indices = sell_indices
 
         self._log_label_distribution(labels)
         return labels
@@ -287,14 +303,16 @@ class DailyExtremaLabeler:
 
         highs, lows = self.find_daily_extrema(df)
 
-        # Extrema-Indizes markieren (immer mit 3-Klassen-Mapping)
-        for high in highs:
-            if 0 <= high.index < n:
-                labels_3class[high.index] = self.LABELS_3['SELL']  # 2
+        # Signal-Indizes speichern (echte Extrema fuer Chart)
+        self.sell_signal_indices = [high.index for high in highs if 0 <= high.index < n]
+        self.buy_signal_indices = [low.index for low in lows if 0 <= low.index < n]
 
-        for low in lows:
-            if 0 <= low.index < n:
-                labels_3class[low.index] = self.LABELS_3['BUY']  # 1
+        # Extrema-Indizes markieren (immer mit 3-Klassen-Mapping)
+        for idx in self.sell_signal_indices:
+            labels_3class[idx] = self.LABELS_3['SELL']  # 2
+
+        for idx in self.buy_signal_indices:
+            labels_3class[idx] = self.LABELS_3['BUY']  # 1
 
         # Bei 2 Klassen: Konvertieren
         if num_classes == 2:
@@ -319,11 +337,21 @@ class DailyExtremaLabeler:
 
         close_prices = df['Close'].values
 
+        # Temporaere Listen fuer Signal-Indizes
+        buy_indices = []
+        sell_indices = []
+
         for i in range(n - 1):
             if close_prices[i + 1] > close_prices[i]:
                 labels[i] = self.LABELS['BUY']  # 0
+                buy_indices.append(i)
             else:
                 labels[i] = self.LABELS['SELL']  # 1
+                sell_indices.append(i)
+
+        # Signal-Indizes speichern
+        self.buy_signal_indices = buy_indices
+        self.sell_signal_indices = sell_indices
 
         self._log_label_distribution(labels)
         return labels
@@ -645,13 +673,15 @@ class DailyExtremaLabeler:
             df, threshold_pct=config.zigzag_threshold
         )
 
-        for idx in high_indices:
-            if 0 <= idx < n:
-                labels_3class[idx] = self.LABELS_3['SELL']
+        # Signal-Indizes speichern (echte Extrema fuer Chart)
+        self.sell_signal_indices = [idx for idx in high_indices if 0 <= idx < n]
+        self.buy_signal_indices = [idx for idx in low_indices if 0 <= idx < n]
 
-        for idx in low_indices:
-            if 0 <= idx < n:
-                labels_3class[idx] = self.LABELS_3['BUY']
+        for idx in self.sell_signal_indices:
+            labels_3class[idx] = self.LABELS_3['SELL']
+
+        for idx in self.buy_signal_indices:
+            labels_3class[idx] = self.LABELS_3['BUY']
 
         # Bei 2 Klassen: Konvertieren
         if config.num_classes == 2:
@@ -671,13 +701,15 @@ class DailyExtremaLabeler:
         # Verwende die volle Config mit allen Parametern
         high_indices, low_indices = self.find_peaks_extrema(df, config=config)
 
-        for idx in high_indices:
-            if 0 <= idx < n:
-                labels_3class[idx] = self.LABELS_3['SELL']
+        # Signal-Indizes speichern (echte Peaks fuer Chart)
+        self.sell_signal_indices = [idx for idx in high_indices if 0 <= idx < n]
+        self.buy_signal_indices = [idx for idx in low_indices if 0 <= idx < n]
 
-        for idx in low_indices:
-            if 0 <= idx < n:
-                labels_3class[idx] = self.LABELS_3['BUY']
+        for idx in self.sell_signal_indices:
+            labels_3class[idx] = self.LABELS_3['SELL']
+
+        for idx in self.buy_signal_indices:
+            labels_3class[idx] = self.LABELS_3['BUY']
 
         # Bei 2 Klassen: Konvertieren
         if config.num_classes == 2:
@@ -698,13 +730,15 @@ class DailyExtremaLabeler:
             df, order=config.fractal_order
         )
 
-        for idx in high_indices:
-            if 0 <= idx < n:
-                labels_3class[idx] = self.LABELS_3['SELL']
+        # Signal-Indizes speichern (echte Fractals fuer Chart)
+        self.sell_signal_indices = [idx for idx in high_indices if 0 <= idx < n]
+        self.buy_signal_indices = [idx for idx in low_indices if 0 <= idx < n]
 
-        for idx in low_indices:
-            if 0 <= idx < n:
-                labels_3class[idx] = self.LABELS_3['BUY']
+        for idx in self.sell_signal_indices:
+            labels_3class[idx] = self.LABELS_3['SELL']
+
+        for idx in self.buy_signal_indices:
+            labels_3class[idx] = self.LABELS_3['BUY']
 
         # Bei 2 Klassen: Konvertieren
         if config.num_classes == 2:
@@ -725,13 +759,15 @@ class DailyExtremaLabeler:
             df, lookback=config.pivot_lookback
         )
 
-        for idx in high_indices:
-            if 0 <= idx < n:
-                labels_3class[idx] = self.LABELS_3['SELL']
+        # Signal-Indizes speichern (echte Pivots fuer Chart)
+        self.sell_signal_indices = [idx for idx in high_indices if 0 <= idx < n]
+        self.buy_signal_indices = [idx for idx in low_indices if 0 <= idx < n]
 
-        for idx in low_indices:
-            if 0 <= idx < n:
-                labels_3class[idx] = self.LABELS_3['BUY']
+        for idx in self.sell_signal_indices:
+            labels_3class[idx] = self.LABELS_3['SELL']
+
+        for idx in self.buy_signal_indices:
+            labels_3class[idx] = self.LABELS_3['BUY']
 
         # Bei 2 Klassen: Konvertieren
         if config.num_classes == 2:
