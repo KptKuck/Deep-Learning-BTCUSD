@@ -54,9 +54,17 @@ class TrainingWorker(QThread):
             from ..trainer.trainer import Trainer
             from ..trainer.callbacks import EarlyStopping, ModelCheckpoint
 
-            # GPU Memory vor Training leeren
+            # WICHTIG: CUDA-Kontext im Worker-Thread initialisieren
+            # Das Modell muss im selben Thread auf GPU verschoben werden,
+            # in dem auch das Training stattfindet
             if self.device.type == 'cuda':
+                # Neuen CUDA-Kontext fuer diesen Thread erstellen
+                torch.cuda.set_device(0)
                 torch.cuda.empty_cache()
+
+                # Modell im Worker-Thread auf GPU verschieben
+                self.model = self.model.to(self.device)
+                self.log_message.emit(f"Modell auf GPU verschoben (im Worker-Thread)")
                 self.log_message.emit(f"GPU Memory geleert")
 
             # Callbacks
@@ -153,15 +161,25 @@ class TrainingWorker(QThread):
             self.training_error.emit(error_msg)
 
         except Exception as e:
-            # Allgemeiner Fehler
+            # Allgemeiner Fehler - detailliertes Logging
             import traceback
-            error_msg = f"Training Fehler: {e}\n\n{traceback.format_exc()}"
+            import sys
+
+            exc_type, exc_value, exc_tb = sys.exc_info()
+            tb_lines = traceback.format_exception(exc_type, exc_value, exc_tb)
+
+            error_msg = f"Training Fehler: {e}\n\nTyp: {exc_type.__name__}\n\nTraceback:\n{''.join(tb_lines)}"
+            self.log_message.emit(f"KRITISCHER FEHLER: {error_msg}")
             self.training_error.emit(error_msg)
 
         finally:
             # Speicher aufraeumen
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            try:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+            except Exception:
+                pass  # Ignorieren wenn Cleanup fehlschlaegt
 
     def stop(self):
         """Stoppt das Training."""
