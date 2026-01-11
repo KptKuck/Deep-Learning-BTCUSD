@@ -131,8 +131,9 @@ class TrainingWindow(QMainWindow):
     - Stop/Resume Funktion
     """
 
-    # Signal fuer Log-Meldungen an MainWindow
+    # Signals
     log_message = pyqtSignal(str, str)  # message, level
+    training_completed = pyqtSignal(object, object)  # model, results
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -146,6 +147,10 @@ class TrainingWindow(QMainWindow):
         self.val_loader = None
         self.worker = None
         self.history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
+
+        # Trainingsdaten (werden von MainWindow gesetzt)
+        self.training_data = None
+        self.training_info = None
 
         # Device
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

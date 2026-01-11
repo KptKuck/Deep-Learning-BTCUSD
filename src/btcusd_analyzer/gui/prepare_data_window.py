@@ -684,8 +684,7 @@ class PrepareDataWindow(QMainWindow):
         self.status_label.setStyleSheet('color: #4da8da;')
 
         try:
-            # Hier wuerde die eigentliche Berechnung stattfinden
-            # Vereinfachte Demo-Implementierung
+            from ..training.labeler import DailyExtremaLabeler
 
             close_col = 'Close' if 'Close' in self.data.columns else 'close'
             prices = self.data[close_col].values
@@ -693,21 +692,29 @@ class PrepareDataWindow(QMainWindow):
             lookback = self.params['lookback']
             lookforward = self.params['lookforward']
 
-            # Finde Signale (vereinfacht)
+            # Verwende echten Labeler
+            labeler = DailyExtremaLabeler(
+                lookforward=lookforward,
+                threshold_pct=2.0  # Standard Schwellwert
+            )
+
+            # Generiere Labels basierend auf Auto-Modus
+            if self.params['auto_gen']:
+                # Auto-Modus: Future Return Methode
+                labels = labeler.generate_labels(self.data, method='future_return')
+            else:
+                # Manuell: Extrema-basiert
+                labels = labeler.generate_labels(self.data, method='extrema')
+
+            # Finde Signal-Indizes (ohne Randbereich)
             buy_indices = []
             sell_indices = []
 
             for i in range(lookback, len(prices) - lookforward):
-                # Lokales Minimum = BUY
-                if prices[i] == min(prices[i-5:i+5]):
+                if labels[i] == 1:  # BUY
                     buy_indices.append(i)
-                # Lokales Maximum = SELL
-                elif prices[i] == max(prices[i-5:i+5]):
+                elif labels[i] == 2:  # SELL
                     sell_indices.append(i)
-
-            # Limitiere auf vernuenftige Anzahl
-            buy_indices = buy_indices[:100]
-            sell_indices = sell_indices[:100]
 
             num_buy = len(buy_indices)
             num_sell = len(sell_indices)

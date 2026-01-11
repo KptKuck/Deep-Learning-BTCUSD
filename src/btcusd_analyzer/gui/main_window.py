@@ -12,10 +12,11 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QGroupBox, QStatusBar, QScrollArea,
     QFileDialog, QMessageBox, QComboBox, QFrame, QDateEdit,
-    QTextEdit, QSlider, QCheckBox, QSplitter
+    QTextEdit, QSlider, QCheckBox, QSplitter, QTableWidget,
+    QTableWidgetItem, QHeaderView
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QDate
-from PyQt6.QtGui import QFont, QAction
+from PyQt6.QtGui import QFont, QAction, QColor
 
 import logging
 
@@ -50,7 +51,8 @@ class GUILogHandler(logging.Handler):
                 level = 'TIMING'
                 msg = msg[8:].strip()  # [TIMING] prefix entfernen
 
-            self.callback(msg, level)
+            # _from_handler=True verhindert doppeltes Logging in die Datei
+            self.callback(msg, level, _from_handler=True)
         except Exception:
             self.handleError(record)
 
@@ -683,12 +685,97 @@ class MainWindow(QMainWindow):
 
         return group
 
+    def _create_status_table(self) -> QWidget:
+        """Erstellt die Status-Tabelle fuer Trainingsdaten-Status."""
+        frame = QFrame()
+        frame.setStyleSheet('''
+            QFrame {
+                background-color: #1a1a2e;
+                border: 1px solid #333355;
+                border-radius: 4px;
+            }
+        ''')
+        frame.setMaximumHeight(200)
+
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(4)
+
+        # Titel
+        title = QLabel('Trainingsdaten Status')
+        title.setFont(QFont('Segoe UI', 10, QFont.Weight.Bold))
+        title.setStyleSheet('color: #90cdf4; border: none;')
+        layout.addWidget(title)
+
+        # Tabelle
+        self.status_table = QTableWidget()
+        self.status_table.setColumnCount(2)
+        self.status_table.setHorizontalHeaderLabels(['Phase', 'Status'])
+        self.status_table.horizontalHeader().setStretchLastSection(True)
+        self.status_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.status_table.verticalHeader().setVisible(False)
+        self.status_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.status_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self.status_table.setShowGrid(False)
+
+        # Styling
+        self.status_table.setStyleSheet('''
+            QTableWidget {
+                background-color: #1a1a2e;
+                border: none;
+                color: #cccccc;
+                font-size: 9pt;
+            }
+            QTableWidget::item {
+                padding: 4px;
+                border-bottom: 1px solid #2a2a4e;
+            }
+            QHeaderView::section {
+                background-color: #2a2a4e;
+                color: #90cdf4;
+                padding: 4px;
+                border: none;
+                font-weight: bold;
+                font-size: 9pt;
+            }
+        ''')
+
+        # Initiale Zeilen
+        phases = [
+            'Rohdaten',
+            'Analysiert',
+            'Gelabelt',
+            'Sequenzen generiert',
+            'Training bereit'
+        ]
+
+        self.status_table.setRowCount(len(phases))
+        for i, phase in enumerate(phases):
+            # Phase Name
+            phase_item = QTableWidgetItem(phase)
+            phase_item.setFont(QFont('Segoe UI', 9))
+            self.status_table.setItem(i, 0, phase_item)
+
+            # Status
+            status_item = QTableWidgetItem('⬜ Ausstehend')
+            status_item.setFont(QFont('Segoe UI', 9))
+            status_item.setForeground(Qt.GlobalColor.gray)
+            self.status_table.setItem(i, 1, status_item)
+
+        layout.addWidget(self.status_table)
+
+        return frame
+
     def _create_right_panel(self) -> QWidget:
-        """Erstellt das rechte Logger-Panel."""
+        """Erstellt das rechte Panel mit Status-Tabelle und Logger."""
         panel = QWidget()
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(5)
+
+        # === Status-Tabelle ===
+        status_frame = self._create_status_table()
+        layout.addWidget(status_frame)
 
         # Logger Header
         header_layout = QHBoxLayout()
@@ -847,8 +934,15 @@ class MainWindow(QMainWindow):
 
     # === Log-Methoden ===
 
-    def _log(self, message: str, level: str = 'INFO'):
-        """Schreibt eine Nachricht in den Logger."""
+    def _log(self, message: str, level: str = 'INFO', _from_handler: bool = False):
+        """
+        Schreibt eine Nachricht in den Logger.
+
+        Args:
+            message: Die Log-Nachricht
+            level: Log-Level (TRACE, DEBUG, INFO, SUCCESS, WARNING, ERROR)
+            _from_handler: True wenn der Aufruf vom GUILogHandler kommt (intern)
+        """
         timestamp = datetime.now().strftime('%H:%M:%S')
 
         # Farben nach Level
@@ -888,6 +982,31 @@ class MainWindow(QMainWindow):
         # Auto-scroll
         scrollbar = self.log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
+
+        # NUR an den echten Logger weiterleiten, wenn der Aufruf NICHT vom GUILogHandler kommt
+        # (sonst wurde die Meldung bereits geloggt und wuerde doppelt erscheinen)
+        if not _from_handler:
+            level_map = {
+                'TRACE': Logger.TRACE,
+                'DEBUG': logging.DEBUG,
+                'INFO': logging.INFO,
+                'SUCCESS': Logger.SUCCESS,
+                'WARNING': logging.WARNING,
+                'ERROR': logging.ERROR,
+                'CRITICAL': logging.CRITICAL,
+            }
+
+            # Temporaer den GUI-Handler deaktivieren um Endlosschleife zu vermeiden
+            if self._gui_handler:
+                self._gui_handler.setLevel(logging.CRITICAL + 1)
+
+            # An echten Logger senden
+            log_level = level_map.get(level, logging.INFO)
+            self.logger._logger.log(log_level, message)
+
+            # GUI-Handler wieder aktivieren
+            if self._gui_handler:
+                self._gui_handler.setLevel(Logger.TRACE)
 
     def _setup_gui_log_handler(self):
         """Registriert den GUI-Handler beim Logger."""
@@ -1010,8 +1129,11 @@ class MainWindow(QMainWindow):
             return
 
         self._log('Datenanalyse gestartet...', 'INFO')
+        self._update_status_table(1, '⏳ In Bearbeitung')
+
         # TODO: Implementierung
         self._log('Analyse abgeschlossen', 'SUCCESS')
+        self._update_status_table(1, '✅ Abgeschlossen')
 
     def _prepare_training_data(self):
         """Oeffnet das Trainingsdaten-Vorbereitungsfenster."""
@@ -1036,6 +1158,21 @@ class MainWindow(QMainWindow):
         self.training_info = training_info
         self.training_data_ready.emit(training_data)
         self._log('Trainingsdaten bereit', 'SUCCESS')
+
+        # Status-Tabelle aktualisieren
+        if training_info:
+            # Gelabelt
+            if 'label_counts' in training_info:
+                counts = training_info['label_counts']
+                self._update_status_table(2, f'✅ {sum(counts.values())} Labels')
+
+            # Sequenzen generiert
+            if 'sequences' in training_data:
+                n_seq = len(training_data['sequences'])
+                self._update_status_table(3, f'✅ {n_seq} Sequenzen')
+
+            # Training bereit
+            self._update_status_table(4, '✅ Bereit')
 
     def _visualize_signals(self):
         """Oeffnet das Signal-Visualisierungsfenster."""
@@ -1078,10 +1215,10 @@ class MainWindow(QMainWindow):
 
         try:
             from .training_window import TrainingWindow
-            self.training_window = TrainingWindow(
-                self.training_data, self.training_info,
-                self.config.paths.results_dir, self
-            )
+            self.training_window = TrainingWindow(self)
+            # Trainingsdaten und Info an das Fenster uebergeben
+            self.training_window.training_data = self.training_data
+            self.training_window.training_info = self.training_info
             self.training_window.training_completed.connect(self._on_training_completed)
             self.training_window.show()
         except Exception as e:
@@ -1246,6 +1383,41 @@ class MainWindow(QMainWindow):
             'Portiert von MATLAB'
         )
 
+    # === Status-Tabelle Update ===
+
+    def _update_status_table(self, phase_index: int, status: str, color = None):
+        """
+        Aktualisiert eine Zeile in der Status-Tabelle.
+
+        Args:
+            phase_index: Index der Phase (0=Rohdaten, 1=Analysiert, 2=Gelabelt, 3=Sequenzen, 4=Training bereit)
+            status: Status-Text (z.B. '✅ Abgeschlossen', '⏳ In Bearbeitung', '❌ Fehler')
+            color: QColor oder None fuer automatische Farbe
+        """
+        if phase_index < 0 or phase_index >= self.status_table.rowCount():
+            return
+
+        status_item = self.status_table.item(phase_index, 1)
+        if status_item:
+            status_item.setText(status)
+
+            # Automatische Farbgebung basierend auf Emoji
+            if color:
+                status_item.setForeground(color)
+            elif '✅' in status or '✓' in status:
+                status_item.setForeground(QColor(COLORS['success']))
+            elif '⏳' in status or '🔄' in status:
+                status_item.setForeground(QColor(COLORS['warning']))
+            elif '❌' in status or '✗' in status:
+                status_item.setForeground(QColor(COLORS['error']))
+            else:
+                status_item.setForeground(Qt.GlobalColor.gray)
+
+    def _reset_status_table(self):
+        """Setzt die Status-Tabelle zurueck."""
+        for i in range(self.status_table.rowCount()):
+            self._update_status_table(i, '⬜ Ausstehend')
+
     # === Signal Handler ===
 
     def _on_data_loaded(self, df: pd.DataFrame):
@@ -1256,6 +1428,9 @@ class MainWindow(QMainWindow):
 
         # Status-Anzeige aktualisieren
         self._update_data_status()
+
+        # Status-Tabelle aktualisieren
+        self._update_status_table(0, f'✅ Geladen ({count:,} Datensaetze)')
 
         # Buttons aktivieren
         self.analyze_btn.setEnabled(True)
