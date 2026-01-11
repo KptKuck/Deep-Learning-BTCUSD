@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QGroupBox, QStatusBar, QScrollArea,
     QFileDialog, QMessageBox, QComboBox, QFrame, QDateEdit,
     QTextEdit, QSlider, QCheckBox, QSplitter
@@ -59,7 +59,7 @@ class MainWindow(QMainWindow):
     """
     Haupt-Fenster des BTCUSD Analyzers.
 
-    Layout: 2 Spalten (420px | flexible)
+    Layout: 2 Spalten (340-420px | flexible)
     - Links: Bedienelemente (scrollbar)
     - Rechts: Logger mit HTML-Ausgabe
 
@@ -125,7 +125,7 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        # Main Layout: 2 Spalten (420px | flexible)
+        # Main Layout: 2 Spalten (340-420px | flexible)
         main_layout = QHBoxLayout(central_widget)
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
@@ -142,8 +142,8 @@ class MainWindow(QMainWindow):
         right_panel = self._create_right_panel()
         splitter.addWidget(right_panel)
 
-        # Splitter Proportionen (20% : 80%)
-        splitter.setSizes([300, 1100])
+        # Splitter Proportionen (linke Spalte breiter)
+        splitter.setSizes([380, 1020])
         splitter.setStretchFactor(0, 0)  # Linke Spalte nicht stretchen
         splitter.setStretchFactor(1, 1)  # Rechte Spalte stretchen
 
@@ -156,8 +156,8 @@ class MainWindow(QMainWindow):
     def _create_left_panel(self) -> QWidget:
         """Erstellt das linke Control-Panel mit Scroll-Funktion."""
         panel = QWidget()
-        panel.setMinimumWidth(280)
-        panel.setMaximumWidth(320)
+        panel.setMinimumWidth(340)
+        panel.setMaximumWidth(420)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 0, 0, 0)
 
@@ -301,94 +301,129 @@ class MainWindow(QMainWindow):
         layout.addWidget(local_group)
 
         # === Untergruppe 1.2: Binance API Download ===
-        binance_group = QGroupBox('Binance')
-        binance_group.setFont(QFont('Segoe UI', 8, QFont.Weight.Bold))
+        binance_group = QGroupBox('Binance Download')
+        binance_group.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
+        binance_group.setStyleSheet('''
+            QGroupBox {
+                border: 1px solid #444466;
+                border-radius: 4px;
+                margin-top: 8px;
+                padding-top: 4px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 4px;
+                color: #90cdf4;
+            }
+        ''')
         binance_layout = QVBoxLayout(binance_group)
-        binance_layout.setSpacing(4)
-        binance_layout.setContentsMargins(4, 8, 4, 4)
+        binance_layout.setSpacing(6)
+        binance_layout.setContentsMargins(8, 12, 8, 8)
 
-        # Symbol und Intervall in einer Zeile
-        symbol_layout = QHBoxLayout()
-        symbol_layout.setSpacing(3)
+        # === Zeile 1: Symbol und Intervall ===
+        row1 = QHBoxLayout()
+        row1.setSpacing(8)
+
+        symbol_label = QLabel('Symbol:')
+        symbol_label.setFont(QFont('Segoe UI', 9))
+        symbol_label.setStyleSheet('color: #aaaaaa;')
+        row1.addWidget(symbol_label)
 
         self.symbol_combo = QComboBox()
         self.symbol_combo.addItems(['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT'])
         self.symbol_combo.setCurrentText('BTCUSDT')
-        self.symbol_combo.setFixedHeight(22)
-        symbol_layout.addWidget(self.symbol_combo)
+        self.symbol_combo.setFixedHeight(26)
+        self.symbol_combo.setFont(QFont('Segoe UI', 9))
+        row1.addWidget(self.symbol_combo, 1)
+
+        interval_label = QLabel('Intervall:')
+        interval_label.setFont(QFont('Segoe UI', 9))
+        interval_label.setStyleSheet('color: #aaaaaa;')
+        row1.addWidget(interval_label)
 
         self.interval_combo = QComboBox()
         self.interval_combo.addItems(['1m', '5m', '15m', '1h', '4h', '1d', '1w'])
         self.interval_combo.setCurrentText('1h')
-        self.interval_combo.setFixedHeight(22)
-        self.interval_combo.setFixedWidth(50)
-        symbol_layout.addWidget(self.interval_combo)
+        self.interval_combo.setFixedHeight(26)
+        self.interval_combo.setFixedWidth(60)
+        self.interval_combo.setFont(QFont('Segoe UI', 9))
+        row1.addWidget(self.interval_combo)
 
-        binance_layout.addLayout(symbol_layout)
+        binance_layout.addLayout(row1)
 
-        # Von-Datum
-        from_layout = QHBoxLayout()
+        # === Zeile 2: Zeitraum (Von - Bis) ===
+        date_frame = QFrame()
+        date_frame.setStyleSheet('''
+            QFrame {
+                background-color: #1a1a2e;
+                border: 1px solid #333355;
+                border-radius: 4px;
+                padding: 4px;
+            }
+        ''')
+        date_layout = QHBoxLayout(date_frame)
+        date_layout.setContentsMargins(8, 6, 8, 6)
+        date_layout.setSpacing(8)
+
         from_label = QLabel('Von:')
-        from_label.setFont(QFont('Segoe UI', 8))
-        from_label.setFixedWidth(24)
-        from_layout.addWidget(from_label)
+        from_label.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
+        from_label.setStyleSheet('color: #68d391;')
+        date_layout.addWidget(from_label)
 
         self.from_date = QDateEdit()
         self.from_date.setCalendarPopup(True)
         self.from_date.setDate(QDate(2025, 1, 1))
-        self.from_date.setDisplayFormat('dd.MM.yy')
-        self.from_date.setFixedHeight(22)
-        self.from_date.setFixedWidth(75)
-        from_layout.addWidget(self.from_date)
+        self.from_date.setDisplayFormat('dd.MM.yyyy')
+        self.from_date.setFixedHeight(26)
+        self.from_date.setFont(QFont('Segoe UI', 9))
+        date_layout.addWidget(self.from_date)
 
-        # Von-Buttons Grid
-        from_btn_widget = self._create_date_buttons(self.from_date)
-        from_layout.addWidget(from_btn_widget)
+        date_layout.addSpacing(8)
 
-        binance_layout.addLayout(from_layout)
-
-        # Bis-Datum
-        to_layout = QHBoxLayout()
         to_label = QLabel('Bis:')
-        to_label.setFont(QFont('Segoe UI', 8))
-        to_label.setFixedWidth(24)
-        to_layout.addWidget(to_label)
+        to_label.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
+        to_label.setStyleSheet('color: #fc8181;')
+        date_layout.addWidget(to_label)
 
         self.to_date = QDateEdit()
         self.to_date.setCalendarPopup(True)
         self.to_date.setDate(QDate(2025, 12, 31))
-        self.to_date.setDisplayFormat('dd.MM.yy')
-        self.to_date.setFixedHeight(22)
-        self.to_date.setFixedWidth(75)
-        to_layout.addWidget(self.to_date)
+        self.to_date.setDisplayFormat('dd.MM.yyyy')
+        self.to_date.setFixedHeight(26)
+        self.to_date.setFont(QFont('Segoe UI', 9))
+        date_layout.addWidget(self.to_date)
 
-        # Bis-Buttons Grid
-        to_btn_widget = self._create_date_buttons(self.to_date)
-        to_layout.addWidget(to_btn_widget)
+        binance_layout.addWidget(date_frame)
 
-        binance_layout.addLayout(to_layout)
+        # === Zeile 3: Schnellauswahl ===
+        quick_frame = QFrame()
+        quick_layout = QHBoxLayout(quick_frame)
+        quick_layout.setContentsMargins(0, 0, 0, 0)
+        quick_layout.setSpacing(4)
 
-        # Schnellauswahl-Buttons
-        quick_layout = QHBoxLayout()
-        quick_layout.setSpacing(2)
+        quick_label = QLabel('Schnell:')
+        quick_label.setFont(QFont('Segoe UI', 9))
+        quick_label.setStyleSheet('color: #888888;')
+        quick_layout.addWidget(quick_label)
 
         quick_periods = [('1M', 30), ('3M', 90), ('6M', 180), ('1J', 365), ('2J', 730)]
         for text, days in quick_periods:
             btn = QPushButton(text)
-            btn.setFixedSize(36, 20)
-            btn.setFont(QFont('Segoe UI', 8, QFont.Weight.Bold))
+            btn.setFixedSize(42, 24)
+            btn.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
             btn.setStyleSheet(self._button_style((0.3, 0.4, 0.5)))
             btn.setToolTip(f'Letzte {days} Tage')
             btn.clicked.connect(lambda checked, d=days: self._set_quick_period(d))
             quick_layout.addWidget(btn)
 
         quick_layout.addStretch()
-        binance_layout.addLayout(quick_layout)
+        binance_layout.addWidget(quick_frame)
 
-        # Download Button
-        self.download_btn = QPushButton('Binance Download')
-        self.download_btn.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
-        self.download_btn.setFixedHeight(28)
+        # === Zeile 4: Download Button ===
+        self.download_btn = QPushButton('Download starten')
+        self.download_btn.setFont(QFont('Segoe UI', 10, QFont.Weight.Bold))
+        self.download_btn.setFixedHeight(32)
         self.download_btn.setStyleSheet(self._button_style((0.2, 0.55, 0.9)))
         self.download_btn.setToolTip('Daten von Binance API herunterladen')
         self.download_btn.clicked.connect(self._download_data)
@@ -475,51 +510,6 @@ class MainWindow(QMainWindow):
             self.data_file_label.setStyleSheet('color: #888888;')
             self.data_info_label.setText('-')
             self.data_info_label.setStyleSheet('color: #666666;')
-
-    def _create_date_buttons(self, date_edit: QDateEdit) -> QWidget:
-        """Erstellt +/- Buttons fuer Datumsanpassung."""
-        widget = QWidget()
-        layout = QGridLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
-
-        # Button-Definitionen: (Text, Tage/Monate, Zeile, Spalte, Farbe)
-        buttons = [
-            # Plus-Zeile
-            ('+T', 1, 'day', 0, 0, (0.3, 0.55, 0.3)),
-            ('+W', 7, 'day', 0, 1, (0.3, 0.5, 0.65)),
-            ('+M', 1, 'month', 0, 2, (0.65, 0.5, 0.2)),
-            ('+J', 1, 'year', 0, 3, (0.65, 0.3, 0.3)),
-            # Minus-Zeile
-            ('-T', -1, 'day', 1, 0, (0.45, 0.3, 0.3)),
-            ('-W', -7, 'day', 1, 1, (0.35, 0.3, 0.45)),
-            ('-M', -1, 'month', 1, 2, (0.45, 0.35, 0.2)),
-            ('-J', -1, 'year', 1, 3, (0.45, 0.2, 0.2)),
-        ]
-
-        for text, amount, unit, row, col, color in buttons:
-            btn = QPushButton(text)
-            btn.setFixedSize(32, 20)
-            btn.setFont(QFont('Segoe UI', 8, QFont.Weight.Bold))
-            btn.setStyleSheet(self._button_style(color))
-            btn.clicked.connect(lambda checked, d=date_edit, a=amount, u=unit:
-                               self._adjust_date(d, a, u))
-            layout.addWidget(btn, row, col)
-
-        return widget
-
-    def _adjust_date(self, date_edit: QDateEdit, amount: int, unit: str):
-        """Passt das Datum an."""
-        current = date_edit.date()
-        if unit == 'day':
-            new_date = current.addDays(amount)
-        elif unit == 'month':
-            new_date = current.addMonths(amount)
-        elif unit == 'year':
-            new_date = current.addYears(amount)
-        else:
-            return
-        date_edit.setDate(new_date)
 
     def _create_analyze_group(self) -> QGroupBox:
         """Erstellt Gruppe 2: Datenanalyse."""
