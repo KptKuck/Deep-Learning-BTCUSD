@@ -125,8 +125,9 @@ class Logger:
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
         # Log-Datei mit Zeitstempel
-        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        self.log_file = self.log_dir / f'{self.name}_{timestamp}.txt'
+        # Doppelpunkt (:) ist unter Windows nicht erlaubt in Dateinamen
+        timestamp = datetime.now().strftime('%Y-%m-%d_%Hh%Mm%Ss')
+        self.log_file = self.log_dir / f'session-{timestamp}.txt'
 
         file_handler = logging.FileHandler(self.log_file, encoding='utf-8')
         file_handler.setLevel(self.TRACE)
