@@ -21,6 +21,7 @@ import numpy as np
 
 # Matplotlib fuer Charts
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 
 
@@ -527,14 +528,7 @@ class PrepareDataWindow(QMainWindow):
         total = num_buy + num_sell + num_hold
 
         # Feature-Anzahl berechnen
-        num_features = 0
-        if hasattr(self, 'feature_checks'):
-            for name, cb in self.feature_checks.items():
-                if cb.isChecked():
-                    if name == 'Hour':
-                        num_features += 2  # hour_sin + hour_cos
-                    else:
-                        num_features += 1
+        num_features = self._count_selected_features()
 
         # Lookback/Lookforward aus Params oder SpinBox
         lookback = self.params.get('lookback', 100)
@@ -694,13 +688,7 @@ class PrepareDataWindow(QMainWindow):
     def _on_feature_changed(self):
         """Wird aufgerufen wenn sich die Feature-Auswahl aendert."""
         # Feature-Anzahl aktualisieren
-        count = 0
-        for name, cb in self.feature_checks.items():
-            if cb.isChecked():
-                if name == 'Hour':
-                    count += 2  # hour_sin + hour_cos
-                else:
-                    count += 1
+        count = self._count_selected_features()
         self.feature_info.setText(f'Aktive Features: {count}')
 
         # Features werden ungueltig
@@ -709,16 +697,26 @@ class PrepareDataWindow(QMainWindow):
             self.samples_valid = False
             self._update_tab_status()
 
+        # Stats-Tabelle aktualisieren
+        self._update_stats_table()
+
+    def _count_selected_features(self) -> int:
+        """Zaehlt die aktuell ausgewaehlten Features."""
+        count = 0
+        if hasattr(self, 'feature_checks'):
+            for name, cb in self.feature_checks.items():
+                if cb.isChecked():
+                    # Zyklische Features erzeugen jeweils 2 Spalten (sin + cos)
+                    if name in ('Hour', 'DayOfWeek', 'DayOfMonth', 'Month'):
+                        count += 2
+                    else:
+                        count += 1
+        return count
+
     def _confirm_features(self):
         """Bestaetigt die Feature-Auswahl."""
         # Zaehle aktive Features
-        count = 0
-        for name, cb in self.feature_checks.items():
-            if cb.isChecked():
-                if name == 'Hour':
-                    count += 2
-                else:
-                    count += 1
+        count = self._count_selected_features()
 
         if count == 0:
             self.feature_info.setText('Mindestens ein Feature auswaehlen!')
@@ -1091,6 +1089,30 @@ class PrepareDataWindow(QMainWindow):
         self.ax = self.figure.add_subplot(111)
         self._style_axis(self.ax)
 
+        # Navigation Toolbar fuer Zoom/Pan
+        self.toolbar = NavigationToolbar(self.canvas, panel)
+        self.toolbar.setStyleSheet('''
+            QToolBar {
+                background-color: #333333;
+                border: none;
+                spacing: 5px;
+            }
+            QToolButton {
+                background-color: #444444;
+                border: none;
+                border-radius: 3px;
+                padding: 5px;
+                color: white;
+            }
+            QToolButton:hover {
+                background-color: #555555;
+            }
+            QToolButton:checked {
+                background-color: #4da8da;
+            }
+        ''')
+
+        layout.addWidget(self.toolbar)
         layout.addWidget(self.canvas)
 
         return panel
@@ -1233,15 +1255,8 @@ class PrepareDataWindow(QMainWindow):
             num_hold = int((num_buy + num_sell) * self.params['hold_ratio']) if self.params['include_hold'] else 0
             total = num_buy + num_sell + num_hold
 
-            # Feature-Anzahl
-            num_features = sum([
-                self.params['use_close'],
-                self.params['use_high'],
-                self.params['use_low'],
-                self.params['use_open'],
-                self.params['use_price_change'],
-                self.params['use_price_change_pct'],
-            ])
+            # Feature-Anzahl aus der zentralen Methode
+            num_features = self._count_selected_features()
 
             seq_len = lookback + lookforward
 
@@ -1257,25 +1272,8 @@ class PrepareDataWindow(QMainWindow):
                 'sell_indices': sell_indices,
             }
 
-            # Update Statistik-Tabelle
-            stats = [
-                ('BUY Signale', str(num_buy)),
-                ('SELL Signale', str(num_sell)),
-                ('HOLD Samples', str(num_hold)),
-                ('Gesamt', str(total)),
-                ('---', '---'),
-                ('Sequenzlaenge', str(seq_len)),
-                ('Features', str(num_features)),
-                ('Input Shape', f'{total} x {seq_len} x {num_features}'),
-                ('Balance', f'{num_buy}:{num_sell}:{num_hold}'),
-                ('---', '---'),
-                ('Lookback', str(lookback)),
-                ('Lookforward', str(lookforward)),
-                ('Normalisierung', self.params['normalize_method']),
-            ]
-
-            for i, (param, value) in enumerate(stats):
-                self.stats_table.item(i, 1).setText(value)
+            # Stats-Tabelle aktualisieren (zentrale Methode)
+            self._update_stats_table()
 
             # Update Chart
             self._update_chart(prices, buy_indices, sell_indices)
@@ -1313,6 +1311,21 @@ class PrepareDataWindow(QMainWindow):
                          color='white', fontsize=12)
         self.ax.legend(loc='upper left', facecolor='#333333', edgecolor='#555555',
                       labelcolor='white')
+
+        # Initial-Zoom: Starte ab dem 16. Label (15 Labels nicht sichtbar)
+        all_signal_indices = sorted(buy_indices + sell_indices)
+        if len(all_signal_indices) > 15:
+            # Starte ab Index des 16. Labels
+            start_idx = all_signal_indices[15]
+            # Etwas Puffer nach links
+            start_idx = max(0, start_idx - 50)
+            self.ax.set_xlim(start_idx, len(prices))
+            # Y-Limits an sichtbaren Bereich anpassen
+            visible_prices = prices[start_idx:]
+            if len(visible_prices) > 0:
+                y_min, y_max = visible_prices.min(), visible_prices.max()
+                y_margin = (y_max - y_min) * 0.05
+                self.ax.set_ylim(y_min - y_margin, y_max + y_margin)
 
         self.figure.tight_layout()
         self.canvas.draw()
