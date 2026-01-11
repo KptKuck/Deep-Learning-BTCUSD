@@ -47,8 +47,8 @@ class PrepareDataWindow(QMainWindow):
 
         # Parameter
         self.params = {
-            'lookback': 50,
-            'lookforward': 100,
+            'lookback': 100,
+            'lookforward': 10,
             'include_hold': True,
             'hold_ratio': 1.0,
             'min_distance_factor': 0.3,
@@ -257,30 +257,26 @@ class PrepareDataWindow(QMainWindow):
     def _create_adjust_buttons(self, param_name: str) -> QWidget:
         """Erstellt +/- Buttons fuer Parameter-Anpassung."""
         widget = QWidget()
-        layout = QGridLayout(widget)
+        layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
+        layout.setSpacing(4)
 
-        # Button-Definitionen
+        # Button-Definitionen: --, -, +, ++
         buttons = [
-            ('+1', 1, 0, 0, (0.3, 0.55, 0.3)),
-            ('+5', 5, 0, 1, (0.3, 0.5, 0.65)),
-            ('+10', 10, 0, 2, (0.65, 0.5, 0.2)),
-            ('+50', 50, 0, 3, (0.65, 0.3, 0.3)),
-            ('-1', -1, 1, 0, (0.45, 0.3, 0.3)),
-            ('-5', -5, 1, 1, (0.35, 0.3, 0.45)),
-            ('-10', -10, 1, 2, (0.45, 0.35, 0.2)),
-            ('-50', -50, 1, 3, (0.45, 0.2, 0.2)),
+            ('--', -10, (0.8, 0.2, 0.2)),   # Dunkelrot
+            ('-', -1, (0.6, 0.3, 0.3)),      # Hellrot
+            ('+', 1, (0.2, 0.6, 0.2)),       # Hellgruen
+            ('++', 10, (0.2, 0.8, 0.2)),     # Dunkelgruen
         ]
 
-        for text, amount, row, col, color in buttons:
+        for text, amount, color in buttons:
             btn = QPushButton(text)
-            btn.setFixedSize(40, 26)
-            btn.setFont(QFont('Segoe UI', 10, QFont.Weight.Bold))
+            btn.setFixedSize(50, 30)
+            btn.setFont(QFont('Segoe UI', 12, QFont.Weight.Bold))
             btn.setStyleSheet(self._button_style(color))
             btn.clicked.connect(lambda checked, p=param_name, a=amount:
                                self._adjust_param(p, a))
-            layout.addWidget(btn, row, col)
+            layout.addWidget(btn)
 
         return widget
 
