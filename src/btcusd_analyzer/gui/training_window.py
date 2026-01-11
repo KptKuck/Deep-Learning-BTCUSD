@@ -407,6 +407,12 @@ class TrainingWindow(QMainWindow):
             self.gpu_timer.start(1000)
             self._update_gpu_memory()
 
+            # GPU Test Button
+            self.gpu_test_btn = QPushButton("GPU Test")
+            self.gpu_test_btn.setToolTip("Testet GPU-Training mit synthetischen Daten")
+            self.gpu_test_btn.clicked.connect(self._run_gpu_test)
+            device_layout.addWidget(self.gpu_test_btn, 4, 0, 1, 2)
+
         layout.addWidget(device_group)
 
         # Buttons
@@ -915,6 +921,181 @@ class TrainingWindow(QMainWindow):
         except Exception as e:
             # Bei Fehler stumm ignorieren
             pass
+
+    def _run_gpu_test(self):
+        """
+        Fuehrt einen GPU-Trainingstest mit synthetischen Daten durch.
+        Generiert 1000 Samples mit 4 Features und trainiert 5 Epochen.
+        """
+        if not torch.cuda.is_available():
+            QMessageBox.warning(self, "GPU Test", "Keine GPU verfuegbar!")
+            return
+
+        self._log("=== GPU Test gestartet ===")
+        self.gpu_test_btn.setEnabled(False)
+        self.gpu_test_btn.setText("Test laeuft...")
+
+        try:
+            # GPU aufräumen
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
+            # Synthetische Daten generieren: 1000 Samples, Lookback=50, 4 Features
+            num_samples = 1000
+            lookback = 50
+            num_features = 4
+            num_classes = 3
+
+            self._log(f"Generiere {num_samples} synthetische Samples...")
+            self._log(f"Shape: ({num_samples}, {lookback}, {num_features})")
+
+            # Zufaellige Sequenzen
+            X = np.random.randn(num_samples, lookback, num_features).astype(np.float32)
+            # Zufaellige Labels (0=HOLD, 1=BUY, 2=SELL)
+            Y = np.random.randint(0, num_classes, size=num_samples)
+
+            # In Tensoren konvertieren und auf GPU laden
+            X_tensor = torch.FloatTensor(X)
+            Y_tensor = torch.LongTensor(Y)
+
+            self._log(f"Daten auf GPU laden...")
+
+            # Train/Val Split (80/20)
+            split_idx = int(num_samples * 0.8)
+            X_train, X_val = X_tensor[:split_idx], X_tensor[split_idx:]
+            Y_train, Y_val = Y_tensor[:split_idx], Y_tensor[split_idx:]
+
+            from torch.utils.data import TensorDataset, DataLoader
+
+            train_dataset = TensorDataset(X_train, Y_train)
+            val_dataset = TensorDataset(X_val, Y_val)
+
+            batch_size = 32
+            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
+            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+
+            self._log(f"DataLoader erstellt: {len(train_dataset)} Train, {len(val_dataset)} Val")
+
+            # Kleines Test-Modell erstellen
+            from ..models import ModelFactory
+
+            model = ModelFactory.create(
+                'bilstm',
+                input_size=num_features,
+                hidden_size=32,  # Klein fuer Test
+                num_layers=1,
+                num_classes=num_classes,
+                dropout=0.1
+            )
+
+            self._log(f"Modell: {model.name}, Parameter: {sum(p.numel() for p in model.parameters()):,}")
+
+            # Auf GPU verschieben
+            device = torch.device('cuda')
+            model = model.to(device)
+            self._log(f"Modell auf GPU geladen")
+
+            # Loss und Optimizer
+            criterion = torch.nn.CrossEntropyLoss()
+            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+            # 5 Test-Epochen trainieren
+            num_epochs = 5
+            self._log(f"Starte Training: {num_epochs} Epochen...")
+
+            for epoch in range(1, num_epochs + 1):
+                model.train()
+                train_loss = 0.0
+                correct = 0
+                total = 0
+
+                for batch_idx, (data, target) in enumerate(train_loader):
+                    # Auf GPU
+                    data = data.to(device, non_blocking=True)
+                    target = target.to(device, non_blocking=True)
+
+                    # Forward
+                    optimizer.zero_grad()
+                    output = model(data)
+                    loss = criterion(output, target)
+
+                    # Backward
+                    loss.backward()
+                    optimizer.step()
+
+                    train_loss += loss.item()
+                    _, predicted = output.max(1)
+                    total += target.size(0)
+                    correct += predicted.eq(target).sum().item()
+
+                    # Periodisch synchronisieren
+                    if batch_idx % 10 == 0:
+                        torch.cuda.synchronize()
+
+                train_acc = 100.0 * correct / total
+                avg_loss = train_loss / len(train_loader)
+
+                # GPU Memory Status
+                allocated = torch.cuda.memory_allocated(0) / (1024 ** 3)
+                reserved = torch.cuda.memory_reserved(0) / (1024 ** 3)
+
+                self._log(f"Epoch {epoch}/{num_epochs}: Loss={avg_loss:.4f}, Acc={train_acc:.1f}%, "
+                         f"GPU: {allocated:.2f}GB alloc / {reserved:.2f}GB reserved")
+
+            # Aufräumen
+            model.cpu()
+            del model, optimizer, criterion
+            del train_loader, val_loader, train_dataset, val_dataset
+            del X_tensor, Y_tensor, X_train, X_val, Y_train, Y_val
+
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
+            import gc
+            gc.collect()
+
+            self._log("=== GPU Test ERFOLGREICH ===", level='SUCCESS')
+            QMessageBox.information(
+                self, "GPU Test",
+                f"GPU Test erfolgreich!\n\n"
+                f"- {num_samples} Samples trainiert\n"
+                f"- {num_epochs} Epochen ohne Fehler\n"
+                f"- GPU: {torch.cuda.get_device_name(0)}\n\n"
+                f"GPU funktioniert korrekt."
+            )
+
+        except torch.cuda.OutOfMemoryError as e:
+            self._log(f"GPU Out of Memory: {e}", level='ERROR')
+            torch.cuda.empty_cache()
+            QMessageBox.critical(
+                self, "GPU Test Fehler",
+                f"GPU Out of Memory!\n\n{e}\n\nReduziere Batch Size oder Modellgroesse."
+            )
+
+        except RuntimeError as e:
+            error_str = str(e)
+            self._log(f"Runtime Error: {error_str}", level='ERROR')
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            QMessageBox.critical(
+                self, "GPU Test Fehler",
+                f"CUDA/Runtime Fehler:\n\n{error_str}\n\n"
+                f"Moegliche Ursachen:\n"
+                f"- GPU-Treiber veraltet\n"
+                f"- CUDA Version inkompatibel\n"
+                f"- GPU wird von anderem Prozess verwendet"
+            )
+
+        except Exception as e:
+            import traceback
+            self._log(f"Fehler: {e}\n{traceback.format_exc()}", level='ERROR')
+            QMessageBox.critical(self, "GPU Test Fehler", f"Unerwarteter Fehler:\n\n{e}")
+
+        finally:
+            self.gpu_test_btn.setEnabled(True)
+            self.gpu_test_btn.setText("GPU Test")
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     def closeEvent(self, event):
         """Behandelt das Schliessen des Fensters."""
