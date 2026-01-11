@@ -33,7 +33,8 @@ class FeatureProcessor:
         'price': ['Open', 'High', 'Low', 'Close', 'PriceChange', 'PriceChangePct'],
         'volume': ['Volume', 'RelativeVolume'],
         'time': ['hour_sin', 'hour_cos'],
-        'technical': ['SMA', 'EMA', 'RSI', 'ATR', 'MACD', 'BB_Upper', 'BB_Lower', 'BB_Width'],
+        'volatility': ['ATR', 'ATR_Pct', 'RollingStd', 'RollingStd_Pct', 'HighLowRange', 'ReturnVol', 'ParkinsonVol'],
+        'technical': ['SMA', 'EMA', 'RSI', 'MACD', 'BB_Upper', 'BB_Lower', 'BB_Width'],
     }
 
     def __init__(self, features: Optional[List[str]] = None):
@@ -186,6 +187,44 @@ class FeatureProcessor:
         lower = self._calc_bb_lower(df, period, std_dev)
         sma = df['Close'].rolling(window=period).mean()
         return (upper - lower) / sma * 100
+
+    # === Volatilitaets-Features ===
+
+    def _calc_atr_pct(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
+        """ATR als Prozentsatz des Preises (normalisierte Volatilitaet)."""
+        atr = self._calc_atr(df, period)
+        return (atr / df['Close']) * 100
+
+    def _calc_rollingstd(self, df: pd.DataFrame, period: int = 20) -> pd.Series:
+        """Rolling Standard Deviation der Close-Preise."""
+        return df['Close'].rolling(window=period).std()
+
+    def _calc_rollingstd_pct(self, df: pd.DataFrame, period: int = 20) -> pd.Series:
+        """Rolling Std als Prozentsatz des Preises."""
+        std = df['Close'].rolling(window=period).std()
+        return (std / df['Close']) * 100
+
+    def _calc_highlowrange(self, df: pd.DataFrame) -> pd.Series:
+        """High-Low Range als Prozentsatz des Close (Tagesvolatilitaet)."""
+        return ((df['High'] - df['Low']) / df['Close']) * 100
+
+    def _calc_returnvol(self, df: pd.DataFrame, period: int = 20) -> pd.Series:
+        """Volatilitaet der Returns (Standardabweichung der prozentualen Aenderungen)."""
+        returns = df['Close'].pct_change() * 100
+        return returns.rolling(window=period).std()
+
+    def _calc_parkinsonvol(self, df: pd.DataFrame, period: int = 20) -> pd.Series:
+        """
+        Parkinson Volatilitaet - effizienterer Schaetzer als Close-basierte Volatilitaet.
+        Nutzt High-Low Range fuer bessere Schaetzung.
+        Formel: sqrt(1/(4*ln(2)) * sum(ln(H/L)^2) / n)
+        """
+        log_hl = np.log(df['High'] / df['Low'])
+        log_hl_sq = log_hl ** 2
+        # Faktor: 1/(4*ln(2)) ≈ 0.361
+        parkinson = np.sqrt(log_hl_sq.rolling(window=period).mean() / (4 * np.log(2)))
+        # In Prozent umrechnen
+        return parkinson * 100
 
     # === Volumen-Features ===
 

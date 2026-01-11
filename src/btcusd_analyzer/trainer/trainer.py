@@ -254,7 +254,9 @@ class Trainer:
         total = 0
 
         for batch_idx, (data, target) in enumerate(train_loader):
-            data, target = data.to(self.device), target.to(self.device)
+            # Non-blocking Transfer fuer bessere Performance
+            data = data.to(self.device, non_blocking=True)
+            target = target.to(self.device, non_blocking=True)
 
             self.optimizer.zero_grad()
 
@@ -272,6 +274,10 @@ class Trainer:
             _, predicted = output.max(1)
             total += target.size(0)
             correct += predicted.eq(target).sum().item()
+
+            # Periodisch GPU synchronisieren um Speicherlecks zu vermeiden
+            if self.device.type == 'cuda' and batch_idx % 50 == 0:
+                torch.cuda.synchronize()
 
         avg_loss = total_loss / len(train_loader)
         accuracy = 100.0 * correct / total

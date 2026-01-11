@@ -54,6 +54,11 @@ class TrainingWorker(QThread):
             from ..trainer.trainer import Trainer
             from ..trainer.callbacks import EarlyStopping, ModelCheckpoint
 
+            # GPU Memory vor Training leeren
+            if self.device.type == 'cuda':
+                torch.cuda.empty_cache()
+                self.log_message.emit(f"GPU Memory geleert")
+
             # Callbacks
             callbacks = []
             if self.config.get('early_stopping', True):
@@ -129,8 +134,34 @@ class TrainingWorker(QThread):
                 'model_path': str(final_model_path)
             })
 
+        except torch.cuda.OutOfMemoryError as e:
+            # GPU Speicher freigeben
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            error_msg = f"GPU Out of Memory: {e}\n\nVersuche kleinere Batch Size oder weniger Features."
+            self.training_error.emit(error_msg)
+
+        except RuntimeError as e:
+            # Haeufig CUDA-Fehler
+            error_str = str(e)
+            if 'CUDA' in error_str or 'cuda' in error_str:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                error_msg = f"CUDA Fehler: {error_str}\n\nMoegliche Loesungen:\n- Batch Size reduzieren\n- GPU-Treiber aktualisieren\n- CPU statt GPU verwenden"
+            else:
+                error_msg = f"Runtime Fehler: {error_str}"
+            self.training_error.emit(error_msg)
+
         except Exception as e:
-            self.training_error.emit(str(e))
+            # Allgemeiner Fehler
+            import traceback
+            error_msg = f"Training Fehler: {e}\n\n{traceback.format_exc()}"
+            self.training_error.emit(error_msg)
+
+        finally:
+            # Speicher aufraeumen
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     def stop(self):
         """Stoppt das Training."""

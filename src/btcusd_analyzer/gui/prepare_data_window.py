@@ -728,6 +728,36 @@ class PrepareDataWindow(QMainWindow):
             vol_layout.addWidget(cb)
         scroll_layout.addWidget(vol_group)
 
+        # Volatilitaets-Features Gruppe
+        vol_group = QGroupBox('Volatilitaets-Features')
+        vol_group.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
+        vol_group.setStyleSheet('''
+            QGroupBox { color: #ff9966; border: 1px solid #333; border-radius: 5px;
+                        margin-top: 10px; padding-top: 10px; }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }
+        ''')
+        vol_layout = QVBoxLayout(vol_group)
+
+        # Volatilitaets-Features mit Tooltips
+        volatility_features = [
+            ('ATR', 'Average True Range (14 Perioden)'),
+            ('ATR_Pct', 'ATR als % vom Preis (normalisiert)'),
+            ('RollingStd', 'Rolling Std (20 Perioden)'),
+            ('RollingStd_Pct', 'Rolling Std als % vom Preis'),
+            ('HighLowRange', 'High-Low Range als % (Tagesvolatilitaet)'),
+            ('ReturnVol', 'Return Volatilitaet (Std der Returns)'),
+            ('ParkinsonVol', 'Parkinson Vol (effizienter Schaetzer)'),
+        ]
+        for feat, tooltip in volatility_features:
+            cb = QCheckBox(feat)
+            cb.setChecked(False)
+            cb.setStyleSheet('color: white;')
+            cb.setToolTip(tooltip)
+            cb.stateChanged.connect(self._on_feature_changed)
+            self.feature_checks[feat] = cb
+            vol_layout.addWidget(cb)
+        scroll_layout.addWidget(vol_group)
+
         # Zeit-Features Gruppe
         time_group = QGroupBox('Zeit-Features (zyklisch)')
         time_group.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
