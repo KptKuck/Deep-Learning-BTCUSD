@@ -4,15 +4,34 @@ Entspricht download_btc_data.m aus dem MATLAB-Projekt
 """
 
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, ClassVar, List, Optional, TYPE_CHECKING
 
 import pandas as pd
 
-from ..core.logger import get_logger
+from ..core.logger import get_logger, Logger
+
+if TYPE_CHECKING:
+    from binance.client import Client
 
 
+@dataclass(frozen=True)
+class DownloadConfig:
+    """Konfiguration fuer einen Binance-Download."""
+    symbol: str = 'BTCUSDT'
+    interval: str = '1h'
+    start_date: str = ''
+    end_date: Optional[str] = None
+    save: bool = True
+
+    def __post_init__(self):
+        # Symbol uppercase validieren
+        object.__setattr__(self, 'symbol', self.symbol.upper())
+
+
+@dataclass
 class BinanceDownloader:
     """
     Laedt historische Kursdaten von der Binance API.
@@ -22,21 +41,17 @@ class BinanceDownloader:
     - 1h, 2h, 4h, 6h, 8h, 12h (Stunden)
     - 1d, 3d (Tage)
     - 1w, 1M (Woche, Monat)
-
-    Attributes:
-        symbol: Trading-Paar (z.B. 'BTCUSDT')
-        data_dir: Verzeichnis zum Speichern der Daten
     """
 
-    # Binance API Endpoints
-    BASE_URL = 'https://api.binance.com'
-    KLINES_ENDPOINT = '/api/v3/klines'
+    symbol: str = 'BTCUSDT'
+    data_dir: Optional[Path] = None
 
-    # Maximale Anzahl Klines pro Anfrage
-    MAX_LIMIT = 1000
+    # Klassenattribute (nicht im __init__)
+    BASE_URL: ClassVar[str] = 'https://api.binance.com'
+    KLINES_ENDPOINT: ClassVar[str] = '/api/v3/klines'
+    MAX_LIMIT: ClassVar[int] = 1000
 
-    # Mapping: Intervall -> Millisekunden
-    INTERVAL_MS = {
+    INTERVAL_MS: ClassVar[dict[str, int]] = {
         '1m': 60000,
         '3m': 180000,
         '5m': 300000,
@@ -54,19 +69,26 @@ class BinanceDownloader:
         '1M': 2592000000,
     }
 
-    def __init__(self, symbol: str = 'BTCUSDT', data_dir: Optional[Path] = None):
-        """
-        Initialisiert den Downloader.
+    # Private Felder (nicht im __init__, werden in __post_init__ gesetzt)
+    _client: Optional['Client'] = field(default=None, init=False, repr=False)
+    _logger: Optional[Logger] = field(default=None, init=False, repr=False)
 
-        Args:
-            symbol: Trading-Paar (z.B. 'BTCUSDT')
-            data_dir: Verzeichnis zum Speichern (default: ./Daten_csv)
-        """
-        self.symbol = symbol.upper()
-        self.data_dir = Path(data_dir) if data_dir else Path.cwd() / 'Daten_csv'
+    def __post_init__(self):
+        """Initialisiert abgeleitete Felder nach der Dataclass-Erstellung."""
+        self.symbol = self.symbol.upper()
+        if self.data_dir is None:
+            self.data_dir = Path.cwd() / 'Daten_csv'
+        else:
+            self.data_dir = Path(self.data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.logger = get_logger()
-        self._client = None
+        self._logger = get_logger()
+
+    @property
+    def logger(self) -> Logger:
+        """Zugriff auf den Logger."""
+        if self._logger is None:
+            self._logger = get_logger()
+        return self._logger
 
     def _get_client(self):
         """Erstellt Binance Client (lazy loading)."""
@@ -101,7 +123,7 @@ class BinanceDownloader:
         """
         start_time = time.perf_counter()
 
-        self.logger.debug(f'=== Binance Download gestartet ===')
+        self.logger.debug('=== Binance Download gestartet ===')
         self.logger.debug(f'Symbol: {self.symbol}')
         self.logger.debug(f'Intervall: {interval}')
         self.logger.debug(f'Start-Datum (Input): {start_date}')
@@ -114,14 +136,14 @@ class BinanceDownloader:
             start_dt = datetime.strptime(start_date, '%Y-%m-%d')
             self.logger.debug(f'Start-Datum (parsed): {start_dt}')
         except ValueError as e:
-            self.logger.error(f'Ungültiges Start-Datum Format: {start_date} - {e}')
+            self.logger.error(f'Ungueltiges Start-Datum Format: {start_date} - {e}')
             return None
 
         try:
             end_dt = datetime.strptime(end_date, '%Y-%m-%d') if end_date else datetime.now()
             self.logger.debug(f'End-Datum (parsed): {end_dt}')
         except ValueError as e:
-            self.logger.error(f'Ungültiges End-Datum Format: {end_date} - {e}')
+            self.logger.error(f'Ungueltiges End-Datum Format: {end_date} - {e}')
             return None
 
         # Zeitraum validieren
@@ -129,7 +151,7 @@ class BinanceDownloader:
         self.logger.debug(f'Zeitraum: {days_diff} Tage')
 
         if days_diff < 0:
-            self.logger.error(f'Start-Datum liegt nach End-Datum!')
+            self.logger.error('Start-Datum liegt nach End-Datum!')
             return None
 
         self.logger.info(f'Lade {self.symbol} Daten: {start_date} bis {end_dt.strftime("%Y-%m-%d")} ({days_diff} Tage)')
@@ -140,7 +162,7 @@ class BinanceDownloader:
             self.logger.debug('Binance Client bereit')
 
             # Alle Klines in Chunks laden
-            all_klines = []
+            all_klines: List = []
             current_start = int(start_dt.timestamp() * 1000)
             end_ms = int(end_dt.timestamp() * 1000)
             chunk_count = 0
@@ -290,7 +312,7 @@ class BinanceDownloader:
             combined = combined.drop_duplicates(subset=['DateTime'], keep='last')
             combined = combined.sort_values('DateTime').reset_index(drop=True)
 
-            self.logger.success(f'{len(new_df)} neue Datensätze hinzugefuegt')
+            self.logger.success(f'{len(new_df)} neue Datensaetze hinzugefuegt')
             return combined
 
         return existing_df

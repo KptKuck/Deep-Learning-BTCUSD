@@ -16,6 +16,9 @@
 - Type Hints verwenden
 - Docstrings fuer alle oeffentlichen Funktionen/Klassen
 - Variablennamen: snake_case
+- Datenklassen: `@dataclass` oder Pydantic verwenden
+  - Keine manuellen `__init__`, `__repr__`, `__eq__` Methoden
+  - Ausnahme: Komplexe Initialisierungslogik (z.B. PyQt6 Widgets)
 
 ## Projektstruktur
 ```
