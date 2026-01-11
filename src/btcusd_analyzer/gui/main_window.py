@@ -685,97 +685,150 @@ class MainWindow(QMainWindow):
 
         return group
 
-    def _create_status_table(self) -> QWidget:
-        """Erstellt die Status-Tabelle fuer Trainingsdaten-Status."""
-        frame = QFrame()
-        frame.setStyleSheet('''
-            QFrame {
+    def _create_status_panel(self) -> QWidget:
+        """Erstellt das detaillierte Status-Panel fuer Trainingsdaten."""
+        panel = QWidget()
+        panel.setMinimumWidth(280)
+        panel.setMaximumWidth(350)
+
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(8)
+
+        # === Titel ===
+        title = QLabel('Trainingsdaten')
+        title.setFont(QFont('Segoe UI', 12, QFont.Weight.Bold))
+        title.setStyleSheet('color: #90cdf4;')
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+
+        # === Scroll Area fuer alle Inhalte ===
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(8)
+        scroll_layout.setContentsMargins(0, 0, 5, 0)
+
+        # === 1. Status-Gruppe ===
+        status_group = self._create_info_group('Status', [
+            ('Pipeline', 'status_pipeline', '⬜ Ausstehend'),
+            ('Rohdaten', 'status_raw', '-'),
+            ('Labels', 'status_labels', '-'),
+            ('Sequenzen', 'status_sequences', '-'),
+        ])
+        scroll_layout.addWidget(status_group)
+
+        # === 2. DataFrame Info ===
+        df_group = self._create_info_group('DataFrame', [
+            ('Datensaetze', 'df_rows', '-'),
+            ('Zeitraum', 'df_period', '-'),
+            ('Intervall', 'df_interval', '-'),
+            ('Spalten', 'df_columns', '-'),
+            ('Speicher', 'df_memory', '-'),
+        ])
+        scroll_layout.addWidget(df_group)
+
+        # === 3. Sequenz-Parameter ===
+        seq_group = self._create_info_group('Sequenzen', [
+            ('Lookback', 'seq_lookback', '-'),
+            ('Lookforward', 'seq_lookforward', '-'),
+            ('Features', 'seq_features', '-'),
+            ('Gesamt', 'seq_total', '-'),
+        ])
+        scroll_layout.addWidget(seq_group)
+
+        # === 4. Label-Verteilung ===
+        label_group = self._create_info_group('Labels', [
+            ('BUY', 'label_buy', '-'),
+            ('SELL', 'label_sell', '-'),
+            ('HOLD', 'label_hold', '-'),
+            ('Balance', 'label_balance', '-'),
+        ])
+        scroll_layout.addWidget(label_group)
+
+        # === 5. Training Split ===
+        split_group = self._create_info_group('Train/Val Split', [
+            ('Training', 'split_train', '-'),
+            ('Validation', 'split_val', '-'),
+            ('Ratio', 'split_ratio', '-'),
+        ])
+        scroll_layout.addWidget(split_group)
+
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll)
+
+        return panel
+
+    def _create_info_group(self, title: str, fields: list) -> QGroupBox:
+        """
+        Erstellt eine Info-Gruppe mit Label-Wert-Paaren.
+
+        Args:
+            title: Gruppentitel
+            fields: Liste von (label, attr_name, default_value) Tupeln
+        """
+        group = QGroupBox(title)
+        group.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
+        group.setStyleSheet('''
+            QGroupBox {
                 background-color: #1a1a2e;
                 border: 1px solid #333355;
                 border-radius: 4px;
+                margin-top: 8px;
+                padding-top: 4px;
             }
-        ''')
-        frame.setMaximumHeight(200)
-
-        layout = QVBoxLayout(frame)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(4)
-
-        # Titel
-        title = QLabel('Trainingsdaten Status')
-        title.setFont(QFont('Segoe UI', 10, QFont.Weight.Bold))
-        title.setStyleSheet('color: #90cdf4; border: none;')
-        layout.addWidget(title)
-
-        # Tabelle
-        self.status_table = QTableWidget()
-        self.status_table.setColumnCount(2)
-        self.status_table.setHorizontalHeaderLabels(['Phase', 'Status'])
-        self.status_table.horizontalHeader().setStretchLastSection(True)
-        self.status_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.status_table.verticalHeader().setVisible(False)
-        self.status_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.status_table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
-        self.status_table.setShowGrid(False)
-
-        # Styling
-        self.status_table.setStyleSheet('''
-            QTableWidget {
-                background-color: #1a1a2e;
-                border: none;
-                color: #cccccc;
-                font-size: 9pt;
-            }
-            QTableWidget::item {
-                padding: 4px;
-                border-bottom: 1px solid #2a2a4e;
-            }
-            QHeaderView::section {
-                background-color: #2a2a4e;
-                color: #90cdf4;
-                padding: 4px;
-                border: none;
-                font-weight: bold;
-                font-size: 9pt;
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 8px;
+                padding: 0 4px;
+                color: #68d391;
             }
         ''')
 
-        # Initiale Zeilen
-        phases = [
-            'Rohdaten',
-            'Analysiert',
-            'Gelabelt',
-            'Sequenzen generiert',
-            'Training bereit'
-        ]
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(8, 12, 8, 8)
+        layout.setSpacing(2)
 
-        self.status_table.setRowCount(len(phases))
-        for i, phase in enumerate(phases):
-            # Phase Name
-            phase_item = QTableWidgetItem(phase)
-            phase_item.setFont(QFont('Segoe UI', 9))
-            self.status_table.setItem(i, 0, phase_item)
+        for label_text, attr_name, default_value in fields:
+            row = QHBoxLayout()
+            row.setSpacing(4)
 
-            # Status
-            status_item = QTableWidgetItem('⬜ Ausstehend')
-            status_item.setFont(QFont('Segoe UI', 9))
-            status_item.setForeground(Qt.GlobalColor.gray)
-            self.status_table.setItem(i, 1, status_item)
+            label = QLabel(f'{label_text}:')
+            label.setFont(QFont('Segoe UI', 9))
+            label.setStyleSheet('color: #888888;')
+            label.setFixedWidth(80)
+            row.addWidget(label)
 
-        layout.addWidget(self.status_table)
+            value_label = QLabel(default_value)
+            value_label.setFont(QFont('Segoe UI', 9))
+            value_label.setStyleSheet('color: #cccccc;')
+            value_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+            row.addWidget(value_label, 1)
 
-        return frame
+            # Speichere Referenz zum Value-Label
+            setattr(self, f'info_{attr_name}', value_label)
+
+            layout.addLayout(row)
+
+        return group
 
     def _create_right_panel(self) -> QWidget:
-        """Erstellt das rechte Panel mit Status-Tabelle und Logger."""
+        """Erstellt das rechte Panel mit Logger und Status-Panel nebeneinander."""
         panel = QWidget()
-        layout = QVBoxLayout(panel)
+        layout = QHBoxLayout(panel)
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(5)
 
-        # === Status-Tabelle ===
-        status_frame = self._create_status_table()
-        layout.addWidget(status_frame)
+        # === Linke Seite: Logger ===
+        logger_widget = QWidget()
+        logger_layout = QVBoxLayout(logger_widget)
+        logger_layout.setContentsMargins(0, 0, 0, 0)
+        logger_layout.setSpacing(5)
 
         # Logger Header
         header_layout = QHBoxLayout()
@@ -822,20 +875,26 @@ class MainWindow(QMainWindow):
         self.font_slider = QSlider(Qt.Orientation.Horizontal)
         self.font_slider.setRange(8, 14)
         self.font_slider.setValue(10)
-        self.font_slider.setFixedWidth(120)
+        self.font_slider.setFixedWidth(100)
         self.font_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.font_slider.setTickInterval(2)
         self.font_slider.valueChanged.connect(self._update_log_font_size)
         header_layout.addWidget(self.font_slider)
 
-        layout.addLayout(header_layout)
+        logger_layout.addLayout(header_layout)
 
         # Logger Textbereich (HTML-faehig)
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
         self._log_font_size = 10  # Initiale Schriftgroesse
         self._update_log_stylesheet()
-        layout.addWidget(self.log_text)
+        logger_layout.addWidget(self.log_text)
+
+        layout.addWidget(logger_widget, 1)  # Stretch factor 1
+
+        # === Rechte Seite: Status-Panel ===
+        status_panel = self._create_status_panel()
+        layout.addWidget(status_panel, 0)  # Kein Stretch
 
         return panel
 
@@ -1129,11 +1188,9 @@ class MainWindow(QMainWindow):
             return
 
         self._log('Datenanalyse gestartet...', 'INFO')
-        self._update_status_table(1, '⏳ In Bearbeitung')
 
         # TODO: Implementierung
         self._log('Analyse abgeschlossen', 'SUCCESS')
-        self._update_status_table(1, '✅ Abgeschlossen')
 
     def _prepare_training_data(self):
         """Oeffnet das Trainingsdaten-Vorbereitungsfenster."""
@@ -1159,20 +1216,8 @@ class MainWindow(QMainWindow):
         self.training_data_ready.emit(training_data)
         self._log('Trainingsdaten bereit', 'SUCCESS')
 
-        # Status-Tabelle aktualisieren
-        if training_info:
-            # Gelabelt
-            if 'label_counts' in training_info:
-                counts = training_info['label_counts']
-                self._update_status_table(2, f'✅ {sum(counts.values())} Labels')
-
-            # Sequenzen generiert
-            if 'sequences' in training_data:
-                n_seq = len(training_data['sequences'])
-                self._update_status_table(3, f'✅ {n_seq} Sequenzen')
-
-            # Training bereit
-            self._update_status_table(4, '✅ Bereit')
+        # Status-Panel aktualisieren
+        self._update_status_panel_from_training(training_data, training_info)
 
     def _visualize_signals(self):
         """Oeffnet das Signal-Visualisierungsfenster."""
@@ -1383,40 +1428,131 @@ class MainWindow(QMainWindow):
             'Portiert von MATLAB'
         )
 
-    # === Status-Tabelle Update ===
+    # === Status-Panel Update ===
 
-    def _update_status_table(self, phase_index: int, status: str, color = None):
+    def _update_info_label(self, attr_name: str, value: str, color: str = None):
         """
-        Aktualisiert eine Zeile in der Status-Tabelle.
+        Aktualisiert ein Info-Label im Status-Panel.
 
         Args:
-            phase_index: Index der Phase (0=Rohdaten, 1=Analysiert, 2=Gelabelt, 3=Sequenzen, 4=Training bereit)
-            status: Status-Text (z.B. '✅ Abgeschlossen', '⏳ In Bearbeitung', '❌ Fehler')
-            color: QColor oder None fuer automatische Farbe
+            attr_name: Name des Attributs (z.B. 'df_rows')
+            value: Anzuzeigender Wert
+            color: Optionale Farbe (hex)
         """
-        if phase_index < 0 or phase_index >= self.status_table.rowCount():
+        label = getattr(self, f'info_{attr_name}', None)
+        if label:
+            label.setText(value)
+            if color:
+                label.setStyleSheet(f'color: {color};')
+            else:
+                label.setStyleSheet('color: #cccccc;')
+
+    def _update_status_panel_from_data(self, df: pd.DataFrame):
+        """Aktualisiert das Status-Panel mit DataFrame-Infos."""
+        if df is None:
             return
 
-        status_item = self.status_table.item(phase_index, 1)
-        if status_item:
-            status_item.setText(status)
+        # Status
+        self._update_info_label('status_raw', '✅ Geladen', COLORS['success'])
+        self._update_info_label('status_pipeline', '⏳ Daten geladen', COLORS['warning'])
 
-            # Automatische Farbgebung basierend auf Emoji
-            if color:
-                status_item.setForeground(color)
-            elif '✅' in status or '✓' in status:
-                status_item.setForeground(QColor(COLORS['success']))
-            elif '⏳' in status or '🔄' in status:
-                status_item.setForeground(QColor(COLORS['warning']))
-            elif '❌' in status or '✗' in status:
-                status_item.setForeground(QColor(COLORS['error']))
+        # DataFrame Info
+        count = len(df)
+        self._update_info_label('df_rows', f'{count:,}')
+
+        # Zeitraum
+        try:
+            if hasattr(df.index, 'min') and hasattr(df.index, 'max'):
+                start = df.index.min()
+                end = df.index.max()
+                if hasattr(start, 'strftime'):
+                    self._update_info_label('df_period', f'{start.strftime("%d.%m.%y")} - {end.strftime("%d.%m.%y")}')
+                    # Intervall berechnen
+                    if len(df) > 1:
+                        delta = (df.index[1] - df.index[0]).total_seconds()
+                        if delta < 60:
+                            interval = f'{int(delta)}s'
+                        elif delta < 3600:
+                            interval = f'{int(delta/60)}m'
+                        elif delta < 86400:
+                            interval = f'{int(delta/3600)}h'
+                        else:
+                            interval = f'{int(delta/86400)}d'
+                        self._update_info_label('df_interval', interval)
+        except Exception:
+            pass
+
+        # Spalten
+        self._update_info_label('df_columns', str(len(df.columns)))
+
+        # Speicher
+        memory_mb = df.memory_usage(deep=True).sum() / (1024 * 1024)
+        self._update_info_label('df_memory', f'{memory_mb:.2f} MB')
+
+    def _update_status_panel_from_training(self, training_data: dict, training_info: dict):
+        """Aktualisiert das Status-Panel mit Trainingsdaten-Infos."""
+        if training_info is None:
+            return
+
+        # Status aktualisieren
+        self._update_info_label('status_labels', '✅ Generiert', COLORS['success'])
+        self._update_info_label('status_sequences', '✅ Erstellt', COLORS['success'])
+        self._update_info_label('status_pipeline', '✅ Bereit', COLORS['success'])
+
+        # Sequenz-Parameter
+        if 'params' in training_info:
+            params = training_info['params']
+            self._update_info_label('seq_lookback', str(params.get('lookback', '-')))
+            self._update_info_label('seq_lookforward', str(params.get('lookforward', '-')))
+
+        # Features und Gesamt
+        self._update_info_label('seq_features', str(training_info.get('num_features', '-')))
+        self._update_info_label('seq_total', f"{training_info.get('total', 0):,}")
+
+        # Label-Verteilung
+        num_buy = training_info.get('num_buy', 0)
+        num_sell = training_info.get('num_sell', 0)
+        num_hold = training_info.get('num_hold', 0)
+        total = num_buy + num_sell + num_hold
+
+        self._update_info_label('label_buy', f'{num_buy:,} ({100*num_buy/total:.1f}%)' if total > 0 else '-', COLORS['success'])
+        self._update_info_label('label_sell', f'{num_sell:,} ({100*num_sell/total:.1f}%)' if total > 0 else '-', COLORS['error'])
+        self._update_info_label('label_hold', f'{num_hold:,} ({100*num_hold/total:.1f}%)' if total > 0 else '-')
+
+        # Balance
+        if num_buy > 0 and num_sell > 0:
+            ratio = max(num_buy, num_sell) / min(num_buy, num_sell)
+            if ratio < 1.5:
+                balance_text = f'✅ Gut ({ratio:.2f}:1)'
+                balance_color = COLORS['success']
+            elif ratio < 3.0:
+                balance_text = f'⚠ Maessig ({ratio:.2f}:1)'
+                balance_color = COLORS['warning']
             else:
-                status_item.setForeground(Qt.GlobalColor.gray)
+                balance_text = f'❌ Unbalanciert ({ratio:.2f}:1)'
+                balance_color = COLORS['error']
+            self._update_info_label('label_balance', balance_text, balance_color)
 
-    def _reset_status_table(self):
-        """Setzt die Status-Tabelle zurueck."""
-        for i in range(self.status_table.rowCount()):
-            self._update_status_table(i, '⬜ Ausstehend')
+        # Train/Val Split (80/20 default)
+        if total > 0:
+            train_count = int(total * 0.8)
+            val_count = total - train_count
+            self._update_info_label('split_train', f'{train_count:,}')
+            self._update_info_label('split_val', f'{val_count:,}')
+            self._update_info_label('split_ratio', '80 / 20 %')
+
+    def _reset_status_panel(self):
+        """Setzt alle Status-Panel Felder zurueck."""
+        default_fields = [
+            'status_pipeline', 'status_raw', 'status_labels', 'status_sequences',
+            'df_rows', 'df_period', 'df_interval', 'df_columns', 'df_memory',
+            'seq_lookback', 'seq_lookforward', 'seq_features', 'seq_total',
+            'label_buy', 'label_sell', 'label_hold', 'label_balance',
+            'split_train', 'split_val', 'split_ratio'
+        ]
+        for field in default_fields:
+            self._update_info_label(field, '-')
+        self._update_info_label('status_pipeline', '⬜ Ausstehend')
 
     # === Signal Handler ===
 
@@ -1429,8 +1565,8 @@ class MainWindow(QMainWindow):
         # Status-Anzeige aktualisieren
         self._update_data_status()
 
-        # Status-Tabelle aktualisieren
-        self._update_status_table(0, f'✅ Geladen ({count:,} Datensaetze)')
+        # Status-Panel aktualisieren
+        self._update_status_panel_from_data(df)
 
         # Buttons aktivieren
         self.analyze_btn.setEnabled(True)
