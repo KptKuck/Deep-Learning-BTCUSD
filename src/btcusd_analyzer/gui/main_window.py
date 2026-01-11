@@ -108,8 +108,8 @@ class MainWindow(QMainWindow):
         right_panel = self._create_right_panel()
         splitter.addWidget(right_panel)
 
-        # Splitter Proportionen (420px : Rest)
-        splitter.setSizes([420, 980])
+        # Splitter Proportionen (20% : 80%)
+        splitter.setSizes([300, 1100])
         splitter.setStretchFactor(0, 0)  # Linke Spalte nicht stretchen
         splitter.setStretchFactor(1, 1)  # Rechte Spalte stretchen
 
@@ -122,8 +122,8 @@ class MainWindow(QMainWindow):
     def _create_left_panel(self) -> QWidget:
         """Erstellt das linke Control-Panel mit Scroll-Funktion."""
         panel = QWidget()
-        panel.setMinimumWidth(420)
-        panel.setMaximumWidth(450)
+        panel.setMinimumWidth(280)
+        panel.setMaximumWidth(320)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 0, 0, 0)
 
@@ -140,9 +140,9 @@ class MainWindow(QMainWindow):
 
         # Titel
         title_label = QLabel('BTCUSD Analyzer')
-        title_label.setFont(QFont('Segoe UI', 18, QFont.Weight.Bold))
+        title_label.setFont(QFont('Segoe UI', 12, QFont.Weight.Bold))
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title_label.setFixedHeight(40)
+        title_label.setFixedHeight(28)
         scroll_layout.addWidget(title_label)
 
         # === GRUPPE 1: Daten Laden ===
@@ -174,22 +174,22 @@ class MainWindow(QMainWindow):
     def _create_group_title(self, text: str, color: tuple) -> QLabel:
         """Erstellt einen Gruppen-Titel mit Hintergrundfarbe."""
         label = QLabel(text)
-        label.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
+        label.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        label.setFixedHeight(25)
+        label.setFixedHeight(20)
         r, g, b = [int(c * 255) for c in color]
         label.setStyleSheet(f'''
             QLabel {{
                 background-color: rgb({r}, {g}, {b});
                 color: white;
                 border-radius: 3px;
-                padding: 2px;
+                padding: 1px;
             }}
         ''')
         return label
 
     def _create_data_load_group(self) -> QGroupBox:
-        """Erstellt Gruppe 1: Daten Laden."""
+        """Erstellt Gruppe 1: Daten Laden - Uebersichtliche Struktur."""
         group = QGroupBox()
         group.setStyleSheet('QGroupBox { border: none; }')
         layout = QVBoxLayout(group)
@@ -199,37 +199,112 @@ class MainWindow(QMainWindow):
         title = self._create_group_title('Daten Laden', (0.2, 0.4, 0.6))
         layout.addWidget(title)
 
-        # --- Untergruppe 1.1: Lokale Datei ---
-        local_group = QGroupBox('Lokale Datei')
-        local_group.setFont(QFont('Segoe UI', 10, QFont.Weight.Bold))
-        local_layout = QVBoxLayout(local_group)
+        # === Status-Anzeige fuer geladene Daten ===
+        status_frame = QFrame()
+        status_frame.setStyleSheet('''
+            QFrame {
+                background-color: #1a1a2e;
+                border: 1px solid #333355;
+                border-radius: 3px;
+                padding: 3px;
+            }
+        ''')
+        status_layout = QVBoxLayout(status_frame)
+        status_layout.setContentsMargins(5, 3, 5, 3)
+        status_layout.setSpacing(1)
 
-        self.load_file_btn = QPushButton('CSV Datei oeffnen...')
-        self.load_file_btn.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
-        self.load_file_btn.setFixedHeight(35)
+        # Datei-Status
+        self.data_file_label = QLabel('Keine Daten geladen')
+        self.data_file_label.setFont(QFont('Segoe UI', 8))
+        self.data_file_label.setStyleSheet('color: #888888;')
+        status_layout.addWidget(self.data_file_label)
+
+        # Daten-Info (Anzahl, Zeitraum)
+        self.data_info_label = QLabel('-')
+        self.data_info_label.setFont(QFont('Segoe UI', 8))
+        self.data_info_label.setStyleSheet('color: #666666;')
+        status_layout.addWidget(self.data_info_label)
+
+        layout.addWidget(status_frame)
+
+        # === Untergruppe 1.1: Lokale Datei ===
+        local_group = QGroupBox('Lokal')
+        local_group.setFont(QFont('Segoe UI', 8, QFont.Weight.Bold))
+        local_layout = QVBoxLayout(local_group)
+        local_layout.setSpacing(3)
+        local_layout.setContentsMargins(4, 8, 4, 4)
+
+        # Button-Reihe: Oeffnen | Letzte laden
+        btn_row = QHBoxLayout()
+
+        self.load_file_btn = QPushButton('CSV...')
+        self.load_file_btn.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
+        self.load_file_btn.setFixedHeight(28)
         self.load_file_btn.setStyleSheet(self._button_style((0.4, 0.4, 0.4)))
+        self.load_file_btn.setToolTip('CSV-Datei aus Ordner waehlen')
         self.load_file_btn.clicked.connect(self._load_csv)
-        local_layout.addWidget(self.load_file_btn)
+        btn_row.addWidget(self.load_file_btn)
+
+        self.load_last_data_btn = QPushButton('Letzte')
+        self.load_last_data_btn.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
+        self.load_last_data_btn.setFixedHeight(28)
+        self.load_last_data_btn.setStyleSheet(self._button_style((0.3, 0.5, 0.4)))
+        self.load_last_data_btn.setToolTip('Zuletzt verwendete Datei laden')
+        self.load_last_data_btn.clicked.connect(self._load_last_data)
+        btn_row.addWidget(self.load_last_data_btn)
+
+        local_layout.addLayout(btn_row)
+
+        # Daten-Ordner oeffnen
+        self.open_folder_btn = QPushButton('Ordner')
+        self.open_folder_btn.setFont(QFont('Segoe UI', 8))
+        self.open_folder_btn.setFixedHeight(22)
+        self.open_folder_btn.setStyleSheet(self._button_style((0.35, 0.35, 0.4)))
+        self.open_folder_btn.setToolTip('Daten-Verzeichnis im Explorer oeffnen')
+        self.open_folder_btn.clicked.connect(self._open_data_folder)
+        local_layout.addWidget(self.open_folder_btn)
 
         layout.addWidget(local_group)
 
-        # --- Untergruppe 1.2: Binance API Download ---
-        binance_group = QGroupBox('Binance API Download')
-        binance_group.setFont(QFont('Segoe UI', 10, QFont.Weight.Bold))
+        # === Untergruppe 1.2: Binance API Download ===
+        binance_group = QGroupBox('Binance')
+        binance_group.setFont(QFont('Segoe UI', 8, QFont.Weight.Bold))
         binance_layout = QVBoxLayout(binance_group)
-        binance_layout.setSpacing(8)
+        binance_layout.setSpacing(4)
+        binance_layout.setContentsMargins(4, 8, 4, 4)
+
+        # Symbol und Intervall in einer Zeile
+        symbol_layout = QHBoxLayout()
+        symbol_layout.setSpacing(3)
+
+        self.symbol_combo = QComboBox()
+        self.symbol_combo.addItems(['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT'])
+        self.symbol_combo.setCurrentText('BTCUSDT')
+        self.symbol_combo.setFixedHeight(22)
+        symbol_layout.addWidget(self.symbol_combo)
+
+        self.interval_combo = QComboBox()
+        self.interval_combo.addItems(['1m', '5m', '15m', '1h', '4h', '1d', '1w'])
+        self.interval_combo.setCurrentText('1h')
+        self.interval_combo.setFixedHeight(22)
+        self.interval_combo.setFixedWidth(50)
+        symbol_layout.addWidget(self.interval_combo)
+
+        binance_layout.addLayout(symbol_layout)
 
         # Von-Datum
         from_layout = QHBoxLayout()
         from_label = QLabel('Von:')
-        from_label.setFont(QFont('Segoe UI', 10, QFont.Weight.Bold))
-        from_label.setFixedWidth(35)
+        from_label.setFont(QFont('Segoe UI', 8))
+        from_label.setFixedWidth(24)
         from_layout.addWidget(from_label)
 
         self.from_date = QDateEdit()
         self.from_date.setCalendarPopup(True)
-        self.from_date.setDate(QDate(2025, 9, 1))
-        self.from_date.setDisplayFormat('dd.MM.yyyy')
+        self.from_date.setDate(QDate(2025, 1, 1))
+        self.from_date.setDisplayFormat('dd.MM.yy')
+        self.from_date.setFixedHeight(22)
+        self.from_date.setFixedWidth(75)
         from_layout.addWidget(self.from_date)
 
         # Von-Buttons Grid
@@ -241,14 +316,16 @@ class MainWindow(QMainWindow):
         # Bis-Datum
         to_layout = QHBoxLayout()
         to_label = QLabel('Bis:')
-        to_label.setFont(QFont('Segoe UI', 10, QFont.Weight.Bold))
-        to_label.setFixedWidth(35)
+        to_label.setFont(QFont('Segoe UI', 8))
+        to_label.setFixedWidth(24)
         to_layout.addWidget(to_label)
 
         self.to_date = QDateEdit()
         self.to_date.setCalendarPopup(True)
-        self.to_date.setDate(QDate.currentDate())
-        self.to_date.setDisplayFormat('dd.MM.yyyy')
+        self.to_date.setDate(QDate(2025, 12, 31))
+        self.to_date.setDisplayFormat('dd.MM.yy')
+        self.to_date.setFixedHeight(22)
+        self.to_date.setFixedWidth(75)
         to_layout.addWidget(self.to_date)
 
         # Bis-Buttons Grid
@@ -257,31 +334,113 @@ class MainWindow(QMainWindow):
 
         binance_layout.addLayout(to_layout)
 
-        # Intervall Auswahl
-        interval_layout = QHBoxLayout()
-        interval_label = QLabel('Intervall:')
-        interval_label.setFont(QFont('Segoe UI', 10, QFont.Weight.Bold))
-        interval_label.setFixedWidth(60)
-        interval_layout.addWidget(interval_label)
+        # Schnellauswahl-Buttons
+        quick_layout = QHBoxLayout()
+        quick_layout.setSpacing(2)
 
-        self.interval_combo = QComboBox()
-        self.interval_combo.addItems(['1h', '4h', '1d', '1w'])
-        self.interval_combo.setCurrentText('1h')
-        interval_layout.addWidget(self.interval_combo)
+        quick_periods = [('1M', 30), ('3M', 90), ('6M', 180), ('1J', 365), ('2J', 730)]
+        for text, days in quick_periods:
+            btn = QPushButton(text)
+            btn.setFixedSize(36, 20)
+            btn.setFont(QFont('Segoe UI', 8, QFont.Weight.Bold))
+            btn.setStyleSheet(self._button_style((0.3, 0.4, 0.5)))
+            btn.setToolTip(f'Letzte {days} Tage')
+            btn.clicked.connect(lambda checked, d=days: self._set_quick_period(d))
+            quick_layout.addWidget(btn)
 
-        binance_layout.addLayout(interval_layout)
+        quick_layout.addStretch()
+        binance_layout.addLayout(quick_layout)
 
         # Download Button
-        self.download_btn = QPushButton('Von Binance herunterladen')
-        self.download_btn.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
-        self.download_btn.setFixedHeight(35)
+        self.download_btn = QPushButton('Binance Download')
+        self.download_btn.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
+        self.download_btn.setFixedHeight(28)
         self.download_btn.setStyleSheet(self._button_style((0.2, 0.55, 0.9)))
+        self.download_btn.setToolTip('Daten von Binance API herunterladen')
         self.download_btn.clicked.connect(self._download_data)
         binance_layout.addWidget(self.download_btn)
 
         layout.addWidget(binance_group)
 
         return group
+
+    def _set_quick_period(self, days: int):
+        """Setzt den Zeitraum auf die letzten X Tage."""
+        from datetime import date, timedelta
+        end_date = date.today()
+        start_date = end_date - timedelta(days=days)
+        self.from_date.setDate(QDate(start_date.year, start_date.month, start_date.day))
+        self.to_date.setDate(QDate(end_date.year, end_date.month, end_date.day))
+        self._log(f'Zeitraum gesetzt: Letzte {days} Tage', 'DEBUG')
+
+    def _load_last_data(self):
+        """Laedt die zuletzt verwendete CSV-Datei."""
+        try:
+            reader = CSVReader(self.config.paths.data_dir)
+            df, filepath = reader.load_last_csv()
+
+            if df is not None:
+                self.data = df
+                self.data_path = filepath
+                self.data_loaded.emit(df)
+                self._log(f'Letzte Datei geladen: {filepath.name}', 'SUCCESS')
+                self._update_data_status()
+            else:
+                self._log('Keine vorherige Datei gefunden', 'WARNING')
+        except Exception as e:
+            self._log(f'Fehler beim Laden: {e}', 'ERROR')
+
+    def _open_data_folder(self):
+        """Oeffnet den Daten-Ordner im Explorer."""
+        import subprocess
+        import platform
+
+        folder = self.config.paths.data_dir
+        if not folder.exists():
+            folder.mkdir(parents=True, exist_ok=True)
+
+        if platform.system() == 'Windows':
+            subprocess.Popen(['explorer', str(folder)])
+        elif platform.system() == 'Darwin':
+            subprocess.Popen(['open', str(folder)])
+        else:
+            subprocess.Popen(['xdg-open', str(folder)])
+
+        self._log(f'Ordner geoeffnet: {folder}', 'DEBUG')
+
+    def _update_data_status(self):
+        """Aktualisiert die Daten-Status-Anzeige."""
+        if self.data is not None and self.data_path is not None:
+            # Dateiname
+            self.data_file_label.setText(self.data_path.name)
+            self.data_file_label.setStyleSheet('color: #68d391;')
+
+            # Zeitraum und Anzahl
+            count = len(self.data)
+            if hasattr(self.data.index, 'min') and hasattr(self.data.index, 'max'):
+                try:
+                    start = self.data.index.min()
+                    end = self.data.index.max()
+                    if hasattr(start, 'strftime'):
+                        start_str = start.strftime('%d.%m.%y')
+                        end_str = end.strftime('%d.%m.%y')
+                    else:
+                        start_str = str(start)[:10]
+                        end_str = str(end)[:10]
+                    self.data_info_label.setText(
+                        f'{count:,} | {start_str}-{end_str}'
+                    )
+                except Exception:
+                    self.data_info_label.setText(f'{count:,} Datensaetze')
+            else:
+                self.data_info_label.setText(f'{count:,} Datensaetze')
+
+            self.data_info_label.setStyleSheet('color: #90cdf4;')
+        else:
+            self.data_file_label.setText('Keine Daten geladen')
+            self.data_file_label.setStyleSheet('color: #888888;')
+            self.data_info_label.setText('-')
+            self.data_info_label.setStyleSheet('color: #666666;')
 
     def _create_date_buttons(self, date_edit: QDateEdit) -> QWidget:
         """Erstellt +/- Buttons fuer Datumsanpassung."""
@@ -306,8 +465,8 @@ class MainWindow(QMainWindow):
 
         for text, amount, unit, row, col, color in buttons:
             btn = QPushButton(text)
-            btn.setFixedSize(45, 24)
-            btn.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
+            btn.setFixedSize(32, 20)
+            btn.setFont(QFont('Segoe UI', 8, QFont.Weight.Bold))
             btn.setStyleSheet(self._button_style(color))
             btn.clicked.connect(lambda checked, d=date_edit, a=amount, u=unit:
                                self._adjust_date(d, a, u))
@@ -333,7 +492,7 @@ class MainWindow(QMainWindow):
         group = QGroupBox()
         group.setStyleSheet('QGroupBox { border: none; }')
         layout = QVBoxLayout(group)
-        layout.setSpacing(5)
+        layout.setSpacing(4)
 
         # Titel
         title = self._create_group_title('Datenanalyse', (0.3, 0.5, 0.3))
@@ -342,19 +501,20 @@ class MainWindow(QMainWindow):
         # Buttons nebeneinander
         btn_row = QHBoxLayout()
 
-        self.analyze_btn = QPushButton('Analysieren')
-        self.analyze_btn.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
-        self.analyze_btn.setFixedHeight(35)
+        self.analyze_btn = QPushButton('Analyse')
+        self.analyze_btn.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
+        self.analyze_btn.setFixedHeight(26)
         self.analyze_btn.setStyleSheet(self._button_style((0.2, 0.8, 0.4)))
         self.analyze_btn.setEnabled(False)
         self.analyze_btn.clicked.connect(self._analyze_data)
         btn_row.addWidget(self.analyze_btn)
 
-        self.prepare_btn = QPushButton('Training vorbereiten')
-        self.prepare_btn.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
-        self.prepare_btn.setFixedHeight(35)
+        self.prepare_btn = QPushButton('Vorbereiten')
+        self.prepare_btn.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
+        self.prepare_btn.setFixedHeight(26)
         self.prepare_btn.setStyleSheet(self._button_style((0.8, 0.4, 0.2)))
         self.prepare_btn.setEnabled(False)
+        self.prepare_btn.setToolTip('Training vorbereiten')
         self.prepare_btn.clicked.connect(self._prepare_training_data)
         btn_row.addWidget(self.prepare_btn)
 
@@ -362,18 +522,19 @@ class MainWindow(QMainWindow):
 
         # Signale visualisieren
         self.visualize_btn = QPushButton('Signale visualisieren')
-        self.visualize_btn.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
-        self.visualize_btn.setFixedHeight(35)
+        self.visualize_btn.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
+        self.visualize_btn.setFixedHeight(26)
         self.visualize_btn.setStyleSheet(self._button_style((0.2, 0.8, 0.8)))
         self.visualize_btn.setEnabled(False)
         self.visualize_btn.clicked.connect(self._visualize_signals)
         layout.addWidget(self.visualize_btn)
 
         # Trainingsdaten aus Workspace laden
-        self.load_training_btn = QPushButton('Trainingsdaten aus Workspace laden')
-        self.load_training_btn.setFont(QFont('Segoe UI', 10, QFont.Weight.Bold))
-        self.load_training_btn.setFixedHeight(30)
+        self.load_training_btn = QPushButton('Trainingsdaten laden')
+        self.load_training_btn.setFont(QFont('Segoe UI', 8))
+        self.load_training_btn.setFixedHeight(22)
         self.load_training_btn.setStyleSheet(self._button_style((0.5, 0.3, 0.6)))
+        self.load_training_btn.setToolTip('Trainingsdaten aus Workspace laden')
         self.load_training_btn.clicked.connect(self._load_training_data)
         layout.addWidget(self.load_training_btn)
 
@@ -384,16 +545,16 @@ class MainWindow(QMainWindow):
         group = QGroupBox()
         group.setStyleSheet('QGroupBox { border: none; }')
         layout = QVBoxLayout(group)
-        layout.setSpacing(5)
+        layout.setSpacing(4)
 
         # Titel
         title = self._create_group_title('BILSTM Training', (0.6, 0.2, 0.8))
         layout.addWidget(title)
 
         # Training GUI Button
-        self.train_gui_btn = QPushButton('Training GUI oeffnen...')
-        self.train_gui_btn.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
-        self.train_gui_btn.setFixedHeight(40)
+        self.train_gui_btn = QPushButton('Training GUI...')
+        self.train_gui_btn.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
+        self.train_gui_btn.setFixedHeight(28)
         self.train_gui_btn.setStyleSheet(self._button_style((0.6, 0.2, 0.8)))
         self.train_gui_btn.setEnabled(False)
         self.train_gui_btn.clicked.connect(self._open_training_gui)
@@ -406,7 +567,7 @@ class MainWindow(QMainWindow):
         group = QGroupBox()
         group.setStyleSheet('QGroupBox { border: none; }')
         layout = QVBoxLayout(group)
-        layout.setSpacing(5)
+        layout.setSpacing(4)
 
         # Titel
         title = self._create_group_title('Modell & Vorhersage', (1.0, 0.6, 0.2))
@@ -416,24 +577,24 @@ class MainWindow(QMainWindow):
         btn_row = QHBoxLayout()
 
         self.load_model_btn = QPushButton('Laden')
-        self.load_model_btn.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
-        self.load_model_btn.setFixedHeight(35)
+        self.load_model_btn.setFont(QFont('Segoe UI', 8, QFont.Weight.Bold))
+        self.load_model_btn.setFixedHeight(24)
         self.load_model_btn.setStyleSheet(self._button_style((0.5, 0.5, 0.5)))
         self.load_model_btn.setToolTip('Modell aus Datei laden')
         self.load_model_btn.clicked.connect(self._load_model)
         btn_row.addWidget(self.load_model_btn)
 
         self.load_last_btn = QPushButton('Letztes')
-        self.load_last_btn.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
-        self.load_last_btn.setFixedHeight(35)
+        self.load_last_btn.setFont(QFont('Segoe UI', 8, QFont.Weight.Bold))
+        self.load_last_btn.setFixedHeight(24)
         self.load_last_btn.setStyleSheet(self._button_style((0.4, 0.6, 0.7)))
         self.load_last_btn.setToolTip('Zuletzt verwendetes Modell laden')
         self.load_last_btn.clicked.connect(self._load_last_model)
         btn_row.addWidget(self.load_last_btn)
 
-        self.predict_btn = QPushButton('Vorhersage')
-        self.predict_btn.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
-        self.predict_btn.setFixedHeight(35)
+        self.predict_btn = QPushButton('Predict')
+        self.predict_btn.setFont(QFont('Segoe UI', 8, QFont.Weight.Bold))
+        self.predict_btn.setFixedHeight(24)
         self.predict_btn.setStyleSheet(self._button_style((1.0, 0.6, 0.2)))
         self.predict_btn.setToolTip('Vorhersage mit geladenem Modell')
         self.predict_btn.setEnabled(False)
@@ -443,9 +604,9 @@ class MainWindow(QMainWindow):
         layout.addLayout(btn_row)
 
         # Backtester Button
-        self.backtest_btn = QPushButton('Backtester starten')
-        self.backtest_btn.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
-        self.backtest_btn.setFixedHeight(35)
+        self.backtest_btn = QPushButton('Backtester')
+        self.backtest_btn.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
+        self.backtest_btn.setFixedHeight(26)
         self.backtest_btn.setStyleSheet(self._button_style((0.7, 0.4, 0.8)))
         self.backtest_btn.setEnabled(False)
         self.backtest_btn.clicked.connect(self._open_backtester)
@@ -453,12 +614,12 @@ class MainWindow(QMainWindow):
 
         # Modell Info Labels
         self.model_name_label = QLabel('Modell: -')
-        self.model_name_label.setFont(QFont('Segoe UI', 10))
+        self.model_name_label.setFont(QFont('Segoe UI', 8))
         self.model_name_label.setStyleSheet('color: #999999;')
         layout.addWidget(self.model_name_label)
 
         self.model_folder_label = QLabel('Ordner: -')
-        self.model_folder_label.setFont(QFont('Segoe UI', 10))
+        self.model_folder_label.setFont(QFont('Segoe UI', 8))
         self.model_folder_label.setStyleSheet('color: #808080;')
         layout.addWidget(self.model_folder_label)
 
@@ -469,26 +630,28 @@ class MainWindow(QMainWindow):
         group = QGroupBox()
         group.setStyleSheet('QGroupBox { border: none; }')
         layout = QVBoxLayout(group)
-        layout.setSpacing(5)
+        layout.setSpacing(4)
 
         # Titel
-        title = self._create_group_title('Parameter Management', (0.4, 0.7, 0.5))
+        title = self._create_group_title('Parameter', (0.4, 0.7, 0.5))
         layout.addWidget(title)
 
         # Buttons nebeneinander
         btn_row = QHBoxLayout()
 
-        self.save_params_btn = QPushButton('Parameter speichern')
-        self.save_params_btn.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
-        self.save_params_btn.setFixedHeight(35)
+        self.save_params_btn = QPushButton('Speichern')
+        self.save_params_btn.setFont(QFont('Segoe UI', 8, QFont.Weight.Bold))
+        self.save_params_btn.setFixedHeight(24)
         self.save_params_btn.setStyleSheet(self._button_style((0.3, 0.6, 0.4)))
+        self.save_params_btn.setToolTip('Parameter speichern')
         self.save_params_btn.clicked.connect(self._save_parameters)
         btn_row.addWidget(self.save_params_btn)
 
-        self.load_params_btn = QPushButton('Parameter laden')
-        self.load_params_btn.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
-        self.load_params_btn.setFixedHeight(35)
+        self.load_params_btn = QPushButton('Laden')
+        self.load_params_btn.setFont(QFont('Segoe UI', 8, QFont.Weight.Bold))
+        self.load_params_btn.setFixedHeight(24)
         self.load_params_btn.setStyleSheet(self._button_style((0.5, 0.8, 0.6)))
+        self.load_params_btn.setToolTip('Parameter laden')
         self.load_params_btn.clicked.connect(self._load_parameters)
         btn_row.addWidget(self.load_params_btn)
 
@@ -748,18 +911,19 @@ class MainWindow(QMainWindow):
 
     def _download_data(self):
         """Startet Binance Download."""
+        symbol = self.symbol_combo.currentText()
         from_date = self.from_date.date().toPyDate()
         to_date = self.to_date.date().toPyDate()
         interval = self.interval_combo.currentText()
 
-        self._log(f'Download gestartet: {from_date} bis {to_date}, Intervall: {interval}', 'INFO')
+        self._log(f'Download gestartet: {symbol} {from_date} bis {to_date}, Intervall: {interval}', 'INFO')
 
         try:
-            from ..data.binance_client import BinanceDownloader
+            from ..data.downloader import BinanceDownloader
             downloader = BinanceDownloader(self.config.paths.data_dir)
 
             df, filepath = downloader.download(
-                symbol='BTCUSDT',
+                symbol=symbol,
                 interval=interval,
                 start_date=from_date,
                 end_date=to_date
@@ -770,6 +934,7 @@ class MainWindow(QMainWindow):
                 self.data_path = filepath
                 self.data_loaded.emit(df)
                 self._log(f'Download erfolgreich: {len(df)} Datensaetze', 'SUCCESS')
+                self._update_data_status()
             else:
                 self._log('Download fehlgeschlagen', 'ERROR')
         except Exception as e:
@@ -1009,10 +1174,11 @@ class MainWindow(QMainWindow):
     def _on_data_loaded(self, df: pd.DataFrame):
         """Wird aufgerufen wenn Daten geladen wurden."""
         count = len(df)
-        start = df.index[0] if hasattr(df.index[0], 'strftime') else str(df.index[0])
-        end = df.index[-1] if hasattr(df.index[-1], 'strftime') else str(df.index[-1])
 
         self.status_label.setText(f'Daten geladen: {count:,} Datensaetze')
+
+        # Status-Anzeige aktualisieren
+        self._update_data_status()
 
         # Buttons aktivieren
         self.analyze_btn.setEnabled(True)
