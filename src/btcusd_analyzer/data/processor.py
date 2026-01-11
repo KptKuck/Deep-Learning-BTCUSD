@@ -15,8 +15,10 @@ class FeatureProcessor:
     Generiert Features aus OHLCV-Rohdaten.
 
     Verfuegbare Features:
-    - Basis: Open, High, Low, Close, Volume
+    - Basis: Open, High, Low, Close
     - Abgeleitet: PriceChange, PriceChangePct, Range, RangePct
+    - Volumen: Volume, RelativeVolume
+    - Zeit (zyklisch): hour_sin, hour_cos
     - Technisch: SMA, EMA, RSI, MACD, Bollinger Bands, ATR
 
     Attributes:
@@ -25,6 +27,14 @@ class FeatureProcessor:
 
     # Standard-Features (wie im MATLAB-Projekt)
     DEFAULT_FEATURES = ['Open', 'High', 'Low', 'Close', 'PriceChange', 'PriceChangePct']
+
+    # Alle verfuegbaren Features fuer GUI-Auswahl
+    AVAILABLE_FEATURES = {
+        'price': ['Open', 'High', 'Low', 'Close', 'PriceChange', 'PriceChangePct'],
+        'volume': ['Volume', 'RelativeVolume'],
+        'time': ['hour_sin', 'hour_cos'],
+        'technical': ['SMA', 'EMA', 'RSI', 'ATR', 'MACD', 'BB_Upper', 'BB_Lower', 'BB_Width'],
+    }
 
     def __init__(self, features: Optional[List[str]] = None):
         """
@@ -176,6 +186,40 @@ class FeatureProcessor:
         lower = self._calc_bb_lower(df, period, std_dev)
         sma = df['Close'].rolling(window=period).mean()
         return (upper - lower) / sma * 100
+
+    # === Volumen-Features ===
+
+    def _calc_volume(self, df: pd.DataFrame) -> pd.Series:
+        """Rohes Handelsvolumen."""
+        if 'Vol' in df.columns:
+            return df['Vol']
+        elif 'TickVol' in df.columns:
+            return df['TickVol']
+        return pd.Series(0, index=df.index)
+
+    def _calc_relativevolume(self, df: pd.DataFrame) -> pd.Series:
+        """Relatives Volumen (aktuell / 20-Perioden-Durchschnitt)."""
+        vol = self._calc_volume(df)
+        sma20 = vol.rolling(window=20).mean()
+        return (vol / sma20).fillna(1.0)
+
+    # === Zeit-Features (zyklisch kodiert) ===
+
+    def _calc_hour_sin(self, df: pd.DataFrame) -> pd.Series:
+        """Stunde als Sinus (zyklisch kodiert)."""
+        if 'DateTime' not in df.columns:
+            self.logger.warning('DateTime-Spalte fehlt fuer hour_sin')
+            return pd.Series(0, index=df.index)
+        hour = df['DateTime'].dt.hour
+        return np.sin(2 * np.pi * hour / 24)
+
+    def _calc_hour_cos(self, df: pd.DataFrame) -> pd.Series:
+        """Stunde als Cosinus (zyklisch kodiert)."""
+        if 'DateTime' not in df.columns:
+            self.logger.warning('DateTime-Spalte fehlt fuer hour_cos')
+            return pd.Series(0, index=df.index)
+        hour = df['DateTime'].dt.hour
+        return np.cos(2 * np.pi * hour / 24)
 
     def add_feature(self, name: str):
         """Fuegt ein Feature zur Liste hinzu."""
