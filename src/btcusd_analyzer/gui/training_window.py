@@ -142,6 +142,10 @@ class TrainingWorker(QThread):
                 'model_path': str(final_model_path)
             })
 
+            # Trainer-Referenzen aufraeumen
+            del trainer
+            del history
+
         except torch.cuda.OutOfMemoryError as e:
             # GPU Speicher freigeben
             if torch.cuda.is_available():
@@ -173,13 +177,32 @@ class TrainingWorker(QThread):
             self.training_error.emit(error_msg)
 
         finally:
-            # Speicher aufraeumen
+            # Gruendliches Speicher-Cleanup im Worker
+            import gc
             try:
+                # Modell auf CPU verschieben vor Cleanup
+                if self.model is not None:
+                    try:
+                        self.model.cpu()
+                    except Exception:
+                        pass
+
+                # GPU aufraeumen
                 if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                    for _ in range(3):
+                        torch.cuda.empty_cache()
                     torch.cuda.synchronize()
-            except Exception:
-                pass  # Ignorieren wenn Cleanup fehlschlaegt
+
+                    # Memory Status loggen
+                    allocated = torch.cuda.memory_allocated(0) / (1024 ** 3)
+                    reserved = torch.cuda.memory_reserved(0) / (1024 ** 3)
+                    self.log_message.emit(f"Worker Cleanup: GPU {allocated:.2f}GB alloc / {reserved:.2f}GB reserved")
+
+                # GC forcieren
+                gc.collect()
+
+            except Exception as cleanup_err:
+                self.log_message.emit(f"Cleanup Warnung: {cleanup_err}")
 
     def stop(self):
         """Stoppt das Training."""
@@ -690,27 +713,61 @@ class TrainingWindow(QMainWindow):
         """Raeumt vorheriges Modell und GPU-Speicher auf vor neuem Training."""
         import gc
 
+        self._log("Cleanup: Raeume vorheriges Training auf...")
+
         # Worker beenden falls noch aktiv
         if self.worker is not None:
+            self._log("Cleanup: Worker stoppen...")
             if self.worker.isRunning():
                 self.worker.stop()
                 self.worker.wait(5000)  # Max 5 Sekunden warten
+
+            # Worker-Referenzen explizit loeschen
+            if hasattr(self.worker, 'model') and self.worker.model is not None:
+                try:
+                    self.worker.model.cpu()
+                except Exception:
+                    pass
+                self.worker.model = None
+
+            if hasattr(self.worker, 'train_loader'):
+                self.worker.train_loader = None
+            if hasattr(self.worker, 'val_loader'):
+                self.worker.val_loader = None
+
+            self.worker.deleteLater()  # Qt-seitig aufräumen
             self.worker = None
 
         # Altes Modell vom GPU entfernen
         if self.model is not None:
-            self.model.cpu()  # Erst auf CPU verschieben
+            self._log("Cleanup: Modell entfernen...")
+            try:
+                self.model.cpu()  # Erst auf CPU verschieben
+            except Exception:
+                pass
             del self.model
             self.model = None
 
-        # GPU Cache komplett leeren
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()  # Warten bis alles abgeschlossen
-            self._log("GPU-Speicher freigegeben fuer neues Training")
+        # History zuruecksetzen
+        self.history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
 
-        # Python Garbage Collection forcieren
-        gc.collect()
+        # GPU Cache komplett leeren - mehrfach fuer gruendliches Cleanup
+        if torch.cuda.is_available():
+            for _ in range(3):  # Mehrfach leeren
+                torch.cuda.empty_cache()
+            torch.cuda.synchronize()  # Warten bis alles abgeschlossen
+
+            # GPU Memory Status loggen
+            allocated = torch.cuda.memory_allocated(0) / (1024 ** 3)
+            reserved = torch.cuda.memory_reserved(0) / (1024 ** 3)
+            self._log(f"Cleanup: GPU nach Cleanup - {allocated:.2f}GB alloc / {reserved:.2f}GB reserved")
+
+        # Python Garbage Collection forcieren - mehrere Generationen
+        gc.collect(0)  # Generation 0
+        gc.collect(1)  # Generation 1
+        gc.collect(2)  # Generation 2 (alle)
+
+        self._log("Cleanup: Abgeschlossen")
 
     def _start_training(self):
         """Startet das Training."""
