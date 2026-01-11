@@ -291,38 +291,100 @@ class PrepareDataWindow(QMainWindow):
         self.zigzag_threshold_spin.setSingleStep(0.5)
         method_params_layout.addWidget(self.zigzag_threshold_spin, 0, 1)
 
-        # Peak Prominence
-        self.prominence_label = QLabel('Prominenz %:')
-        method_params_layout.addWidget(self.prominence_label, 1, 0)
+        # === Peak Detection Parameter (scipy.signal.find_peaks) ===
+        # Basis-Parameter
+        self.peak_distance_label = QLabel('Distance (Abstand):')
+        self.peak_distance_label.setToolTip('Mindestabstand zwischen zwei Peaks in Datenpunkten')
+        method_params_layout.addWidget(self.peak_distance_label, 1, 0)
+        self.peak_distance_spin = QSpinBox()
+        self.peak_distance_spin.setRange(1, 500)
+        self.peak_distance_spin.setValue(10)
+        self.peak_distance_spin.setToolTip('Mindestabstand zwischen Peaks')
+        method_params_layout.addWidget(self.peak_distance_spin, 1, 1)
+
+        self.prominence_label = QLabel('Prominence %:')
+        self.prominence_label.setToolTip('Wie stark der Peak herausragen muss (% der Preisspanne)')
+        method_params_layout.addWidget(self.prominence_label, 2, 0)
         self.prominence_spin = QDoubleSpinBox()
-        self.prominence_spin.setRange(0.1, 5.0)
+        self.prominence_spin.setRange(0.0, 10.0)
         self.prominence_spin.setValue(0.5)
         self.prominence_spin.setSingleStep(0.1)
-        method_params_layout.addWidget(self.prominence_spin, 1, 1)
+        self.prominence_spin.setToolTip('0 = deaktiviert')
+        method_params_layout.addWidget(self.prominence_spin, 2, 1)
 
-        # Peak Distance
-        self.distance_label = QLabel('Min. Abstand:')
-        method_params_layout.addWidget(self.distance_label, 2, 0)
-        self.peak_distance_spin = QSpinBox()
-        self.peak_distance_spin.setRange(1, 100)
-        self.peak_distance_spin.setValue(10)
-        method_params_layout.addWidget(self.peak_distance_spin, 2, 1)
+        self.peak_width_label = QLabel('Width (Breite):')
+        self.peak_width_label.setToolTip('Minimale Breite des Peaks in Datenpunkten')
+        method_params_layout.addWidget(self.peak_width_label, 3, 0)
+        self.peak_width_spin = QSpinBox()
+        self.peak_width_spin.setRange(0, 100)
+        self.peak_width_spin.setValue(0)
+        self.peak_width_spin.setToolTip('0 = deaktiviert')
+        method_params_layout.addWidget(self.peak_width_spin, 3, 1)
+
+        # Erweiterte Parameter
+        self.peak_height_label = QLabel('Height %:')
+        self.peak_height_label.setToolTip('Mindest-Peakwert als % vom Mittelwert')
+        method_params_layout.addWidget(self.peak_height_label, 4, 0)
+        self.peak_height_spin = QDoubleSpinBox()
+        self.peak_height_spin.setRange(0.0, 50.0)
+        self.peak_height_spin.setValue(0.0)
+        self.peak_height_spin.setSingleStep(0.5)
+        self.peak_height_spin.setToolTip('0 = deaktiviert')
+        method_params_layout.addWidget(self.peak_height_spin, 4, 1)
+
+        self.peak_threshold_label = QLabel('Threshold %:')
+        self.peak_threshold_label.setToolTip('Mindestdifferenz zu direkten Nachbarn (% der Preisspanne)')
+        method_params_layout.addWidget(self.peak_threshold_label, 5, 0)
+        self.peak_threshold_spin = QDoubleSpinBox()
+        self.peak_threshold_spin.setRange(0.0, 10.0)
+        self.peak_threshold_spin.setValue(0.0)
+        self.peak_threshold_spin.setSingleStep(0.1)
+        self.peak_threshold_spin.setToolTip('0 = deaktiviert, strenger als Prominence')
+        method_params_layout.addWidget(self.peak_threshold_spin, 5, 1)
+
+        self.peak_plateau_label = QLabel('Plateau Size:')
+        self.peak_plateau_label.setToolTip('Minimale Plateau-Groesse fuer flache Peaks')
+        method_params_layout.addWidget(self.peak_plateau_label, 6, 0)
+        self.peak_plateau_spin = QSpinBox()
+        self.peak_plateau_spin.setRange(0, 50)
+        self.peak_plateau_spin.setValue(0)
+        self.peak_plateau_spin.setToolTip('0 = deaktiviert')
+        method_params_layout.addWidget(self.peak_plateau_spin, 6, 1)
+
+        self.peak_wlen_label = QLabel('Window Length:')
+        self.peak_wlen_label.setToolTip('Fenstergroesse fuer Prominence-Berechnung')
+        method_params_layout.addWidget(self.peak_wlen_label, 7, 0)
+        self.peak_wlen_spin = QSpinBox()
+        self.peak_wlen_spin.setRange(0, 1000)
+        self.peak_wlen_spin.setValue(0)
+        self.peak_wlen_spin.setToolTip('0 = gesamte Daten verwenden')
+        method_params_layout.addWidget(self.peak_wlen_spin, 7, 1)
+
+        self.peak_rel_height_label = QLabel('Rel. Height:')
+        self.peak_rel_height_label.setToolTip('Relative Hoehe fuer Width-Berechnung (0.0-1.0)')
+        method_params_layout.addWidget(self.peak_rel_height_label, 8, 0)
+        self.peak_rel_height_spin = QDoubleSpinBox()
+        self.peak_rel_height_spin.setRange(0.01, 0.99)
+        self.peak_rel_height_spin.setValue(0.5)
+        self.peak_rel_height_spin.setSingleStep(0.05)
+        self.peak_rel_height_spin.setToolTip('Standard: 0.5 (halbe Hoehe)')
+        method_params_layout.addWidget(self.peak_rel_height_spin, 8, 1)
 
         # Fractal Order
         self.fractal_label = QLabel('Fractal Order:')
-        method_params_layout.addWidget(self.fractal_label, 3, 0)
+        method_params_layout.addWidget(self.fractal_label, 9, 0)
         self.fractal_order_spin = QSpinBox()
         self.fractal_order_spin.setRange(1, 5)
         self.fractal_order_spin.setValue(2)
-        method_params_layout.addWidget(self.fractal_order_spin, 3, 1)
+        method_params_layout.addWidget(self.fractal_order_spin, 9, 1)
 
         # Pivot Lookback
         self.pivot_label = QLabel('Pivot Lookback:')
-        method_params_layout.addWidget(self.pivot_label, 4, 0)
+        method_params_layout.addWidget(self.pivot_label, 10, 0)
         self.pivot_lookback_spin = QSpinBox()
         self.pivot_lookback_spin.setRange(1, 20)
         self.pivot_lookback_spin.setValue(5)
-        method_params_layout.addWidget(self.pivot_lookback_spin, 4, 1)
+        method_params_layout.addWidget(self.pivot_lookback_spin, 10, 1)
 
         scroll_layout.addWidget(self.method_params_group)
 
@@ -361,10 +423,24 @@ class PrepareDataWindow(QMainWindow):
         # Alle verstecken
         self.zigzag_label.hide()
         self.zigzag_threshold_spin.hide()
+        # Peak Detection Parameter
+        self.peak_distance_label.hide()
+        self.peak_distance_spin.hide()
         self.prominence_label.hide()
         self.prominence_spin.hide()
-        self.distance_label.hide()
-        self.peak_distance_spin.hide()
+        self.peak_width_label.hide()
+        self.peak_width_spin.hide()
+        self.peak_height_label.hide()
+        self.peak_height_spin.hide()
+        self.peak_threshold_label.hide()
+        self.peak_threshold_spin.hide()
+        self.peak_plateau_label.hide()
+        self.peak_plateau_spin.hide()
+        self.peak_wlen_label.hide()
+        self.peak_wlen_spin.hide()
+        self.peak_rel_height_label.hide()
+        self.peak_rel_height_spin.hide()
+        # Andere
         self.fractal_label.hide()
         self.fractal_order_spin.hide()
         self.pivot_label.hide()
@@ -375,11 +451,23 @@ class PrepareDataWindow(QMainWindow):
             self.zigzag_label.show()
             self.zigzag_threshold_spin.show()
             self.method_params_group.show()
-        elif method_idx == 2:  # Peak Detection
+        elif method_idx == 2:  # Peak Detection - alle Parameter anzeigen
+            self.peak_distance_label.show()
+            self.peak_distance_spin.show()
             self.prominence_label.show()
             self.prominence_spin.show()
-            self.distance_label.show()
-            self.peak_distance_spin.show()
+            self.peak_width_label.show()
+            self.peak_width_spin.show()
+            self.peak_height_label.show()
+            self.peak_height_spin.show()
+            self.peak_threshold_label.show()
+            self.peak_threshold_spin.show()
+            self.peak_plateau_label.show()
+            self.peak_plateau_spin.show()
+            self.peak_wlen_label.show()
+            self.peak_wlen_spin.show()
+            self.peak_rel_height_label.show()
+            self.peak_rel_height_spin.show()
             self.method_params_group.show()
         elif method_idx == 3:  # Fractals
             self.fractal_label.show()
@@ -423,14 +511,22 @@ class PrepareDataWindow(QMainWindow):
                 6: LabelingMethod.BINARY,
             }
 
-            # Config erstellen
+            # Config erstellen mit allen Parametern
             config = LabelingConfig(
                 method=method_map[self.labeling_method_combo.currentIndex()],
                 lookforward=self.label_lookforward_spin.value(),
                 threshold_pct=self.label_threshold_spin.value(),
                 zigzag_threshold=self.zigzag_threshold_spin.value(),
-                prominence=self.prominence_spin.value(),
-                distance=self.peak_distance_spin.value(),
+                # Peak Detection Parameter (scipy.signal.find_peaks)
+                peak_distance=self.peak_distance_spin.value(),
+                peak_prominence=self.prominence_spin.value(),
+                peak_width=self.peak_width_spin.value() if self.peak_width_spin.value() > 0 else None,
+                peak_height=self.peak_height_spin.value() if self.peak_height_spin.value() > 0 else None,
+                peak_threshold=self.peak_threshold_spin.value() if self.peak_threshold_spin.value() > 0 else None,
+                peak_plateau_size=self.peak_plateau_spin.value() if self.peak_plateau_spin.value() > 0 else None,
+                peak_wlen=self.peak_wlen_spin.value() if self.peak_wlen_spin.value() > 0 else None,
+                peak_rel_height=self.peak_rel_height_spin.value(),
+                # Andere Methoden
                 fractal_order=self.fractal_order_spin.value(),
                 pivot_lookback=self.pivot_lookback_spin.value(),
             )
@@ -1112,10 +1208,107 @@ class PrepareDataWindow(QMainWindow):
             }
         ''')
 
+        # Zusaetzliche Zoom-Kontrollen
+        zoom_controls = QWidget()
+        zoom_layout = QHBoxLayout(zoom_controls)
+        zoom_layout.setContentsMargins(0, 5, 0, 5)
+        zoom_layout.setSpacing(10)
+
+        # Autozoom Button (erste 20 Signale)
+        self.autozoom_btn = QPushButton('Erste 20 Signale')
+        self.autozoom_btn.setStyleSheet(self._get_button_stylesheet('#4da8da'))
+        self.autozoom_btn.clicked.connect(self._autozoom_first_signals)
+        zoom_layout.addWidget(self.autozoom_btn)
+
+        # X-Zoom Buttons
+        zoom_layout.addWidget(QLabel('X:'))
+        self.zoom_x_in_btn = QPushButton('+')
+        self.zoom_x_in_btn.setFixedWidth(30)
+        self.zoom_x_in_btn.setStyleSheet(self._get_button_stylesheet('#555555'))
+        self.zoom_x_in_btn.clicked.connect(lambda: self._zoom_axis('x', 0.8))
+        zoom_layout.addWidget(self.zoom_x_in_btn)
+
+        self.zoom_x_out_btn = QPushButton('-')
+        self.zoom_x_out_btn.setFixedWidth(30)
+        self.zoom_x_out_btn.setStyleSheet(self._get_button_stylesheet('#555555'))
+        self.zoom_x_out_btn.clicked.connect(lambda: self._zoom_axis('x', 1.25))
+        zoom_layout.addWidget(self.zoom_x_out_btn)
+
+        # Y-Zoom Buttons
+        zoom_layout.addWidget(QLabel('Y:'))
+        self.zoom_y_in_btn = QPushButton('+')
+        self.zoom_y_in_btn.setFixedWidth(30)
+        self.zoom_y_in_btn.setStyleSheet(self._get_button_stylesheet('#555555'))
+        self.zoom_y_in_btn.clicked.connect(lambda: self._zoom_axis('y', 0.8))
+        zoom_layout.addWidget(self.zoom_y_in_btn)
+
+        self.zoom_y_out_btn = QPushButton('-')
+        self.zoom_y_out_btn.setFixedWidth(30)
+        self.zoom_y_out_btn.setStyleSheet(self._get_button_stylesheet('#555555'))
+        self.zoom_y_out_btn.clicked.connect(lambda: self._zoom_axis('y', 1.25))
+        zoom_layout.addWidget(self.zoom_y_out_btn)
+
+        # Reset Button
+        self.reset_zoom_btn = QPushButton('Reset')
+        self.reset_zoom_btn.setStyleSheet(self._get_button_stylesheet('#666666'))
+        self.reset_zoom_btn.clicked.connect(self._reset_zoom)
+        zoom_layout.addWidget(self.reset_zoom_btn)
+
+        zoom_layout.addStretch()
+
         layout.addWidget(self.toolbar)
+        layout.addWidget(zoom_controls)
         layout.addWidget(self.canvas)
 
         return panel
+
+    def _zoom_axis(self, axis: str, factor: float):
+        """Zoomt eine einzelne Achse."""
+        if axis == 'x':
+            xlim = self.ax.get_xlim()
+            center = (xlim[0] + xlim[1]) / 2
+            width = (xlim[1] - xlim[0]) * factor
+            self.ax.set_xlim(center - width/2, center + width/2)
+        else:
+            ylim = self.ax.get_ylim()
+            center = (ylim[0] + ylim[1]) / 2
+            height = (ylim[1] - ylim[0]) * factor
+            self.ax.set_ylim(center - height/2, center + height/2)
+        self.canvas.draw()
+
+    def _reset_zoom(self):
+        """Setzt den Zoom auf die gesamte Ansicht zurueck."""
+        self.ax.autoscale()
+        self.canvas.draw()
+
+    def _autozoom_first_signals(self):
+        """Zoomt auf die ersten 20 Signale."""
+        if not hasattr(self, '_last_signal_indices') or not self._last_signal_indices:
+            return
+
+        all_signals = sorted(self._last_signal_indices)
+        if len(all_signals) == 0:
+            return
+
+        # Zeige die ersten 20 Signale (oder alle wenn weniger)
+        num_signals = min(20, len(all_signals))
+        end_idx = all_signals[num_signals - 1]
+
+        # Etwas Puffer hinzufuegen
+        start_idx = max(0, all_signals[0] - 50)
+        end_idx = end_idx + 50
+
+        self.ax.set_xlim(start_idx, end_idx)
+
+        # Y-Limits an sichtbaren Bereich anpassen
+        if hasattr(self, '_last_prices'):
+            visible_prices = self._last_prices[start_idx:end_idx]
+            if len(visible_prices) > 0:
+                y_min, y_max = visible_prices.min(), visible_prices.max()
+                y_margin = (y_max - y_min) * 0.05
+                self.ax.set_ylim(y_min - y_margin, y_max + y_margin)
+
+        self.canvas.draw()
 
     def _style_axis(self, ax):
         """Stylt eine Matplotlib-Achse im Dark Theme."""
@@ -1213,12 +1406,16 @@ class PrepareDataWindow(QMainWindow):
         return panel
 
     def _calculate_preview(self):
-        """Berechnet die Vorschau der Trainingsdaten."""
+        """Berechnet die Vorschau der Trainingsdaten basierend auf bereits generierten Labels."""
         self.status_label.setText('Berechne Vorschau...')
         self.status_label.setStyleSheet('color: #4da8da;')
 
         try:
-            from ..training.labeler import DailyExtremaLabeler
+            # Pruefe ob Labels bereits generiert wurden
+            if self.generated_labels is None:
+                self.status_label.setText('Fehler: Zuerst Labels generieren!')
+                self.status_label.setStyleSheet('color: #fc8181;')
+                return
 
             close_col = 'Close' if 'Close' in self.data.columns else 'close'
             prices = self.data[close_col].values
@@ -1226,19 +1423,8 @@ class PrepareDataWindow(QMainWindow):
             lookback = self.params['lookback']
             lookforward = self.params['lookforward']
 
-            # Verwende echten Labeler
-            labeler = DailyExtremaLabeler(
-                lookforward=lookforward,
-                threshold_pct=2.0  # Standard Schwellwert
-            )
-
-            # Generiere Labels basierend auf Auto-Modus
-            if self.params['auto_gen']:
-                # Auto-Modus: Future Return Methode
-                labels = labeler.generate_labels(self.data, method='future_return')
-            else:
-                # Manuell: Extrema-basiert
-                labels = labeler.generate_labels(self.data, method='extrema')
+            # Verwende die bereits generierten Labels aus Tab 1
+            labels = self.generated_labels
 
             # Finde Signal-Indizes (ohne Randbereich)
             buy_indices = []
@@ -1292,6 +1478,10 @@ class PrepareDataWindow(QMainWindow):
         self.ax.clear()
         self._style_axis(self.ax)
 
+        # Speichere fuer Autozoom
+        self._last_prices = prices
+        self._last_signal_indices = sorted(buy_indices + sell_indices)
+
         # Preis-Linie
         self.ax.plot(prices, color='white', linewidth=0.5, alpha=0.8)
 
@@ -1312,16 +1502,17 @@ class PrepareDataWindow(QMainWindow):
         self.ax.legend(loc='upper left', facecolor='#333333', edgecolor='#555555',
                       labelcolor='white')
 
-        # Initial-Zoom: Starte ab dem 16. Label (15 Labels nicht sichtbar)
-        all_signal_indices = sorted(buy_indices + sell_indices)
-        if len(all_signal_indices) > 15:
-            # Starte ab Index des 16. Labels
-            start_idx = all_signal_indices[15]
-            # Etwas Puffer nach links
-            start_idx = max(0, start_idx - 50)
-            self.ax.set_xlim(start_idx, len(prices))
+        # Initial-Zoom: Zeige die ersten 20 Signale
+        if len(self._last_signal_indices) > 0:
+            num_signals = min(20, len(self._last_signal_indices))
+            end_idx = self._last_signal_indices[num_signals - 1]
+            start_idx = max(0, self._last_signal_indices[0] - 50)
+            end_idx = end_idx + 50
+
+            self.ax.set_xlim(start_idx, end_idx)
+
             # Y-Limits an sichtbaren Bereich anpassen
-            visible_prices = prices[start_idx:]
+            visible_prices = prices[start_idx:min(end_idx, len(prices))]
             if len(visible_prices) > 0:
                 y_min, y_max = visible_prices.min(), visible_prices.max()
                 y_margin = (y_max - y_min) * 0.05
@@ -1361,7 +1552,7 @@ class PrepareDataWindow(QMainWindow):
             self.status_label.setStyleSheet('color: #fc8181;')
 
     def _button_style(self, color: tuple) -> str:
-        """Generiert Button-Stylesheet."""
+        """Generiert Button-Stylesheet aus RGB-Tuple (0-1)."""
         r, g, b = [int(c * 255) for c in color]
         r_h, g_h, b_h = [min(255, int(c * 255 * 1.2)) for c in color]
         r_p, g_p, b_p = [int(c * 255 * 0.8) for c in color]
@@ -1372,6 +1563,38 @@ class PrepareDataWindow(QMainWindow):
                 color: white;
                 border: none;
                 border-radius: 4px;
+            }}
+            QPushButton:hover {{
+                background-color: rgb({r_h}, {g_h}, {b_h});
+            }}
+            QPushButton:pressed {{
+                background-color: rgb({r_p}, {g_p}, {b_p});
+            }}
+            QPushButton:disabled {{
+                background-color: rgb(80, 80, 80);
+                color: rgb(120, 120, 120);
+            }}
+        '''
+
+    def _get_button_stylesheet(self, hex_color: str) -> str:
+        """Generiert Button-Stylesheet aus Hex-Farbcode."""
+        # Hex zu RGB konvertieren
+        hex_color = hex_color.lstrip('#')
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+
+        # Hover/Pressed Varianten
+        r_h, g_h, b_h = [min(255, int(c * 1.2)) for c in (r, g, b)]
+        r_p, g_p, b_p = [int(c * 0.8) for c in (r, g, b)]
+
+        return f'''
+            QPushButton {{
+                background-color: rgb({r}, {g}, {b});
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 5px 10px;
             }}
             QPushButton:hover {{
                 background-color: rgb({r_h}, {g_h}, {b_h});

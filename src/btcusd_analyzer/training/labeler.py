@@ -40,9 +40,19 @@ class LabelingConfig:
     threshold_pct: float = 2.0
     # ZigZag Parameter
     zigzag_threshold: float = 5.0
-    # Peak Detection Parameter
-    prominence: float = 0.5
-    distance: int = 10
+
+    # Peak Detection Parameter (alle scipy.signal.find_peaks Parameter)
+    # Basis-Parameter
+    peak_distance: int = 10  # Mindestabstand zwischen Peaks
+    peak_prominence: float = 0.5  # Wie stark der Peak herausragt (in %)
+    peak_width: Optional[float] = None  # Minimale Breite des Peaks
+    # Erweiterte Parameter
+    peak_height: Optional[float] = None  # Absoluter Mindest-Peakwert (in % vom Mittelwert)
+    peak_threshold: Optional[float] = None  # Mindestdifferenz zu direkten Nachbarn (in %)
+    peak_plateau_size: Optional[int] = None  # Minimale Plateau-Groesse
+    peak_wlen: Optional[int] = None  # Fenstergroesse fuer Prominence-Berechnung
+    peak_rel_height: float = 0.5  # Relative Hoehe fuer Width-Berechnung (0-1)
+
     # Williams Fractals Parameter
     fractal_order: int = 2
     # Pivot Points Parameter
@@ -350,48 +360,110 @@ class DailyExtremaLabeler:
     def find_peaks_extrema(
         self,
         df: pd.DataFrame,
+        config: Optional[LabelingConfig] = None,
+        # Legacy-Parameter fuer Rueckwaertskompatibilitaet
         prominence: float = 0.5,
         distance: int = 10
     ) -> Tuple[List[int], List[int]]:
         """
         Peak-Detection mit scipy.signal.find_peaks.
 
+        Unterstuetzt alle Parameter von scipy.signal.find_peaks:
+        - distance: Mindestabstand zwischen Peaks
+        - prominence: Wie stark der Peak herausragt
+        - width: Minimale Breite des Peaks
+        - height: Absoluter Mindest-Peakwert
+        - threshold: Mindestdifferenz zu direkten Nachbarn
+        - plateau_size: Minimale Plateau-Groesse
+        - wlen: Fenstergroesse fuer Prominence-Berechnung
+        - rel_height: Relative Hoehe fuer Width-Berechnung
+
         Args:
             df: DataFrame mit OHLCV-Daten
-            prominence: Mindest-Prominenz (% des Preises)
-            distance: Mindestabstand zwischen Peaks
+            config: LabelingConfig mit allen Peak-Parametern (bevorzugt)
+            prominence: Legacy-Parameter (% des Preises)
+            distance: Legacy-Parameter Mindestabstand
 
         Returns:
             Tuple aus (high_indices, low_indices)
         """
+        # Parameter aus Config oder Legacy-Werte
+        if config is not None:
+            distance = config.peak_distance
+            prominence = config.peak_prominence
+            width = config.peak_width
+            height = config.peak_height
+            threshold = config.peak_threshold
+            plateau_size = config.peak_plateau_size
+            wlen = config.peak_wlen
+            rel_height = config.peak_rel_height
+        else:
+            width = None
+            height = None
+            threshold = None
+            plateau_size = None
+            wlen = None
+            rel_height = 0.5
+
         if not SCIPY_AVAILABLE:
             self.logger.warning('scipy nicht verfuegbar - verwende Fallback')
             return self._find_peaks_fallback(df, distance)
 
         close = df['Close'].values
         n = len(close)
-
-        # Prominenz als absoluter Wert berechnen
+        price_mean = close.mean()
         price_range = close.max() - close.min()
-        abs_prominence = price_range * (prominence / 100)
+
+        # Parameter-Dictionary fuer find_peaks aufbauen
+        peak_params = {'distance': distance}
+
+        # Prominenz als absoluter Wert (% der Preisspanne)
+        if prominence is not None and prominence > 0:
+            peak_params['prominence'] = price_range * (prominence / 100)
+
+        # Width (direkt in Datenpunkten)
+        if width is not None and width > 0:
+            peak_params['width'] = width
+
+        # Height als absoluter Wert (% vom Mittelwert)
+        if height is not None and height > 0:
+            abs_height = price_mean * (height / 100)
+            peak_params['height'] = abs_height
+
+        # Threshold als absoluter Wert (% der Preisspanne)
+        if threshold is not None and threshold > 0:
+            peak_params['threshold'] = price_range * (threshold / 100)
+
+        # Plateau Size (direkt in Datenpunkten)
+        if plateau_size is not None and plateau_size > 0:
+            peak_params['plateau_size'] = plateau_size
+
+        # Wlen - Fenstergroesse fuer Prominence
+        if wlen is not None and wlen > 0:
+            peak_params['wlen'] = wlen
+
+        # Rel_height fuer Width-Berechnung
+        if rel_height is not None and 0 < rel_height < 1:
+            peak_params['rel_height'] = rel_height
+
+        self.logger.debug(f'Peak-Detection Parameter: {peak_params}')
 
         # Hochpunkte finden
-        high_indices, _ = find_peaks(
-            close,
-            prominence=abs_prominence,
-            distance=distance
-        )
+        high_indices, high_props = find_peaks(close, **peak_params)
 
         # Tiefpunkte finden (invertierte Daten)
-        low_indices, _ = find_peaks(
-            -close,
-            prominence=abs_prominence,
-            distance=distance
-        )
+        # Bei Height muessen wir das Vorzeichen umkehren
+        low_params = peak_params.copy()
+        if 'height' in low_params:
+            # Fuer invertierte Daten: Minimum wird Maximum
+            low_params['height'] = -close.min() + price_mean * (height / 100) if height else None
+            if low_params['height'] is None or low_params['height'] <= 0:
+                del low_params['height']
+
+        low_indices, low_props = find_peaks(-close, **low_params)
 
         self.logger.debug(
-            f'Peaks (prom={prominence}, dist={distance}): '
-            f'{len(high_indices)} Hochs, {len(low_indices)} Tiefs'
+            f'Peaks gefunden: {len(high_indices)} Hochs, {len(low_indices)} Tiefs'
         )
         return list(high_indices), list(low_indices)
 
@@ -527,13 +599,12 @@ class DailyExtremaLabeler:
         return labels
 
     def _label_by_peaks(self, df: pd.DataFrame, config: LabelingConfig) -> np.ndarray:
-        """Labelt basierend auf Peak-Detection."""
+        """Labelt basierend auf Peak-Detection mit allen scipy.signal.find_peaks Parametern."""
         n = len(df)
         labels = np.zeros(n, dtype=np.int64)
 
-        high_indices, low_indices = self.find_peaks_extrema(
-            df, prominence=config.prominence, distance=config.distance
-        )
+        # Verwende die volle Config mit allen Parametern
+        high_indices, low_indices = self.find_peaks_extrema(df, config=config)
 
         for idx in high_indices:
             if 0 <= idx < n:
