@@ -34,9 +34,16 @@ class CSVReader:
         Initialisiert den CSV Reader.
 
         Args:
-            data_dir: Verzeichnis mit CSV-Dateien (default: ./Daten_csv)
+            data_dir: Verzeichnis mit CSV-Dateien (default: <projekt>/data)
         """
-        self.data_dir = Path(data_dir) if data_dir else Path.cwd() / 'Daten_csv'
+        if data_dir:
+            self.data_dir = Path(data_dir)
+        else:
+            # Projektverzeichnis ermitteln (3 Ebenen hoch von dieser Datei)
+            # __file__ -> data/reader.py -> data -> btcusd_analyzer -> src -> btcusd_analyzer_python
+            project_dir = Path(__file__).parent.parent.parent.parent
+            self.data_dir = project_dir / 'data'
+
         self.logger = get_logger()
 
     def read(self, filepath: Path) -> Optional[pd.DataFrame]:

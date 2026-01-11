@@ -9,8 +9,9 @@ from pathlib import Path
 def main():
     """Haupteinstiegspunkt fuer die Anwendung."""
 
-    # Basis-Verzeichnis bestimmen
-    base_dir = Path(__file__).parent.parent.parent.parent
+    # Basis-Verzeichnis bestimmen (btcusd_analyzer_python)
+    # __file__ -> main.py -> btcusd_analyzer -> src -> btcusd_analyzer_python
+    base_dir = Path(__file__).parent.parent.parent
 
     # Logger initialisieren
     from btcusd_analyzer.core.logger import get_logger
