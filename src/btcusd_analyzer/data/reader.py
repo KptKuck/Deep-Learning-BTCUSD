@@ -182,6 +182,22 @@ class CSVReader:
                          f'Range={info["price_range_pct"]:.1f}%')
         self.logger.trace(f'Spalten: {", ".join(info["columns"])}')
 
+        # Erste 10 Datensaetze als Trace ausgeben
+        self.logger.trace('=== Erste 10 Datensaetze ===')
+        display_cols = ['DateTime', 'Open', 'High', 'Low', 'Close']
+        if 'Volume' in df.columns:
+            display_cols.append('Volume')
+        elif 'TickVol' in df.columns:
+            display_cols.append('TickVol')
+
+        for i, row in df.head(10).iterrows():
+            dt_str = row['DateTime'].strftime('%Y-%m-%d %H:%M') if hasattr(row['DateTime'], 'strftime') else str(row['DateTime'])[:16]
+            vol = row.get('Volume', row.get('TickVol', 0))
+            self.logger.trace(
+                f'[{i:4d}] {dt_str} | O:{row["Open"]:>10.2f} H:{row["High"]:>10.2f} '
+                f'L:{row["Low"]:>10.2f} C:{row["Close"]:>10.2f} V:{vol:>12.2f}'
+            )
+
     def find_latest_csv(self, pattern: str = 'BTCUSD*.csv') -> Optional[Path]:
         """
         Findet die neueste CSV-Datei im Datenverzeichnis.
