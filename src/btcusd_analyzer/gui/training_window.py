@@ -64,8 +64,10 @@ class TrainingWorker(QThread):
 
             if self.config.get('save_best', True):
                 save_path = Path(self.config.get('save_path', 'models'))
+                save_path.mkdir(parents=True, exist_ok=True)
+                filepath = str(save_path / 'model_epoch{epoch}_acc{val_accuracy}.pt')
                 callbacks.append(ModelCheckpoint(
-                    save_path=save_path,
+                    filepath=filepath,
                     monitor='val_accuracy'
                 ))
 
@@ -76,18 +78,18 @@ class TrainingWorker(QThread):
                 callbacks=callbacks
             )
 
-            # Custom epoch callback fuer GUI-Updates
-            def on_epoch_end(epoch, logs):
+            # Custom progress callback fuer GUI-Updates
+            def progress_callback(metrics):
                 if self._stop_requested:
                     trainer.stop_training = True
                     return
 
                 self.epoch_completed.emit(
-                    epoch,
-                    logs.get('train_loss', 0),
-                    logs.get('train_accuracy', 0),
-                    logs.get('val_loss', 0),
-                    logs.get('val_accuracy', 0)
+                    metrics.epoch,
+                    metrics.train_loss,
+                    metrics.train_accuracy,
+                    metrics.val_loss,
+                    metrics.val_accuracy
                 )
 
             # Training starten
@@ -100,14 +102,14 @@ class TrainingWorker(QThread):
                 val_loader=self.val_loader,
                 epochs=self.config.get('epochs', 100),
                 learning_rate=self.config.get('learning_rate', 0.001),
-                on_epoch_end=on_epoch_end
+                progress_callback=progress_callback
             )
 
             # Ergebnis senden
             self.training_finished.emit({
                 'history': history,
-                'best_accuracy': max(history.get('val_accuracy', [0])),
-                'final_loss': history.get('val_loss', [0])[-1] if history.get('val_loss') else 0,
+                'best_accuracy': max(history.val_accuracy) if history.val_accuracy else 0,
+                'final_loss': history.val_loss[-1] if history.val_loss else 0,
                 'stopped_early': trainer.stop_training
             })
 
@@ -215,9 +217,9 @@ class TrainingWindow(QMainWindow):
 
         model_layout.addWidget(QLabel("Architektur:"), 0, 0)
         self.model_combo = QComboBox()
+        # Nur implementierte Modelle anzeigen
         self.model_combo.addItems([
-            'BiLSTM', 'LSTM', 'GRU', 'BiGRU', 'CNN', 'CNN-LSTM',
-            'TCN', 'Transformer', 'Informer', 'TFT', 'N-BEATS'
+            'BiLSTM', 'LSTM', 'GRU', 'BiGRU', 'CNN', 'CNN-LSTM'
         ])
         model_layout.addWidget(self.model_combo, 0, 1)
 
@@ -697,37 +699,37 @@ class TrainingWindow(QMainWindow):
     def _on_epoch_completed(self, epoch: int, train_loss: float, train_acc: float,
                             val_loss: float, val_acc: float):
         """Callback nach jeder Epoche."""
-        # History aktualisieren
+        # History aktualisieren (Accuracy kommt bereits als Prozent vom Trainer)
         self.history['train_loss'].append(train_loss)
-        self.history['train_acc'].append(train_acc * 100)
+        self.history['train_acc'].append(train_acc)
         self.history['val_loss'].append(val_loss)
-        self.history['val_acc'].append(val_acc * 100)
+        self.history['val_acc'].append(val_acc)
 
         # Labels aktualisieren
         self.epoch_label.setText(f"Epoch: {epoch} / {self.epochs_spin.value()}")
         self.progress_bar.setValue(epoch)
 
         self.train_loss_label.setText(f"Train Loss: {train_loss:.4f}")
-        self.train_acc_label.setText(f"Train Acc: {train_acc*100:.1f}%")
+        self.train_acc_label.setText(f"Train Acc: {train_acc:.1f}%")
         self.val_loss_label.setText(f"Val Loss: {val_loss:.4f}")
-        self.val_acc_label.setText(f"Val Acc: {val_acc*100:.1f}%")
+        self.val_acc_label.setText(f"Val Acc: {val_acc:.1f}%")
 
         # Tabelle aktualisieren
         row = self.metrics_table.rowCount()
         self.metrics_table.insertRow(row)
         self.metrics_table.setItem(row, 0, QTableWidgetItem(str(epoch)))
         self.metrics_table.setItem(row, 1, QTableWidgetItem(f"{train_loss:.4f}"))
-        self.metrics_table.setItem(row, 2, QTableWidgetItem(f"{train_acc*100:.1f}%"))
+        self.metrics_table.setItem(row, 2, QTableWidgetItem(f"{train_acc:.1f}%"))
         self.metrics_table.setItem(row, 3, QTableWidgetItem(f"{val_loss:.4f}"))
-        self.metrics_table.setItem(row, 4, QTableWidgetItem(f"{val_acc*100:.1f}%"))
+        self.metrics_table.setItem(row, 4, QTableWidgetItem(f"{val_acc:.1f}%"))
         self.metrics_table.scrollToBottom()
 
         # Plot aktualisieren
         self._update_plot()
 
         # Log
-        self._log(f"Epoch {epoch}: Loss={train_loss:.4f}, Acc={train_acc*100:.1f}%, "
-                  f"Val Loss={val_loss:.4f}, Val Acc={val_acc*100:.1f}%")
+        self._log(f"Epoch {epoch}: Loss={train_loss:.4f}, Acc={train_acc:.1f}%, "
+                  f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.1f}%")
 
     def _on_training_finished(self, results: dict):
         """Callback wenn Training abgeschlossen."""
@@ -735,7 +737,8 @@ class TrainingWindow(QMainWindow):
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
 
-        best_acc = results.get('best_accuracy', 0) * 100
+        # best_accuracy kommt bereits als Prozentwert vom Trainer
+        best_acc = results.get('best_accuracy', 0)
         self._log(f"\nTraining abgeschlossen!")
         self._log(f"Beste Validation Accuracy: {best_acc:.1f}%")
 
@@ -753,7 +756,7 @@ class TrainingWindow(QMainWindow):
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
 
-        self._log(f"FEHLER: {error}")
+        self._log(f"FEHLER: {error}", level='ERROR')
         QMessageBox.critical(self, "Training-Fehler", error)
 
     def _update_time(self):

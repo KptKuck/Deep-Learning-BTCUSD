@@ -159,13 +159,12 @@ class Trainer:
             weight_decay=1e-5
         )
 
-        # Learning Rate Scheduler
+        # Learning Rate Scheduler (verbose wurde in PyTorch 2.x entfernt)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer,
             mode='min',
             factor=0.5,
-            patience=5,
-            verbose=True
+            patience=5
         )
 
         # Loss Function mit optionalen Klassengewichten
