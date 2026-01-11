@@ -1264,6 +1264,8 @@ class MainWindow(QMainWindow):
             # Trainingsdaten und Info an das Fenster uebergeben
             self.training_window.training_data = self.training_data
             self.training_window.training_info = self.training_info
+            # DataLoader aus training_data erstellen
+            self.training_window.prepare_data_loaders(self.training_data)
             self.training_window.training_completed.connect(self._on_training_completed)
             self.training_window.show()
         except Exception as e:

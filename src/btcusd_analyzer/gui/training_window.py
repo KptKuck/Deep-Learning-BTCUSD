@@ -5,6 +5,7 @@ Training Window - GUI fuer Modell-Training mit Live-Visualisierung
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from datetime import datetime
+import inspect
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -160,14 +161,22 @@ class TrainingWindow(QMainWindow):
 
     def _log(self, message: str, level: str = 'INFO'):
         """Loggt eine Nachricht an MainWindow und lokales Log."""
+        # Aufrufenden Funktionsnamen ermitteln
+        caller_frame = inspect.currentframe().f_back
+        caller_name = caller_frame.f_code.co_name if caller_frame else 'unknown'
+
+        # Nachricht mit Funktionsnamen
+        formatted_message = f'{caller_name}() - {message}'
+
         # An MainWindow senden (falls parent _log hat)
         if self._parent and hasattr(self._parent, '_log'):
-            self._parent._log(f'[Training] {message}', level)
+            self._parent._log(f'[Training] {formatted_message}', level)
         # Signal emittieren
-        self.log_message.emit(message, level)
+        self.log_message.emit(formatted_message, level)
         # Auch lokal loggen falls vorhanden
         if hasattr(self, 'log_text'):
-            self.log_text.append(f'[{level}] {message}')
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            self.log_text.append(f'[{timestamp}] [{level}] {formatted_message}')
 
     def _setup_ui(self):
         """Erstellt die Benutzeroberflaeche."""
@@ -557,6 +566,53 @@ class TrainingWindow(QMainWindow):
         self.val_loader = val_loader
         self._log(f"Daten geladen: {len(train_loader.dataset)} Training, {len(val_loader.dataset)} Validation")
 
+    def prepare_data_loaders(self, training_data: Dict[str, Any], batch_size: int = 64, val_split: float = 0.2):
+        """
+        Erstellt DataLoader aus training_data Dictionary.
+
+        Args:
+            training_data: Dict mit 'X' (Sequenzen) und 'Y' (Labels)
+            batch_size: Batch-Groesse
+            val_split: Anteil fuer Validierung (default 20%)
+        """
+        from torch.utils.data import TensorDataset, DataLoader
+
+        X = training_data['X']
+        Y = training_data['Y']
+
+        # In PyTorch Tensoren konvertieren
+        X_tensor = torch.FloatTensor(X)
+        Y_tensor = torch.LongTensor(Y)
+
+        # Train/Val Split
+        total = len(X)
+        val_size = int(total * val_split)
+        train_size = total - val_size
+
+        # Sequenzieller Split (nicht random, da Zeitreihen)
+        X_train = X_tensor[:train_size]
+        Y_train = Y_tensor[:train_size]
+        X_val = X_tensor[train_size:]
+        Y_val = Y_tensor[train_size:]
+
+        # Datasets
+        train_dataset = TensorDataset(X_train, Y_train)
+        val_dataset = TensorDataset(X_val, Y_val)
+
+        # DataLoader
+        self.train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=False  # Zeitreihen nicht shufflen
+        )
+        self.val_loader = DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            shuffle=False
+        )
+
+        self._log(f"DataLoader erstellt: {train_size} Training, {val_size} Validation (Batch: {batch_size})", level='SUCCESS')
+
     def _start_training(self):
         """Startet das Training."""
         if self.train_loader is None or self.val_loader is None:
@@ -618,7 +674,7 @@ class TrainingWindow(QMainWindow):
         self.worker.epoch_completed.connect(self._on_epoch_completed)
         self.worker.training_finished.connect(self._on_training_finished)
         self.worker.training_error.connect(self._on_training_error)
-        self.worker.log_message.connect(self._log)
+        self.worker.log_message.connect(lambda msg: self._log(msg, 'INFO'))
         self.worker.start()
 
         # UI aktualisieren
@@ -708,10 +764,6 @@ class TrainingWindow(QMainWindow):
             hours, minutes = divmod(minutes, 60)
             self.time_label.setText(f"Zeit: {hours:02d}:{minutes:02d}:{seconds:02d}")
 
-    def _log(self, message: str):
-        """Fuegt eine Nachricht zum Log hinzu."""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.log_text.append(f"[{timestamp}] {message}")
 
     def get_model(self):
         """Gibt das trainierte Modell zurueck."""
