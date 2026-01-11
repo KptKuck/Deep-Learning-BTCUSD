@@ -3,13 +3,50 @@ Labeler Modul - Erkennung von Tages-Extrema fuer Labeling
 Entspricht find_daily_extrema.m aus dem MATLAB-Projekt
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
 from ..core.logger import get_logger
+
+# Optional: scipy fuer Peak-Detection
+try:
+    from scipy.signal import find_peaks
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+
+
+class LabelingMethod(Enum):
+    """Verfuegbare Labeling-Methoden."""
+    FUTURE_RETURN = "future_return"
+    ZIGZAG = "zigzag"
+    PEAKS = "peaks"
+    FRACTALS = "fractals"
+    PIVOTS = "pivots"
+    EXTREMA_DAILY = "extrema_daily"
+    BINARY = "binary"
+
+
+@dataclass
+class LabelingConfig:
+    """Konfiguration fuer Label-Generierung."""
+    method: LabelingMethod = LabelingMethod.FUTURE_RETURN
+    # Gemeinsame Parameter
+    lookforward: int = 100
+    threshold_pct: float = 2.0
+    # ZigZag Parameter
+    zigzag_threshold: float = 5.0
+    # Peak Detection Parameter
+    prominence: float = 0.5
+    distance: int = 10
+    # Williams Fractals Parameter
+    fractal_order: int = 2
+    # Pivot Points Parameter
+    pivot_lookback: int = 5
 
 
 @dataclass
@@ -99,25 +136,50 @@ class DailyExtremaLabeler:
         self.logger.debug(f'Gefunden: {len(highs)} Tageshochs, {len(lows)} Tagestiefs')
         return highs, lows
 
-    def generate_labels(self, df: pd.DataFrame, method: str = 'future_return') -> np.ndarray:
+    def generate_labels(
+        self,
+        df: pd.DataFrame,
+        method: Optional[str] = None,
+        config: Optional[LabelingConfig] = None
+    ) -> np.ndarray:
         """
         Generiert Labels basierend auf der gewaehlten Methode.
 
         Args:
             df: DataFrame mit OHLCV-Daten
-            method: Label-Methode ('future_return', 'extrema', 'binary')
+            method: Label-Methode als String (deprecated, fuer Rueckwaertskompatibilitaet)
+            config: LabelingConfig mit Methode und Parametern (bevorzugt)
 
         Returns:
             NumPy Array mit Labels (0=HOLD, 1=BUY, 2=SELL)
         """
-        if method == 'future_return':
+        # Config erstellen falls nur method angegeben
+        if config is None:
+            if method is None:
+                method = 'future_return'
+            config = LabelingConfig(
+                method=LabelingMethod(method) if method in [m.value for m in LabelingMethod] else LabelingMethod.FUTURE_RETURN,
+                lookforward=self.lookforward,
+                threshold_pct=self.threshold_pct
+            )
+
+        # Methode ausfuehren
+        if config.method == LabelingMethod.FUTURE_RETURN:
             return self._label_by_future_return(df)
-        elif method == 'extrema':
+        elif config.method == LabelingMethod.ZIGZAG:
+            return self._label_by_zigzag(df, config)
+        elif config.method == LabelingMethod.PEAKS:
+            return self._label_by_peaks(df, config)
+        elif config.method == LabelingMethod.FRACTALS:
+            return self._label_by_fractals(df, config)
+        elif config.method == LabelingMethod.PIVOTS:
+            return self._label_by_pivots(df, config)
+        elif config.method == LabelingMethod.EXTREMA_DAILY:
             return self._label_by_extrema(df)
-        elif method == 'binary':
+        elif config.method == LabelingMethod.BINARY:
             return self._label_binary(df)
         else:
-            self.logger.error(f'Unbekannte Label-Methode: {method}')
+            self.logger.error(f'Unbekannte Label-Methode: {config.method}')
             return np.zeros(len(df), dtype=np.int64)
 
     def _label_by_future_return(self, df: pd.DataFrame) -> np.ndarray:
@@ -198,6 +260,339 @@ class DailyExtremaLabeler:
                 labels[i] = self.LABELS['SELL']
 
         return labels
+
+    # =========================================================================
+    # Neue Extrema-Erkennungsmethoden
+    # =========================================================================
+
+    def find_zigzag_extrema(
+        self,
+        df: pd.DataFrame,
+        threshold_pct: float = 5.0
+    ) -> Tuple[List[int], List[int]]:
+        """
+        ZigZag-Algorithmus: Erkennt Extrema bei Richtungswechsel nach X% Bewegung.
+
+        Args:
+            df: DataFrame mit OHLCV-Daten
+            threshold_pct: Mindest-Prozentbewegung fuer Richtungswechsel
+
+        Returns:
+            Tuple aus (high_indices, low_indices)
+        """
+        close = df['Close'].values
+        n = len(close)
+
+        if n < 2:
+            return [], []
+
+        high_indices = []
+        low_indices = []
+
+        # Initialisierung: Erstes Extremum finden
+        trend = 0  # 1 = aufwaerts, -1 = abwaerts
+        last_high_idx = 0
+        last_low_idx = 0
+        last_high = close[0]
+        last_low = close[0]
+
+        for i in range(1, n):
+            price = close[i]
+
+            if trend == 0:
+                # Noch kein Trend - warte auf erste signifikante Bewegung
+                if price >= last_low * (1 + threshold_pct / 100):
+                    trend = 1
+                    last_high = price
+                    last_high_idx = i
+                    low_indices.append(last_low_idx)
+                elif price <= last_high * (1 - threshold_pct / 100):
+                    trend = -1
+                    last_low = price
+                    last_low_idx = i
+                    high_indices.append(last_high_idx)
+                else:
+                    # Aktualisiere potentielle Extrema
+                    if price > last_high:
+                        last_high = price
+                        last_high_idx = i
+                    if price < last_low:
+                        last_low = price
+                        last_low_idx = i
+
+            elif trend == 1:  # Aufwaertstrend
+                if price > last_high:
+                    last_high = price
+                    last_high_idx = i
+                elif price <= last_high * (1 - threshold_pct / 100):
+                    # Richtungswechsel nach unten
+                    high_indices.append(last_high_idx)
+                    trend = -1
+                    last_low = price
+                    last_low_idx = i
+
+            else:  # trend == -1, Abwaertstrend
+                if price < last_low:
+                    last_low = price
+                    last_low_idx = i
+                elif price >= last_low * (1 + threshold_pct / 100):
+                    # Richtungswechsel nach oben
+                    low_indices.append(last_low_idx)
+                    trend = 1
+                    last_high = price
+                    last_high_idx = i
+
+        self.logger.debug(
+            f'ZigZag ({threshold_pct}%): {len(high_indices)} Hochs, {len(low_indices)} Tiefs'
+        )
+        return high_indices, low_indices
+
+    def find_peaks_extrema(
+        self,
+        df: pd.DataFrame,
+        prominence: float = 0.5,
+        distance: int = 10
+    ) -> Tuple[List[int], List[int]]:
+        """
+        Peak-Detection mit scipy.signal.find_peaks.
+
+        Args:
+            df: DataFrame mit OHLCV-Daten
+            prominence: Mindest-Prominenz (% des Preises)
+            distance: Mindestabstand zwischen Peaks
+
+        Returns:
+            Tuple aus (high_indices, low_indices)
+        """
+        if not SCIPY_AVAILABLE:
+            self.logger.warning('scipy nicht verfuegbar - verwende Fallback')
+            return self._find_peaks_fallback(df, distance)
+
+        close = df['Close'].values
+        n = len(close)
+
+        # Prominenz als absoluter Wert berechnen
+        price_range = close.max() - close.min()
+        abs_prominence = price_range * (prominence / 100)
+
+        # Hochpunkte finden
+        high_indices, _ = find_peaks(
+            close,
+            prominence=abs_prominence,
+            distance=distance
+        )
+
+        # Tiefpunkte finden (invertierte Daten)
+        low_indices, _ = find_peaks(
+            -close,
+            prominence=abs_prominence,
+            distance=distance
+        )
+
+        self.logger.debug(
+            f'Peaks (prom={prominence}, dist={distance}): '
+            f'{len(high_indices)} Hochs, {len(low_indices)} Tiefs'
+        )
+        return list(high_indices), list(low_indices)
+
+    def _find_peaks_fallback(
+        self,
+        df: pd.DataFrame,
+        distance: int = 10
+    ) -> Tuple[List[int], List[int]]:
+        """Fallback Peak-Detection ohne scipy."""
+        close = df['Close'].values
+        n = len(close)
+
+        high_indices = []
+        low_indices = []
+
+        for i in range(distance, n - distance):
+            window = close[i - distance:i + distance + 1]
+            center_val = close[i]
+
+            if center_val == window.max():
+                high_indices.append(i)
+            elif center_val == window.min():
+                low_indices.append(i)
+
+        return high_indices, low_indices
+
+    def find_williams_fractals(
+        self,
+        df: pd.DataFrame,
+        order: int = 2
+    ) -> Tuple[List[int], List[int]]:
+        """
+        Williams Fractals: N-Bar Fractal Pattern.
+
+        Ein Fractal-Hoch ist ein Punkt, der hoeher ist als N Bars links und rechts.
+        Ein Fractal-Tief ist ein Punkt, der niedriger ist als N Bars links und rechts.
+
+        Args:
+            df: DataFrame mit OHLCV-Daten
+            order: Anzahl Bars links/rechts (default: 2 = klassisches Williams)
+
+        Returns:
+            Tuple aus (high_indices, low_indices)
+        """
+        high = df['High'].values
+        low = df['Low'].values
+        n = len(high)
+
+        high_indices = []
+        low_indices = []
+
+        for i in range(order, n - order):
+            # Fractal-Hoch pruefen
+            is_fractal_high = True
+            for j in range(1, order + 1):
+                if high[i] <= high[i - j] or high[i] <= high[i + j]:
+                    is_fractal_high = False
+                    break
+            if is_fractal_high:
+                high_indices.append(i)
+
+            # Fractal-Tief pruefen
+            is_fractal_low = True
+            for j in range(1, order + 1):
+                if low[i] >= low[i - j] or low[i] >= low[i + j]:
+                    is_fractal_low = False
+                    break
+            if is_fractal_low:
+                low_indices.append(i)
+
+        self.logger.debug(
+            f'Fractals (order={order}): {len(high_indices)} Hochs, {len(low_indices)} Tiefs'
+        )
+        return high_indices, low_indices
+
+    def find_pivot_points(
+        self,
+        df: pd.DataFrame,
+        lookback: int = 5
+    ) -> Tuple[List[int], List[int]]:
+        """
+        Pivot Points: Lokale Maxima/Minima in einem Fenster.
+
+        Args:
+            df: DataFrame mit OHLCV-Daten
+            lookback: Fenstergroesse links und rechts
+
+        Returns:
+            Tuple aus (high_indices, low_indices)
+        """
+        high = df['High'].values
+        low = df['Low'].values
+        n = len(high)
+
+        high_indices = []
+        low_indices = []
+
+        for i in range(lookback, n - lookback):
+            window_high = high[i - lookback:i + lookback + 1]
+            window_low = low[i - lookback:i + lookback + 1]
+
+            # Pivot High: Hoechster Punkt im Fenster
+            if high[i] == window_high.max():
+                high_indices.append(i)
+
+            # Pivot Low: Tiefster Punkt im Fenster
+            if low[i] == window_low.min():
+                low_indices.append(i)
+
+        self.logger.debug(
+            f'Pivots (lookback={lookback}): {len(high_indices)} Hochs, {len(low_indices)} Tiefs'
+        )
+        return high_indices, low_indices
+
+    def _label_by_zigzag(self, df: pd.DataFrame, config: LabelingConfig) -> np.ndarray:
+        """Labelt basierend auf ZigZag-Extrema."""
+        n = len(df)
+        labels = np.zeros(n, dtype=np.int64)
+
+        high_indices, low_indices = self.find_zigzag_extrema(
+            df, threshold_pct=config.zigzag_threshold
+        )
+
+        for idx in high_indices:
+            if 0 <= idx < n:
+                labels[idx] = self.LABELS['SELL']
+
+        for idx in low_indices:
+            if 0 <= idx < n:
+                labels[idx] = self.LABELS['BUY']
+
+        self._log_label_distribution(labels)
+        return labels
+
+    def _label_by_peaks(self, df: pd.DataFrame, config: LabelingConfig) -> np.ndarray:
+        """Labelt basierend auf Peak-Detection."""
+        n = len(df)
+        labels = np.zeros(n, dtype=np.int64)
+
+        high_indices, low_indices = self.find_peaks_extrema(
+            df, prominence=config.prominence, distance=config.distance
+        )
+
+        for idx in high_indices:
+            if 0 <= idx < n:
+                labels[idx] = self.LABELS['SELL']
+
+        for idx in low_indices:
+            if 0 <= idx < n:
+                labels[idx] = self.LABELS['BUY']
+
+        self._log_label_distribution(labels)
+        return labels
+
+    def _label_by_fractals(self, df: pd.DataFrame, config: LabelingConfig) -> np.ndarray:
+        """Labelt basierend auf Williams Fractals."""
+        n = len(df)
+        labels = np.zeros(n, dtype=np.int64)
+
+        high_indices, low_indices = self.find_williams_fractals(
+            df, order=config.fractal_order
+        )
+
+        for idx in high_indices:
+            if 0 <= idx < n:
+                labels[idx] = self.LABELS['SELL']
+
+        for idx in low_indices:
+            if 0 <= idx < n:
+                labels[idx] = self.LABELS['BUY']
+
+        self._log_label_distribution(labels)
+        return labels
+
+    def _label_by_pivots(self, df: pd.DataFrame, config: LabelingConfig) -> np.ndarray:
+        """Labelt basierend auf Pivot Points."""
+        n = len(df)
+        labels = np.zeros(n, dtype=np.int64)
+
+        high_indices, low_indices = self.find_pivot_points(
+            df, lookback=config.pivot_lookback
+        )
+
+        for idx in high_indices:
+            if 0 <= idx < n:
+                labels[idx] = self.LABELS['SELL']
+
+        for idx in low_indices:
+            if 0 <= idx < n:
+                labels[idx] = self.LABELS['BUY']
+
+        self._log_label_distribution(labels)
+        return labels
+
+    def _log_label_distribution(self, labels: np.ndarray) -> None:
+        """Loggt die Label-Verteilung."""
+        n = len(labels)
+        unique, counts = np.unique(labels, return_counts=True)
+        for u, c in zip(unique, counts):
+            pct = c / n * 100
+            self.logger.debug(f'Label {self.LABEL_NAMES[u]}: {c} ({pct:.1f}%)')
 
     def get_label_weights(self, labels: np.ndarray) -> np.ndarray:
         """
