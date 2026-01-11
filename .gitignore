@@ -95,4 +95,4 @@ nul
 .env
 *.key
 credentials.json
-data/
+/data/

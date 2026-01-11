@@ -916,29 +916,49 @@ class MainWindow(QMainWindow):
         to_date = self.to_date.date().toPyDate()
         interval = self.interval_combo.currentText()
 
-        self._log(f'Download gestartet: {symbol} {from_date} bis {to_date}, Intervall: {interval}', 'INFO')
+        # Datum als String formatieren (YYYY-MM-DD)
+        from_date_str = from_date.strftime('%Y-%m-%d')
+        to_date_str = to_date.strftime('%Y-%m-%d')
+
+        self._log(f'Download gestartet: {symbol} {from_date_str} bis {to_date_str}, Intervall: {interval}', 'INFO')
+        self._log(f'Zielverzeichnis: {self.config.paths.data_dir}', 'DEBUG')
 
         try:
             from ..data.downloader import BinanceDownloader
-            downloader = BinanceDownloader(self.config.paths.data_dir)
 
-            df, filepath = downloader.download(
+            # Symbol wird im Konstruktor uebergeben
+            downloader = BinanceDownloader(
                 symbol=symbol,
+                data_dir=self.config.paths.data_dir
+            )
+
+            # Download mit String-Datums
+            df = downloader.download(
+                start_date=from_date_str,
+                end_date=to_date_str,
                 interval=interval,
-                start_date=from_date,
-                end_date=to_date
+                save=True
             )
 
             if df is not None:
                 self.data = df
-                self.data_path = filepath
+                # Dateipfad rekonstruieren
+                symbol_short = symbol.replace('USDT', 'USD')
+                filename = f'{symbol_short}_{from_date_str}_{to_date_str}.csv'
+                self.data_path = self.config.paths.data_dir / filename
                 self.data_loaded.emit(df)
                 self._log(f'Download erfolgreich: {len(df)} Datensaetze', 'SUCCESS')
                 self._update_data_status()
             else:
-                self._log('Download fehlgeschlagen', 'ERROR')
+                self._log('Download fehlgeschlagen - keine Daten erhalten', 'ERROR')
+        except ImportError as e:
+            self._log(f'Modul nicht installiert: {e}', 'ERROR')
+            self._log('Hinweis: pip install python-binance', 'WARNING')
+            QMessageBox.warning(self, 'Fehler', f'python-binance nicht installiert:\npip install python-binance')
         except Exception as e:
             self._log(f'Download-Fehler: {e}', 'ERROR')
+            import traceback
+            self._log(f'Details: {traceback.format_exc()}', 'DEBUG')
             QMessageBox.warning(self, 'Fehler', f'Download fehlgeschlagen: {e}')
 
     def _analyze_data(self):

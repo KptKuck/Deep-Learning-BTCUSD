@@ -101,22 +101,60 @@ class BinanceDownloader:
         """
         start_time = time.perf_counter()
 
-        # Datum parsen
-        start_dt = datetime.strptime(start_date, '%Y-%m-%d')
-        end_dt = datetime.strptime(end_date, '%Y-%m-%d') if end_date else datetime.now()
-
-        self.logger.info(f'Lade {self.symbol} Daten: {start_date} bis {end_dt.strftime("%Y-%m-%d")}')
+        self.logger.debug(f'=== Binance Download gestartet ===')
+        self.logger.debug(f'Symbol: {self.symbol}')
         self.logger.debug(f'Intervall: {interval}')
+        self.logger.debug(f'Start-Datum (Input): {start_date}')
+        self.logger.debug(f'End-Datum (Input): {end_date}')
+        self.logger.debug(f'Speichern: {save}')
+        self.logger.debug(f'Zielverzeichnis: {self.data_dir}')
+
+        # Datum parsen
+        try:
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+            self.logger.debug(f'Start-Datum (parsed): {start_dt}')
+        except ValueError as e:
+            self.logger.error(f'Ungültiges Start-Datum Format: {start_date} - {e}')
+            return None
 
         try:
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d') if end_date else datetime.now()
+            self.logger.debug(f'End-Datum (parsed): {end_dt}')
+        except ValueError as e:
+            self.logger.error(f'Ungültiges End-Datum Format: {end_date} - {e}')
+            return None
+
+        # Zeitraum validieren
+        days_diff = (end_dt - start_dt).days
+        self.logger.debug(f'Zeitraum: {days_diff} Tage')
+
+        if days_diff < 0:
+            self.logger.error(f'Start-Datum liegt nach End-Datum!')
+            return None
+
+        self.logger.info(f'Lade {self.symbol} Daten: {start_date} bis {end_dt.strftime("%Y-%m-%d")} ({days_diff} Tage)')
+
+        try:
+            self.logger.debug('Initialisiere Binance Client...')
             client = self._get_client()
+            self.logger.debug('Binance Client bereit')
 
             # Alle Klines in Chunks laden
             all_klines = []
             current_start = int(start_dt.timestamp() * 1000)
             end_ms = int(end_dt.timestamp() * 1000)
+            chunk_count = 0
+
+            self.logger.debug(f'Start-Timestamp (ms): {current_start}')
+            self.logger.debug(f'End-Timestamp (ms): {end_ms}')
+            self.logger.debug(f'API URL: {self.BASE_URL}{self.KLINES_ENDPOINT}')
 
             while current_start < end_ms:
+                chunk_count += 1
+                chunk_start_time = time.perf_counter()
+
+                self.logger.debug(f'Chunk {chunk_count}: Anfrage ab {datetime.fromtimestamp(current_start/1000)}')
+
                 klines = client.get_klines(
                     symbol=self.symbol,
                     interval=interval,
@@ -124,40 +162,65 @@ class BinanceDownloader:
                     limit=self.MAX_LIMIT
                 )
 
+                chunk_duration = (time.perf_counter() - chunk_start_time) * 1000
+
                 if not klines:
+                    self.logger.debug(f'Chunk {chunk_count}: Keine weiteren Daten')
                     break
 
                 all_klines.extend(klines)
+                self.logger.debug(f'Chunk {chunk_count}: {len(klines)} Klines empfangen ({chunk_duration:.0f}ms)')
 
                 # Naechster Chunk
                 last_time = klines[-1][0]
                 current_start = last_time + self.INTERVAL_MS.get(interval, 3600000)
 
-                self.logger.trace(f'Geladen: {len(all_klines)} Klines...')
+            self.logger.debug(f'Download abgeschlossen: {chunk_count} Chunks, {len(all_klines)} Klines total')
 
             if not all_klines:
                 self.logger.warning('Keine Daten erhalten')
                 return None
 
             # In DataFrame konvertieren
+            self.logger.debug('Konvertiere Klines zu DataFrame...')
             df = self._klines_to_dataframe(all_klines)
+            self.logger.debug(f'DataFrame erstellt: {len(df)} Zeilen, {len(df.columns)} Spalten')
+            self.logger.debug(f'Spalten: {list(df.columns)}')
 
             # Auf Zeitraum filtern
+            df_before_filter = len(df)
             df = df[(df['DateTime'] >= start_dt) & (df['DateTime'] <= end_dt)]
+            self.logger.debug(f'Nach Zeitraum-Filter: {len(df)} Zeilen (vorher: {df_before_filter})')
+
+            if len(df) > 0:
+                self.logger.debug(f'Erster Datensatz: {df.iloc[0]["DateTime"]}')
+                self.logger.debug(f'Letzter Datensatz: {df.iloc[-1]["DateTime"]}')
+                self.logger.debug(f'Preis-Bereich: {df["Low"].min():.2f} - {df["High"].max():.2f}')
 
             duration_ms = (time.perf_counter() - start_time) * 1000
-            self.logger.timing('download_btc_data', duration_ms)
-            self.logger.success(f'{len(df)} Datensätze geladen')
+            self.logger.debug(f'Gesamtdauer: {duration_ms:.0f}ms')
+            self.logger.success(f'{len(df)} Datensaetze geladen in {duration_ms/1000:.1f}s')
 
             # Speichern
             if save:
+                self.logger.debug('Speichere CSV...')
                 filepath = self._save_csv(df, start_date, end_dt.strftime('%Y-%m-%d'), interval)
+                file_size_kb = filepath.stat().st_size / 1024
+                self.logger.debug(f'Dateigroesse: {file_size_kb:.1f} KB')
                 self.logger.success(f'Gespeichert: {filepath}')
 
+            self.logger.debug('=== Binance Download beendet ===')
             return df
 
+        except ImportError as e:
+            self.logger.error(f'Modul-Fehler: {e}')
+            self.logger.debug('Hinweis: pip install python-binance')
+            return None
         except Exception as e:
             self.logger.error(f'Download-Fehler: {e}')
+            self.logger.debug(f'Fehler-Typ: {type(e).__name__}')
+            import traceback
+            self.logger.debug(f'Traceback: {traceback.format_exc()}')
             return None
 
     def _klines_to_dataframe(self, klines: List) -> pd.DataFrame:
