@@ -105,12 +105,28 @@ class TrainingWorker(QThread):
                 progress_callback=progress_callback
             )
 
+            # Finales Modell automatisch speichern
+            save_path = Path(self.config.get('save_path', 'models'))
+            save_path.mkdir(parents=True, exist_ok=True)
+
+            best_acc = max(history.val_accuracy) if history.val_accuracy else 0
+            model_name = self.model.name.lower().replace(' ', '_')
+            final_model_path = save_path / f'{model_name}_final_acc{best_acc:.1f}.pt'
+
+            self.model.save(final_model_path, metrics={
+                'best_accuracy': best_acc,
+                'final_loss': history.val_loss[-1] if history.val_loss else 0,
+                'epochs_trained': len(history.epochs)
+            })
+            self.log_message.emit(f"Modell gespeichert: {final_model_path}")
+
             # Ergebnis senden
             self.training_finished.emit({
                 'history': history,
-                'best_accuracy': max(history.val_accuracy) if history.val_accuracy else 0,
+                'best_accuracy': best_acc,
                 'final_loss': history.val_loss[-1] if history.val_loss else 0,
-                'stopped_early': trainer.stop_training
+                'stopped_early': trainer.stop_training,
+                'model_path': str(final_model_path)
             })
 
         except Exception as e:
@@ -739,15 +755,23 @@ class TrainingWindow(QMainWindow):
 
         # best_accuracy kommt bereits als Prozentwert vom Trainer
         best_acc = results.get('best_accuracy', 0)
-        self._log(f"\nTraining abgeschlossen!")
-        self._log(f"Beste Validation Accuracy: {best_acc:.1f}%")
+        model_path = results.get('model_path', '')
+
+        self._log(f"\nTraining abgeschlossen!", level='SUCCESS')
+        self._log(f"Beste Validation Accuracy: {best_acc:.1f}%", level='SUCCESS')
 
         if results.get('stopped_early'):
             self._log("(Early Stopping aktiviert)")
 
+        if model_path:
+            self._log(f"Modell gespeichert: {model_path}", level='SUCCESS')
+
+        # Signal an MainWindow senden
+        self.training_completed.emit(self.model, results)
+
         QMessageBox.information(
             self, "Training abgeschlossen",
-            f"Training erfolgreich!\n\nBeste Accuracy: {best_acc:.1f}%"
+            f"Training erfolgreich!\n\nBeste Accuracy: {best_acc:.1f}%\n\nModell: {model_path}"
         )
 
     def _on_training_error(self, error: str):
