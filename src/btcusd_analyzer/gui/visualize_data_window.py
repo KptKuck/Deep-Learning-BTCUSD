@@ -29,9 +29,13 @@ class VisualizeDataWindow(QMainWindow):
     - Rechts: Navigation (Signal-Filter, Zoom, Achsen-Skalierung)
     """
 
+    # Signal fuer Log-Meldungen an MainWindow
+    log_message = pyqtSignal(str, str)  # message, level
+
     def __init__(self, data: pd.DataFrame, training_data: Dict,
                  training_info: Dict, parent=None):
         super().__init__(parent)
+        self._parent = parent
 
         self.data = data
         self.training_data = training_data
@@ -52,6 +56,12 @@ class VisualizeDataWindow(QMainWindow):
         # UI initialisieren
         self._init_ui()
         self._update_charts()
+
+    def _log(self, message: str, level: str = 'INFO'):
+        """Loggt eine Nachricht an MainWindow."""
+        if self._parent and hasattr(self._parent, '_log'):
+            self._parent._log(f'[Visualize] {message}', level)
+        self.log_message.emit(message, level)
 
     def _merge_signals(self) -> List[tuple]:
         """Erstellt eine sortierte Liste aller Signale."""

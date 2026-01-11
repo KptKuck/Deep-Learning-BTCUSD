@@ -35,9 +35,12 @@ class PrepareDataWindow(QMainWindow):
 
     # Signal wenn Daten vorbereitet wurden
     data_prepared = pyqtSignal(object, object)  # (training_data, training_info)
+    # Signal fuer Log-Meldungen an MainWindow
+    log_message = pyqtSignal(str, str)  # message, level
 
     def __init__(self, data: pd.DataFrame, parent=None):
         super().__init__(parent)
+        self._parent = parent
 
         self.data = data
         self.total_points = len(data)
@@ -71,6 +74,12 @@ class PrepareDataWindow(QMainWindow):
         self._init_ui()
         self._update_seq_info()
         self._calculate_extrema()
+
+    def _log(self, message: str, level: str = 'INFO'):
+        """Loggt eine Nachricht an MainWindow."""
+        if self._parent and hasattr(self._parent, '_log'):
+            self._parent._log(f'[Prepare] {message}', level)
+        self.log_message.emit(message, level)
 
     def _init_ui(self):
         """Initialisiert die UI-Komponenten."""

@@ -170,10 +170,14 @@ class TradingWindow(QMainWindow):
     - Warnungen bei Live-Modus
     """
 
+    # Signal fuer Log-Meldungen an MainWindow
+    log_message = pyqtSignal(str, str)  # message, level
+
     def __init__(self, mode: TradingMode = TradingMode.TESTNET, parent=None):
         super().__init__(parent)
         self.mode = mode
         self.worker = None
+        self._parent = parent
 
         self.setWindowTitle(f"BTCUSD Analyzer - Trading ({mode.value.upper()})")
         self.setMinimumSize(1100, 750)
@@ -187,6 +191,17 @@ class TradingWindow(QMainWindow):
 
         self._setup_ui()
         self._apply_mode_style()
+
+    def _log(self, message: str, level: str = 'INFO'):
+        """Loggt eine Nachricht an MainWindow und lokales Log."""
+        # An MainWindow senden (falls parent _log hat)
+        if self._parent and hasattr(self._parent, '_log'):
+            self._parent._log(f'[Trading] {message}', level)
+        # Signal emittieren
+        self.log_message.emit(message, level)
+        # Auch lokal loggen falls vorhanden
+        if hasattr(self, 'log_text'):
+            self.log_text.append(f'[{level}] {message}')
 
     def _setup_ui(self):
         """Erstellt die Benutzeroberflaeche."""

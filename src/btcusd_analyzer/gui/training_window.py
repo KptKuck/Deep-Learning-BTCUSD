@@ -131,10 +131,14 @@ class TrainingWindow(QMainWindow):
     - Stop/Resume Funktion
     """
 
+    # Signal fuer Log-Meldungen an MainWindow
+    log_message = pyqtSignal(str, str)  # message, level
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("BTCUSD Analyzer - Training")
         self.setMinimumSize(1200, 800)
+        self._parent = parent
 
         # State
         self.model = None
@@ -148,6 +152,17 @@ class TrainingWindow(QMainWindow):
 
         self._setup_ui()
         self.setStyleSheet(get_stylesheet())
+
+    def _log(self, message: str, level: str = 'INFO'):
+        """Loggt eine Nachricht an MainWindow und lokales Log."""
+        # An MainWindow senden (falls parent _log hat)
+        if self._parent and hasattr(self._parent, '_log'):
+            self._parent._log(f'[Training] {message}', level)
+        # Signal emittieren
+        self.log_message.emit(message, level)
+        # Auch lokal loggen falls vorhanden
+        if hasattr(self, 'log_text'):
+            self.log_text.append(f'[{level}] {message}')
 
     def _setup_ui(self):
         """Erstellt die Benutzeroberflaeche."""

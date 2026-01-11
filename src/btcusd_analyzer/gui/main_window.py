@@ -17,12 +17,42 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QDate
 from PyQt6.QtGui import QFont, QAction
 
+import logging
+
 import pandas as pd
 
 from ..core.config import Config
-from ..core.logger import get_logger
+from ..core.logger import get_logger, Logger
 from ..data.reader import CSVReader
 from .styles import get_stylesheet, COLORS
+
+
+class GUILogHandler(logging.Handler):
+    """Handler der Logger-Meldungen an die GUI weiterleitet."""
+
+    def __init__(self, callback):
+        super().__init__()
+        self.callback = callback
+        self.setLevel(Logger.TRACE)
+
+    def emit(self, record):
+        try:
+            # Level-Name ermitteln
+            level = record.levelname
+            if record.levelno == Logger.TRACE:
+                level = 'TRACE'
+            elif record.levelno == Logger.SUCCESS:
+                level = 'SUCCESS'
+
+            # TIMING aus Message erkennen
+            msg = self.format(record)
+            if msg.startswith('[TIMING]'):
+                level = 'TIMING'
+                msg = msg[8:].strip()  # [TIMING] prefix entfernen
+
+            self.callback(msg, level)
+        except Exception:
+            self.handleError(record)
 
 
 class MainWindow(QMainWindow):
@@ -67,10 +97,14 @@ class MainWindow(QMainWindow):
         self.logger_mode = 'both'  # 'window', 'both', 'file'
         self.log_level = 5  # 1-5 (ERROR bis TRACE)
         self.enable_timing = False
+        self._gui_handler = None
 
         # UI initialisieren
         self._init_ui()
         self._connect_signals()
+
+        # GUI Log-Handler registrieren (nach UI-Init, damit log_text existiert)
+        self._setup_gui_log_handler()
 
         # Stylesheet anwenden
         self.setStyleSheet(get_stylesheet())
@@ -836,21 +870,25 @@ class MainWindow(QMainWindow):
 
         # Farben nach Level
         colors = {
+            'TRACE': '#888888',
+            'DEBUG': '#b19cd9',
             'INFO': '#90cdf4',
             'SUCCESS': '#68d391',
             'WARNING': '#fbd38d',
             'ERROR': '#fc8181',
-            'DEBUG': '#b19cd9',
-            'TRACE': '#888888',
+            'CRITICAL': '#ff6b6b',
+            'TIMING': '#80cbc4',
         }
 
         bg_colors = {
+            'TRACE': '#2d2d2d',
+            'DEBUG': '#3d3d5c',
             'INFO': '#2d3748',
             'SUCCESS': '#22543d',
             'WARNING': '#744210',
             'ERROR': '#742a2a',
-            'DEBUG': '#3d3d5c',
-            'TRACE': '#2d2d2d',
+            'CRITICAL': '#5c1a1a',
+            'TIMING': '#1a3d3d',
         }
 
         color = colors.get(level, '#cccccc')
@@ -867,6 +905,28 @@ class MainWindow(QMainWindow):
         # Auto-scroll
         scrollbar = self.log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
+
+    def _setup_gui_log_handler(self):
+        """Registriert den GUI-Handler beim Logger."""
+        self._gui_handler = GUILogHandler(self._log)
+        # Formatter ohne Timestamp (wird in _log hinzugefuegt)
+        formatter = logging.Formatter('%(message)s')
+        self._gui_handler.setFormatter(formatter)
+        # Handler zum internen Logger hinzufuegen
+        self.logger._logger.addHandler(self._gui_handler)
+
+    def _update_log_level(self, level: int):
+        """Aktualisiert das Log-Level (1=ERROR bis 5=TRACE)."""
+        level_map = {
+            1: logging.ERROR,
+            2: logging.WARNING,
+            3: Logger.SUCCESS,
+            4: logging.DEBUG,
+            5: Logger.TRACE,
+        }
+        self.log_level = level
+        if self._gui_handler:
+            self._gui_handler.setLevel(level_map.get(level, Logger.TRACE))
 
     # === Event Handler ===
 
@@ -1224,6 +1284,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Wird beim Schliessen des Fensters aufgerufen."""
-        self._log('BTCUSD Analyzer beendet', 'INFO')
+        # GUI-Handler entfernen bevor Logger-Aufruf
+        if self._gui_handler:
+            self.logger._logger.removeHandler(self._gui_handler)
+            self._gui_handler = None
         self.logger.info('BTCUSD Analyzer beendet')
         event.accept()
