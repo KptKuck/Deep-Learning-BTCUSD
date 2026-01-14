@@ -1365,9 +1365,43 @@ class PrepareDataWindow(QMainWindow):
         self.lookforward_spin = QSpinBox()
         self.lookforward_spin.setRange(1, 200)
         self.lookforward_spin.setValue(self.params['lookforward'])
+        self.lookforward_spin.valueChanged.connect(self._update_lookahead_default)
         seq_layout.addWidget(self.lookforward_spin, 1, 1)
 
         layout.addWidget(seq_group)
+
+        # Lookahead Labels (Vorhersage-Training)
+        lookahead_group = QGroupBox('Lookahead Labels')
+        lookahead_group.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
+        lookahead_group.setStyleSheet(self._group_style('#e6b333'))
+        lookahead_layout = QGridLayout(lookahead_group)
+
+        self.use_lookahead_cb = QCheckBox('Lookahead aktivieren')
+        self.use_lookahead_cb.setChecked(True)
+        self.use_lookahead_cb.setStyleSheet('color: white;')
+        self.use_lookahead_cb.setToolTip(
+            'Erweitert Labels auf Bars VOR dem Peak.\n'
+            'Das Modell lernt so, Peaks vorherzusagen.'
+        )
+        self.use_lookahead_cb.stateChanged.connect(self._on_lookahead_toggled)
+        lookahead_layout.addWidget(self.use_lookahead_cb, 0, 0, 1, 2)
+
+        lookahead_layout.addWidget(QLabel('Lookahead Bars:'), 1, 0)
+        self.lookahead_spin = QSpinBox()
+        self.lookahead_spin.setRange(1, 100)
+        self.lookahead_spin.setValue(self.params['lookforward'] // 2)
+        self.lookahead_spin.setToolTip('Anzahl Bars vor dem Peak die das Label erhalten')
+        lookahead_layout.addWidget(self.lookahead_spin, 1, 1)
+
+        # Info-Text
+        lookahead_info = QLabel(
+            'Beispiel: Bei Lookahead=5 erhalten die\n'
+            '5 Bars vor einem BUY-Peak auch das BUY-Label.'
+        )
+        lookahead_info.setStyleSheet('color: #888; font-size: 10px; padding: 5px;')
+        lookahead_layout.addWidget(lookahead_info, 2, 0, 1, 2)
+
+        layout.addWidget(lookahead_group)
 
         # HOLD-Samples (nur bei 3 Klassen)
         self.hold_group = QGroupBox('HOLD-Samples')
@@ -1421,6 +1455,20 @@ class PrepareDataWindow(QMainWindow):
         main_layout.addWidget(scroll)
 
         return widget
+
+    def _update_lookahead_default(self):
+        """Aktualisiert den Lookahead-Standardwert basierend auf Lookforward."""
+        lookforward = self.lookforward_spin.value()
+        default_lookahead = max(1, lookforward // 2)
+        # Nur aktualisieren wenn der Wert "nah" am Default ist
+        current = self.lookahead_spin.value()
+        if abs(current - default_lookahead) <= 5 or current > lookforward:
+            self.lookahead_spin.setValue(default_lookahead)
+
+    def _on_lookahead_toggled(self, state: int):
+        """Aktiviert/deaktiviert die Lookahead-Einstellungen."""
+        enabled = state == Qt.CheckState.Checked.value
+        self.lookahead_spin.setEnabled(enabled)
 
     def _calculate_preview(self):
         """Berechnet die Vorschau."""
@@ -1515,41 +1563,46 @@ class PrepareDataWindow(QMainWindow):
                 features = np.nan_to_num(features, nan=0.0)
                 self._log("NaN-Werte in Features durch 0 ersetzt", 'WARNING')
 
-            # 3. Labels mit Lookahead erweitern
+            # 3. Labels mit Lookahead erweitern (falls aktiviert)
             labels = self.generated_labels
             num_classes = self.result_info.get('num_classes', 3)
-            lookforward = self.params['lookforward']
 
-            # Lookahead = lookforward / 2, damit das Modell lernt VOR dem Peak zu erkennen
-            lookahead_bars = max(1, lookforward // 2)
+            # Lookahead aus UI holen
+            use_lookahead = self.use_lookahead_cb.isChecked()
+            lookahead_bars = self.lookahead_spin.value() if use_lookahead else 0
 
-            if num_classes == 3:
-                # 3 Klassen: HOLD=0, BUY=1, SELL=2
-                expanded_labels = expand_labels_lookahead(
-                    labels,
-                    lookahead=lookahead_bars,
-                    hold_label=0,
-                    buy_label=1,
-                    sell_label=2
-                )
+            if use_lookahead and lookahead_bars > 0:
+                if num_classes == 3:
+                    # 3 Klassen: HOLD=0, BUY=1, SELL=2
+                    expanded_labels = expand_labels_lookahead(
+                        labels,
+                        lookahead=lookahead_bars,
+                        hold_label=0,
+                        buy_label=1,
+                        sell_label=2
+                    )
+                else:
+                    # 2 Klassen: BUY=0, SELL=1, ignorieren bei -1
+                    expanded_labels = expand_labels_lookahead(
+                        labels,
+                        lookahead=lookahead_bars,
+                        hold_label=-1,
+                        buy_label=0,
+                        sell_label=1
+                    )
+
+                # Statistik der erweiterten Labels
+                original_signals = np.sum(labels != 0) if num_classes == 3 else np.sum(labels >= 0)
+                expanded_signals = np.sum(expanded_labels != 0) if num_classes == 3 else np.sum(expanded_labels >= 0)
+                self._log(f"Lookahead Labels: {original_signals} -> {expanded_signals} "
+                          f"(+{lookahead_bars} Bars)", 'INFO')
             else:
-                # 2 Klassen: BUY=0, SELL=1, ignorieren bei -1
-                expanded_labels = expand_labels_lookahead(
-                    labels,
-                    lookahead=lookahead_bars,
-                    hold_label=-1,  # wird ignoriert
-                    buy_label=0,
-                    sell_label=1
-                )
-
-            # Statistik der erweiterten Labels
-            original_signals = np.sum(labels != 0) if num_classes == 3 else np.sum(labels >= 0)
-            expanded_signals = np.sum(expanded_labels != 0) if num_classes == 3 else np.sum(expanded_labels >= 0)
-            self._log(f"Labels erweitert: {original_signals} -> {expanded_signals} "
-                      f"(Lookahead={lookahead_bars} Bars)", 'INFO')
+                expanded_labels = labels
+                self._log("Lookahead deaktiviert - Original-Labels verwendet", 'INFO')
 
             # 4. Sequenzen generieren
             lookback = self.params['lookback']
+            lookforward = self.params['lookforward']
 
             generator = SequenceGenerator(
                 lookback=lookback,
