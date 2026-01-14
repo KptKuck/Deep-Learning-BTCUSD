@@ -1428,9 +1428,15 @@ class BacktestWindow(QMainWindow):
         self.equity_canvas.draw()
 
     def _update_charts(self):
-        """Aktualisiert die Charts."""
+        """Aktualisiert die Charts unter Beibehaltung der Zoom-Einstellungen."""
         if not hasattr(self, 'ax_price'):
             return
+
+        # Aktuelle Zoom-Limits speichern
+        price_xlim = self.ax_price.get_xlim()
+        price_ylim = self.ax_price.get_ylim()
+        equity_xlim = self.ax_equity.get_xlim() if hasattr(self, 'ax_equity') else None
+        equity_ylim = self.ax_equity.get_ylim() if hasattr(self, 'ax_equity') else None
 
         # Preis-Chart
         self.ax_price.clear()
@@ -1462,6 +1468,12 @@ class BacktestWindow(QMainWindow):
 
         self.ax_price.set_title(f'Preis und Signale | BUY: {self.buy_count}, SELL: {self.sell_count}, HOLD: {self.hold_count}',
                                 color='white', fontsize=11)
+
+        # Zoom-Limits wiederherstellen (wenn gueltig)
+        if price_xlim[0] != 0.0 or price_xlim[1] != 1.0:
+            self.ax_price.set_xlim(price_xlim)
+            self.ax_price.set_ylim(price_ylim)
+
         self.price_figure.tight_layout()
         self.price_canvas.draw()
 
@@ -1485,6 +1497,12 @@ class BacktestWindow(QMainWindow):
         pnl_pct = ((self.current_equity - self.initial_capital) / self.initial_capital) * 100
         self.ax_equity.set_title(f'Equity-Kurve | P/L: ${self.total_pnl:,.2f} ({pnl_pct:.2f}%)',
                                  color='white', fontsize=11)
+
+        # Zoom-Limits wiederherstellen (wenn gueltig)
+        if equity_xlim is not None and (equity_xlim[0] != 0.0 or equity_xlim[1] != 1.0):
+            self.ax_equity.set_xlim(equity_xlim)
+            self.ax_equity.set_ylim(equity_ylim)
+
         self.equity_figure.tight_layout()
         self.equity_canvas.draw()
 
@@ -1493,6 +1511,10 @@ class BacktestWindow(QMainWindow):
         if not hasattr(self, 'ax_trade'):
             return
 
+        # Aktuelle Zoom-Limits speichern
+        trade_xlim = self.ax_trade.get_xlim()
+        trade_ylim = self.ax_trade.get_ylim()
+
         self.ax_trade.clear()
         self._setup_trade_chart()
 
@@ -1500,9 +1522,9 @@ class BacktestWindow(QMainWindow):
             self.trade_canvas.draw()
             return
 
-        # Preis-Linie (duenn, grau)
+        # Preis-Linie (heller fuer bessere Sichtbarkeit)
         self.ax_trade.plot(self.data.index, self.data['Close'],
-                          color='#555555', linewidth=0.5, alpha=0.5)
+                          color='#8899bb', linewidth=0.8, alpha=0.7)
 
         # Abgeschlossene Trades visualisieren
         wins = 0
@@ -1550,11 +1572,16 @@ class BacktestWindow(QMainWindow):
             self.ax_trade.scatter([exit_date], [exit_price],
                                  marker='x', c=color, s=60, zorder=5, linewidths=2)
 
-            # P/L Text am Exit
+            # P/L Text am Exit (Gewinn oben, Verlust unten) mit Verbindungslinie
             pnl_text = f'+${pnl:.0f}' if pnl > 0 else f'-${abs(pnl):.0f}'
+            y_offset = 35 if pnl > 0 else -40  # Weiter weg vom Exit
             self.ax_trade.annotate(pnl_text, (exit_date, exit_price),
-                                  textcoords='offset points', xytext=(5, 5),
-                                  fontsize=8, color=color, fontweight='bold')
+                                  textcoords='offset points', xytext=(8, y_offset),
+                                  fontsize=9, color=color, fontweight='bold',
+                                  bbox=dict(boxstyle='round,pad=0.3', facecolor='#1a1a1a',
+                                           edgecolor=color, alpha=0.9),
+                                  arrowprops=dict(arrowstyle='-', color='#e6b333',
+                                                 linewidth=1.5, alpha=0.8))
 
         # Aktuelle offene Position
         if self.position != 'NONE' and self.entry_index > 0:
@@ -1584,6 +1611,11 @@ class BacktestWindow(QMainWindow):
             f'Trades | {total_trades} Trades | {wins}W / {losses}L | Win-Rate: {win_rate:.1f}%',
             color='white', fontsize=11
         )
+
+        # Zoom-Limits wiederherstellen (wenn gueltig)
+        if trade_xlim[0] != 0.0 or trade_xlim[1] != 1.0:
+            self.ax_trade.set_xlim(trade_xlim)
+            self.ax_trade.set_ylim(trade_ylim)
 
         self.trade_figure.tight_layout()
         self.trade_canvas.draw()
