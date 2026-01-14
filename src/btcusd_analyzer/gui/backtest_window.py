@@ -196,7 +196,7 @@ class BacktestWindow(QMainWindow):
         slider_row = QHBoxLayout()
         slider_row.addWidget(QLabel("Schritte/Sek:"))
         self.speed_slider = QSlider(Qt.Orientation.Horizontal)
-        self.speed_slider.setRange(1, 100)
+        self.speed_slider.setRange(1, 500)
         self.speed_slider.setValue(10)
         self.speed_slider.valueChanged.connect(self._update_speed)
         slider_row.addWidget(self.speed_slider)
@@ -516,7 +516,7 @@ class BacktestWindow(QMainWindow):
         """Bereitet Sequenzen fuer Modell-Vorhersagen vor."""
         try:
             import torch
-            from ..data.feature_processor import FeatureProcessor
+            from ..data.processor import FeatureProcessor
             from ..training.normalizer import ZScoreNormalizer
 
             # Features aus model_info holen (gleiche wie beim Training)

@@ -43,7 +43,7 @@ class ModelFactory:
         model_name = model_name.lower().strip()
 
         # LSTM Varianten
-        if model_name in ['bilstm', 'bi_lstm']:
+        if model_name in ['bilstm', 'bi_lstm', 'bilstmclassifier']:
             return BiLSTMClassifier(
                 input_size=input_size,
                 hidden_size=hidden_size,
