@@ -19,10 +19,11 @@
 | Widget-Extraktion (gui/widgets/) | Erledigt |
 | Custom Exceptions (core/exceptions.py) | Erledigt |
 | Input-Validierung (CSVReader, FeatureProcessor) | Erledigt |
+| prepare_data_window.py Duplikate entfernt | Erledigt |
 
 **Naechste Schritte:**
-- GUI-Refactoring (grosse Dateien weiter aufteilen)
 - Alle TODOs im Code sind erledigt
+- GUI-Refactoring optional (prepare_data_window.py: 2.267 -> 1.611 LOC)
 
 ---
 
@@ -40,8 +41,8 @@ Das Projekt zeigt eine **professionelle Architektur** mit klarer Modularitaet, a
 
 | Datei | Zeilen | Status |
 |-------|--------|--------|
-| prepare_data_window.py | 2.267 | Kritisch |
-| main_window.py | 1.590 | Kritisch |
+| prepare_data_window.py | 1.611 | Verbessert (von 2.267) |
+| main_window.py | 1.782 | Kritisch |
 | training_window.py | 1.364 | Hoch |
 | backtest_window.py | 991 | Mittel |
 
@@ -276,9 +277,9 @@ class MyClass:
 
 | Metrik | Vorher | Aktuell | Ziel |
 |--------|--------|---------|------|
-| Test Coverage | 0% | ~20% | 70%+ |
-| Groesste Datei | 2.267 LOC | 2.267 LOC | <500 LOC |
-| TODO-Kommentare | 10+ | 1 | 0 |
+| Test Coverage | 0% | 0% | 70%+ |
+| Groesste Datei | 2.267 LOC | 1.782 LOC | <500 LOC |
+| TODO-Kommentare | 10+ | 0 | 0 |
 | NotImplementedError | 1 | 0* | 0 |
 | Type Hint Coverage | 80% | 80% | 95% |
 | Docstring Coverage | 90% | 90% | 95% |
