@@ -118,8 +118,9 @@ class MainWindow(QMainWindow):
         self.logger.info('BTCUSD Analyzer GUI gestartet')
         self.logger.info(f'Log-Datei: {self.logger.get_log_file_path()}')
 
-        # Auto-Load letzte Daten
+        # Auto-Load letzte Daten und Session
         QTimer.singleShot(100, self._auto_load_last_data)
+        QTimer.singleShot(200, self._auto_load_latest_session)
 
     def _init_ui(self):
         """Initialisiert die UI-Komponenten."""
@@ -1512,19 +1513,21 @@ class MainWindow(QMainWindow):
 
         try:
             sessions = SessionManager.list_sessions(self.config.paths.log_dir)
+            self._log(f"Suche Sessions in: {self.config.paths.log_dir}", 'DEBUG')
+            self._log(f"Gefundene Sessions: {len(sessions)}", 'DEBUG')
 
             # Finde neueste Session mit Modell
             for session in sessions:
                 if session.get('has_model'):
                     session_dir = session['session_dir']
-                    self._log(f"Auto-Load: {session['session_name']}", 'INFO')
+                    self._log(f"Auto-Load Session: {session['session_name']}", 'INFO')
                     self._load_session_from_dir(session_dir)
                     return
 
-            self._log("Keine Session mit Modell gefunden", 'DEBUG')
+            self._log("Keine Session mit Modell gefunden", 'INFO')
 
         except Exception as e:
-            self._log(f"Auto-Load fehlgeschlagen: {e}", 'DEBUG')
+            self._log(f"Auto-Load Session fehlgeschlagen: {e}", 'WARNING')
 
     def _make_prediction(self):
         """Fuehrt eine Vorhersage durch."""
