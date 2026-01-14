@@ -702,16 +702,21 @@ class TrainingWindow(QMainWindow):
         train_dataset = TensorDataset(X_train, Y_train)
         val_dataset = TensorDataset(X_val, Y_val)
 
-        # DataLoader
+        # DataLoader mit CUDA-Optimierung
+        use_cuda = self.device.type == 'cuda'
         self.train_loader = DataLoader(
             train_dataset,
             batch_size=batch_size,
-            shuffle=False  # Zeitreihen nicht shufflen
+            shuffle=False,  # Zeitreihen nicht shufflen
+            pin_memory=use_cuda,  # Schnellerer CPU->GPU Transfer
+            num_workers=0  # Windows: keine Multiprocessing-Worker
         )
         self.val_loader = DataLoader(
             val_dataset,
             batch_size=batch_size,
-            shuffle=False
+            shuffle=False,
+            pin_memory=use_cuda,
+            num_workers=0
         )
 
         self._log(f"DataLoader erstellt: {train_size} Training, {val_size} Validation (Batch: {batch_size})", level='SUCCESS')
@@ -1222,8 +1227,8 @@ class TrainingWindow(QMainWindow):
             val_dataset = TensorDataset(X_val, Y_val)
 
             batch_size = 32
-            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
-            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+            train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, pin_memory=True)
+            val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, pin_memory=True)
 
             self._log(f"DataLoader erstellt: {len(train_dataset)} Train, {len(val_dataset)} Val")
 
