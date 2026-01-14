@@ -1,3 +1,0 @@
-"""
-BTCUSD Analyzer Test Suite
-"""
