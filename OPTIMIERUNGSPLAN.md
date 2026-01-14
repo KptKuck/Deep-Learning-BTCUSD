@@ -20,10 +20,13 @@
 | Custom Exceptions (core/exceptions.py) | Erledigt |
 | Input-Validierung (CSVReader, FeatureProcessor) | Erledigt |
 | prepare_data_window.py Duplikate entfernt | Erledigt |
+| Fake-Datengenerierung behoben | Erledigt |
+| GPU-Utility-Funktionen erstellt | Erledigt |
 
 **Naechste Schritte:**
-- Alle TODOs im Code sind erledigt
-- GUI-Refactoring optional (prepare_data_window.py: 2.267 -> 1.611 LOC)
+- Alle kritischen TODOs sind erledigt
+- GUI-Refactoring optional (grosse Dateien aufteilen)
+- StyleFactory bereits vorhanden fuer Button/Group-Styles
 
 ---
 
