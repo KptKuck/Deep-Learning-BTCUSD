@@ -5,11 +5,17 @@ Entspricht read_btc_data.m aus dem MATLAB-Projekt
 
 import time
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 import pandas as pd
+import numpy as np
 
 from ..core.logger import get_logger
+from ..core.exceptions import (
+    DataValidationError,
+    DataFormatError,
+    MissingDataError,
+)
 
 
 class CSVReader:
@@ -120,6 +126,107 @@ class CSVReader:
             self.logger.error(f'Fehlende Spalten: {missing}')
             return False
         return True
+
+    def validate(self, df: pd.DataFrame, strict: bool = False) -> List[str]:
+        """
+        Fuehrt umfassende Validierung der Daten durch.
+
+        Args:
+            df: DataFrame mit OHLCV-Daten
+            strict: Wenn True, werden auch Warnungen als Fehler gewertet
+
+        Returns:
+            Liste von Validierungsfehlern (leer wenn alles OK)
+
+        Raises:
+            DataValidationError: Bei kritischen Fehlern (wenn strict=True)
+        """
+        errors: List[str] = []
+        warnings: List[str] = []
+
+        if df is None:
+            errors.append("DataFrame ist None")
+            if strict:
+                raise DataValidationError("Keine Daten vorhanden", errors)
+            return errors
+
+        if df.empty:
+            errors.append("DataFrame ist leer")
+            if strict:
+                raise DataValidationError("Keine Daten vorhanden", errors)
+            return errors
+
+        # 1. Spalten-Validierung
+        missing_cols = [col for col in self.REQUIRED_COLUMNS if col not in df.columns]
+        if missing_cols:
+            errors.append(f"Fehlende Pflichtspalten: {', '.join(missing_cols)}")
+
+        # 2. Datentyp-Validierung
+        for col in self.REQUIRED_COLUMNS:
+            if col in df.columns:
+                if not np.issubdtype(df[col].dtype, np.number):
+                    warnings.append(f"Spalte '{col}' ist nicht numerisch")
+
+        # 3. Wertebereich-Validierung (OHLC-Logik)
+        if all(col in df.columns for col in ['Open', 'High', 'Low', 'Close']):
+            # High sollte >= Low sein
+            invalid_hl = (df['High'] < df['Low']).sum()
+            if invalid_hl > 0:
+                errors.append(f"{invalid_hl} Zeilen mit High < Low")
+
+            # Negative Preise
+            for col in ['Open', 'High', 'Low', 'Close']:
+                neg_count = (df[col] < 0).sum()
+                if neg_count > 0:
+                    errors.append(f"{neg_count} negative Werte in '{col}'")
+
+            # Null-Preise
+            for col in ['Open', 'High', 'Low', 'Close']:
+                zero_count = (df[col] == 0).sum()
+                if zero_count > 0:
+                    warnings.append(f"{zero_count} Null-Werte in '{col}'")
+
+        # 4. NaN-Validierung
+        for col in self.REQUIRED_COLUMNS:
+            if col in df.columns:
+                nan_count = df[col].isna().sum()
+                if nan_count > 0:
+                    warnings.append(f"{nan_count} NaN-Werte in '{col}'")
+
+        # 5. Duplikate-Validierung
+        if 'DateTime' in df.columns:
+            dup_count = df['DateTime'].duplicated().sum()
+            if dup_count > 0:
+                warnings.append(f"{dup_count} doppelte DateTime-Eintraege")
+
+        # 6. Zeitreihen-Validierung
+        if 'DateTime' in df.columns and len(df) > 1:
+            # Nicht-chronologische Reihenfolge
+            if not df['DateTime'].is_monotonic_increasing:
+                warnings.append("DateTime nicht chronologisch sortiert")
+
+            # Grosse Luecken erkennen
+            time_diffs = df['DateTime'].diff().dropna()
+            if len(time_diffs) > 0:
+                median_diff = time_diffs.median()
+                large_gaps = (time_diffs > median_diff * 10).sum()
+                if large_gaps > 0:
+                    warnings.append(f"{large_gaps} grosse Zeitluecken erkannt")
+
+        # Warnungen bei strict-Modus als Fehler werten
+        if strict:
+            all_issues = errors + warnings
+            if all_issues:
+                raise DataValidationError(
+                    f"Datenvalidierung fehlgeschlagen: {len(all_issues)} Probleme",
+                    invalid_fields=all_issues
+                )
+
+        # Warnungen loggen
+        for warning in warnings:
+            self.logger.warning(f"Validierung: {warning}")
+
+        return errors
 
     def get_data_info(self, df: pd.DataFrame) -> dict:
         """
