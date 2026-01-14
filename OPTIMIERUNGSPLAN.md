@@ -22,11 +22,12 @@
 | prepare_data_window.py Duplikate entfernt | Erledigt |
 | Fake-Datengenerierung behoben | Erledigt |
 | GPU-Utility-Funktionen erstellt | Erledigt |
+| GUI Services extrahiert (DataService, ModelService) | Erledigt |
 
 **Naechste Schritte:**
 - Alle kritischen TODOs sind erledigt
-- GUI-Refactoring optional (grosse Dateien aufteilen)
-- StyleFactory bereits vorhanden fuer Button/Group-Styles
+- Services-Modul erstellt fuer bessere Wartbarkeit
+- StyleFactory bereits in allen GUI-Dateien verwendet
 
 ---
 
