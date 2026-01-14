@@ -93,6 +93,7 @@ class MainWindow(QMainWindow):
         self.data_path: Optional[Path] = None
         self.training_data = None
         self.training_info = None
+        self.backtest_info = None  # Separates Backtest-Daten (nicht im Training verwendet)
         self.model = None
         self.model_path: Optional[Path] = None
         self.model_info = None
@@ -1222,12 +1223,18 @@ class MainWindow(QMainWindow):
             self._log('PrepareDataWindow noch nicht implementiert', 'WARNING')
             QMessageBox.information(self, 'Info', 'Trainingsdaten-Vorbereitung noch nicht implementiert')
 
-    def _on_training_data_prepared(self, training_data, training_info):
+    def _on_training_data_prepared(self, training_data, training_info, backtest_info):
         """Callback wenn Trainingsdaten vorbereitet wurden."""
         self.training_data = training_data
         self.training_info = training_info
+        self.backtest_info = backtest_info  # Separater Backtest-Datensatz
         self.training_data_ready.emit(training_data)
         self._log('Trainingsdaten bereit', 'SUCCESS')
+
+        # Backtest-Info loggen
+        if backtest_info:
+            backtest_points = backtest_info.get('num_points', 0)
+            self._log(f'Backtest-Daten reserviert: {backtest_points} Datenpunkte', 'INFO')
 
         # Status-Panel aktualisieren
         self._update_status_panel_from_training(training_data, training_info)
@@ -1442,8 +1449,17 @@ class MainWindow(QMainWindow):
         try:
             from .backtest_window import BacktestWindow
             self.backtest_window = BacktestWindow(parent=self)
+
+            # Backtest-Daten verwenden falls verfuegbar (nicht im Training verwendet)
+            if self.backtest_info and 'data' in self.backtest_info:
+                backtest_data = self.backtest_info['data']
+                self._log(f'Verwende separate Backtest-Daten: {len(backtest_data)} Punkte', 'INFO')
+            else:
+                backtest_data = self.data
+                self._log('Keine separaten Backtest-Daten - verwende alle Daten', 'WARNING')
+
             self.backtest_window.set_data(
-                data=self.data,
+                data=backtest_data,
                 model=self.model,
                 model_info=self.model_info
             )

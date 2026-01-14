@@ -48,7 +48,8 @@ class PrepareDataWindow(QMainWindow):
     """
 
     # Signal wenn Daten vorbereitet wurden
-    data_prepared = pyqtSignal(object, object)  # (training_data, training_info)
+    # (training_data, training_info, backtest_data)
+    data_prepared = pyqtSignal(object, object, object)
     # Signal fuer Log-Meldungen an MainWindow
     log_message = pyqtSignal(str, str)  # message, level
 
@@ -69,6 +70,7 @@ class PrepareDataWindow(QMainWindow):
             'auto_gen': True,
             'random_seed': 42,
             'normalize_method': 'zscore',
+            'train_test_split': 80,  # Prozent fuer Training, Rest fuer Backtest
         }
 
         # Ergebnis-Variablen
@@ -1370,6 +1372,33 @@ class PrepareDataWindow(QMainWindow):
 
         layout.addWidget(seq_group)
 
+        # Train/Test Split
+        split_group = QGroupBox('Train/Test Split')
+        split_group.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
+        split_group.setStyleSheet(self._group_style('#33b34d'))
+        split_layout = QGridLayout(split_group)
+
+        split_layout.addWidget(QLabel('Training:'), 0, 0)
+        self.train_split_spin = QSpinBox()
+        self.train_split_spin.setRange(50, 95)
+        self.train_split_spin.setValue(self.params['train_test_split'])
+        self.train_split_spin.setSuffix(' %')
+        self.train_split_spin.valueChanged.connect(self._on_split_changed)
+        split_layout.addWidget(self.train_split_spin, 0, 1)
+
+        split_layout.addWidget(QLabel('Backtest:'), 1, 0)
+        self.test_split_label = QLabel(f"{100 - self.params['train_test_split']} %")
+        self.test_split_label.setStyleSheet('color: #4da8da; font-weight: bold;')
+        split_layout.addWidget(self.test_split_label, 1, 1)
+
+        # Info ueber Datenaufteilung
+        self.split_info_label = QLabel()
+        self.split_info_label.setStyleSheet('color: #888; font-size: 10px; padding: 5px;')
+        self._update_split_info()
+        split_layout.addWidget(self.split_info_label, 2, 0, 1, 2)
+
+        layout.addWidget(split_group)
+
         # Lookahead Labels (Vorhersage-Training)
         lookahead_group = QGroupBox('Lookahead Labels')
         lookahead_group.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
@@ -1470,6 +1499,27 @@ class PrepareDataWindow(QMainWindow):
         enabled = state == Qt.CheckState.Checked.value
         self.lookahead_spin.setEnabled(enabled)
 
+    def _on_split_changed(self, value: int):
+        """Wird aufgerufen wenn sich der Train/Test-Split aendert."""
+        self.params['train_test_split'] = value
+        self.test_split_label.setText(f"{100 - value} %")
+        self._update_split_info()
+
+    def _update_split_info(self):
+        """Aktualisiert die Info-Anzeige fuer den Train/Test-Split."""
+        if not hasattr(self, 'split_info_label'):
+            return
+
+        total = len(self.data)
+        train_pct = self.params.get('train_test_split', 80)
+        train_count = int(total * train_pct / 100)
+        test_count = total - train_count
+
+        self.split_info_label.setText(
+            f"Training: {train_count:,} Datenpunkte\n"
+            f"Backtest: {test_count:,} Datenpunkte"
+        )
+
     def _calculate_preview(self):
         """Berechnet die Vorschau."""
         if not self.features_valid:
@@ -1547,9 +1597,21 @@ class PrepareDataWindow(QMainWindow):
                 compute_class_weights,
             )
 
-            # 1. Features berechnen
+            # 0. Train/Test Split berechnen
+            train_split_pct = self.train_split_spin.value()
+            total_points = len(self.data)
+            split_idx = int(total_points * train_split_pct / 100)
+
+            # Daten aufteilen (zeitlich: Training = Anfang, Backtest = Ende)
+            train_data = self.data.iloc[:split_idx].copy()
+            backtest_data = self.data.iloc[split_idx:].copy()
+
+            self._log(f"Train/Test Split: {train_split_pct}% Training ({len(train_data)}), "
+                      f"{100-train_split_pct}% Backtest ({len(backtest_data)})", 'INFO')
+
+            # 1. Features berechnen (nur fuer Trainingsdaten)
             processor = FeatureProcessor(features=self.selected_features)
-            processed_df = processor.process(self.data)
+            processed_df = processor.process(train_data)
 
             # 2. Feature-Matrix erstellen (nur ausgewaehlte Features)
             feature_columns = [f for f in self.selected_features if f in processed_df.columns]
@@ -1564,7 +1626,8 @@ class PrepareDataWindow(QMainWindow):
                 self._log("NaN-Werte in Features durch 0 ersetzt", 'WARNING')
 
             # 3. Labels mit Lookahead erweitern (falls aktiviert)
-            labels = self.generated_labels
+            # Labels nur fuer Trainingsdaten verwenden
+            train_labels = self.generated_labels[:split_idx]
             num_classes = self.result_info.get('num_classes', 3)
 
             # Lookahead aus UI holen
@@ -1575,7 +1638,7 @@ class PrepareDataWindow(QMainWindow):
                 if num_classes == 3:
                     # 3 Klassen: HOLD=0, BUY=1, SELL=2
                     expanded_labels = expand_labels_lookahead(
-                        labels,
+                        train_labels,
                         lookahead=lookahead_bars,
                         hold_label=0,
                         buy_label=1,
@@ -1584,7 +1647,7 @@ class PrepareDataWindow(QMainWindow):
                 else:
                     # 2 Klassen: BUY=0, SELL=1, ignorieren bei -1
                     expanded_labels = expand_labels_lookahead(
-                        labels,
+                        train_labels,
                         lookahead=lookahead_bars,
                         hold_label=-1,
                         buy_label=0,
@@ -1592,12 +1655,12 @@ class PrepareDataWindow(QMainWindow):
                     )
 
                 # Statistik der erweiterten Labels
-                original_signals = np.sum(labels != 0) if num_classes == 3 else np.sum(labels >= 0)
+                original_signals = np.sum(train_labels != 0) if num_classes == 3 else np.sum(train_labels >= 0)
                 expanded_signals = np.sum(expanded_labels != 0) if num_classes == 3 else np.sum(expanded_labels >= 0)
                 self._log(f"Lookahead Labels: {original_signals} -> {expanded_signals} "
                           f"(+{lookahead_bars} Bars)", 'INFO')
             else:
-                expanded_labels = labels
+                expanded_labels = train_labels
                 self._log("Lookahead deaktiviert - Original-Labels verwendet", 'INFO')
 
             # 4. Sequenzen generieren
@@ -1634,14 +1697,28 @@ class PrepareDataWindow(QMainWindow):
             training_info['num_classes'] = num_classes
             training_info['actual_samples'] = len(X)
             training_info['lookahead_bars'] = lookahead_bars
-            training_info['buy_indices'] = self.detected_peaks['buy_indices'].copy()
-            training_info['sell_indices'] = self.detected_peaks['sell_indices'].copy()
+            training_info['train_split_pct'] = train_split_pct
+            # Nur Peaks im Trainingsbereich
+            training_info['buy_indices'] = [i for i in self.detected_peaks['buy_indices'] if i < split_idx]
+            training_info['sell_indices'] = [i for i in self.detected_peaks['sell_indices'] if i < split_idx]
 
-            # Signal senden
-            self.data_prepared.emit(training_data, training_info)
+            # 7. Backtest-Daten zusammenstellen
+            backtest_info = {
+                'data': backtest_data,
+                'start_idx': split_idx,
+                'num_points': len(backtest_data),
+                'features': self.selected_features.copy(),
+                'lookback': lookback,
+                'num_classes': num_classes,
+            }
+
+            # Signal senden (mit Backtest-Daten)
+            self.data_prepared.emit(training_data, training_info, backtest_info)
 
             self._log(f"Trainingsdaten generiert: {len(X)} Sequenzen, "
                       f"{len(feature_columns)} Features, Lookback={lookback}", 'SUCCESS')
+            self._log(f"Backtest-Daten reserviert: {len(backtest_data)} Datenpunkte "
+                      f"(nicht im Training verwendet)", 'SUCCESS')
 
             self.close()
 
