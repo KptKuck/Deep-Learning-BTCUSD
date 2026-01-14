@@ -1377,7 +1377,7 @@ class PrepareDataWindow(QMainWindow):
     # =========================================================================
 
     def _create_features_tab(self) -> QWidget:
-        """Erstellt Tab 3: Feature-Auswahl mit Uebersicht und Detail-Chart."""
+        """Erstellt Tab 3: Feature-Auswahl mit Sub-Tabs fuer verschiedene Ansichten."""
         tab = QWidget()
         layout = QHBoxLayout(tab)
         layout.setContentsMargins(5, 5, 5, 5)
@@ -1393,60 +1393,95 @@ class PrepareDataWindow(QMainWindow):
         params_widget = self._create_features_params()
         splitter.addWidget(params_widget)
 
-        # Rechte Seite: Zwei Charts uebereinander
-        charts_widget = QWidget()
-        charts_layout = QVBoxLayout(charts_widget)
-        charts_layout.setContentsMargins(0, 0, 0, 0)
-        charts_layout.setSpacing(5)
+        # Rechte Seite: Sub-Tab Widget fuer verschiedene Ansichten
+        self.features_view_tabs = QTabWidget()
+        self.features_view_tabs.setStyleSheet(self._get_subtab_stylesheet())
 
-        # Uebersichts-Chart (oben)
-        charts_layout.addWidget(self.features_chart, 1)
+        # Sub-Tab 1: Uebersicht-Chart
+        overview_tab = self._create_features_overview_subtab()
+        self.features_view_tabs.addTab(overview_tab, 'Uebersicht')
 
-        # Detail-Bereich (unten)
-        detail_widget = QWidget()
-        detail_layout = QVBoxLayout(detail_widget)
-        detail_layout.setContentsMargins(5, 5, 5, 5)
-        detail_layout.setSpacing(5)
+        # Sub-Tab 2: Detail-Chart mit Slider
+        detail_tab = self._create_features_detail_subtab()
+        self.features_view_tabs.addTab(detail_tab, 'Detail')
+
+        # Sub-Tab 3: Datentabelle
+        table_tab = self._create_features_table_subtab()
+        self.features_view_tabs.addTab(table_tab, 'Daten')
+
+        splitter.addWidget(self.features_view_tabs)
+        splitter.setSizes([420, 1000])
+
+        # Initiale Chart-Aktualisierung mit Standard-Features
+        self._update_features_preview()
+
+        return tab
+
+    def _get_subtab_stylesheet(self) -> str:
+        """Stylesheet fuer Sub-Tabs (kompakter als Haupt-Tabs)."""
+        return '''
+            QTabWidget::pane {
+                border: 1px solid #444;
+                background-color: #2a2a2a;
+                border-radius: 4px;
+            }
+            QTabBar::tab {
+                background: #333;
+                color: #999;
+                padding: 8px 16px;
+                margin-right: 2px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                font-size: 11px;
+            }
+            QTabBar::tab:selected {
+                background: #4da8da;
+                color: white;
+            }
+            QTabBar::tab:hover:!selected {
+                background: #444;
+                color: #ccc;
+            }
+        '''
+
+    def _create_features_overview_subtab(self) -> QWidget:
+        """Erstellt den Uebersicht Sub-Tab mit dem Haupt-Feature-Chart."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.addWidget(self.features_chart)
+        return widget
+
+    def _create_features_detail_subtab(self) -> QWidget:
+        """Erstellt den Detail Sub-Tab mit Slider-Navigation."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
 
         # Detail-Kontrollen
-        detail_controls = QHBoxLayout()
+        controls = QHBoxLayout()
 
-        detail_controls.addWidget(QLabel('Bereich:'))
+        controls.addWidget(QLabel('Bereich:'))
 
         self.detail_start_spin = QSpinBox()
         self.detail_start_spin.setRange(0, max(0, self.total_points - 100))
         self.detail_start_spin.setValue(0)
         self.detail_start_spin.setFixedWidth(80)
-        self.detail_start_spin.setStyleSheet('''
-            QSpinBox {
-                background-color: #3a3a3a;
-                border: 1px solid #555;
-                border-radius: 3px;
-                color: white;
-                padding: 3px;
-            }
-        ''')
+        self.detail_start_spin.setStyleSheet(StyleFactory.spinbox_style())
         self.detail_start_spin.valueChanged.connect(self._update_detail_chart)
-        detail_controls.addWidget(self.detail_start_spin)
+        controls.addWidget(self.detail_start_spin)
 
-        detail_controls.addWidget(QLabel('Fenster:'))
+        controls.addWidget(QLabel('Fenster:'))
 
         self.detail_window_spin = QSpinBox()
         self.detail_window_spin.setRange(50, 500)
         self.detail_window_spin.setValue(100)
         self.detail_window_spin.setSingleStep(10)
         self.detail_window_spin.setFixedWidth(70)
-        self.detail_window_spin.setStyleSheet('''
-            QSpinBox {
-                background-color: #3a3a3a;
-                border: 1px solid #555;
-                border-radius: 3px;
-                color: white;
-                padding: 3px;
-            }
-        ''')
+        self.detail_window_spin.setStyleSheet(StyleFactory.spinbox_style())
         self.detail_window_spin.valueChanged.connect(self._on_detail_window_changed)
-        detail_controls.addWidget(self.detail_window_spin)
+        controls.addWidget(self.detail_window_spin)
 
         # Slider fuer schnelle Navigation
         self.detail_slider = QSlider(Qt.Orientation.Horizontal)
@@ -1470,24 +1505,16 @@ class PrepareDataWindow(QMainWindow):
             }
         ''')
         self.detail_slider.valueChanged.connect(self._on_detail_slider_changed)
-        detail_controls.addWidget(self.detail_slider, 1)
+        controls.addWidget(self.detail_slider, 1)
 
-        detail_layout.addLayout(detail_controls)
-        detail_layout.addWidget(self.features_detail_chart, 1)
+        layout.addLayout(controls)
+        layout.addWidget(self.features_detail_chart, 1)
 
-        charts_layout.addWidget(detail_widget, 1)
+        return widget
 
-        # Datentabelle (unten)
-        table_widget = self._create_features_table()
-        charts_layout.addWidget(table_widget)
-
-        splitter.addWidget(charts_widget)
-        splitter.setSizes([420, 1000])
-
-        # Initiale Chart-Aktualisierung mit Standard-Features
-        self._update_features_preview()
-
-        return tab
+    def _create_features_table_subtab(self) -> QWidget:
+        """Erstellt den Daten Sub-Tab mit der Feature-Tabelle."""
+        return self._create_features_table()
 
     def _create_features_params(self) -> QWidget:
         """Erstellt die Parameter-Seite fuer Tab 3 mit allen Feature-Kategorien."""
@@ -1657,9 +1684,9 @@ class PrepareDataWindow(QMainWindow):
         self.features_table.setAlternatingRowColors(True)
         self.features_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.features_table.verticalHeader().setVisible(False)
-        self.features_table.setFixedHeight(280)
+        # Keine feste Hoehe mehr - fuellt den gesamten Sub-Tab aus
 
-        layout.addWidget(self.features_table)
+        layout.addWidget(self.features_table, 1)  # stretch=1 fuer volle Hoehe
 
         # Aktueller Tabellenindex
         self._table_start_index = 0
