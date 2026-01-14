@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QGroupBox, QStatusBar, QScrollArea,
     QFileDialog, QMessageBox, QComboBox, QFrame, QDateEdit,
     QTextEdit, QSlider, QCheckBox, QSplitter, QTableWidget,
-    QTableWidgetItem, QHeaderView
+    QTableWidgetItem, QHeaderView, QApplication
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QDate
 from PyQt6.QtGui import QFont, QAction, QColor
@@ -122,6 +122,18 @@ class MainWindow(QMainWindow):
         """Initialisiert die UI-Komponenten."""
         self.setWindowTitle('BTCUSD Analyzer')
         self.setMinimumSize(1400, 950)
+
+        # Fenstergroesse als Prozent der Bildschirmgroesse (85%)
+        screen_percent = 0.85
+        screen = QApplication.primaryScreen()
+        if screen:
+            available_geometry = screen.availableGeometry()
+            width = int(available_geometry.width() * screen_percent)
+            height = int(available_geometry.height() * screen_percent)
+            self.resize(width, height)
+        else:
+            # Fallback falls kein Screen verfuegbar
+            self.resize(1820, 1235)
 
         # Central Widget
         central_widget = QWidget()
