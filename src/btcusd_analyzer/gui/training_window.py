@@ -1080,12 +1080,15 @@ class TrainingWindow(QMainWindow):
                 # Modell in Session-Ordner kopieren
                 self._save_model_to_session(final_path)
 
-            # Training beendet
+            # Training beendet - model_info an results anhaengen
             self._on_training_finished({
                 'best_accuracy': best_val_acc,
                 'final_loss': avg_val_loss,
                 'stopped_early': patience_counter >= patience,
-                'model_path': str(final_path) if config.get('save_best', True) else ''
+                'model_path': str(final_path) if config.get('save_best', True) else '',
+                'model_type': model_name,
+                'hidden_size': self.hidden_size_spin.value(),
+                'num_layers': self.num_layers_spin.value(),
             })
 
         except torch.cuda.OutOfMemoryError as e:

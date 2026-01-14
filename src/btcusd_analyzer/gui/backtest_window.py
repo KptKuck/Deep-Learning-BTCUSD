@@ -94,6 +94,9 @@ class BacktestWindow(QMainWindow):
         # Timer
         self.backtest_timer: Optional[QTimer] = None
 
+        # DEBUG-Modus
+        self.debug_mode = False
+
         self._setup_ui()
         self.setStyleSheet(get_stylesheet())
 
@@ -107,6 +110,11 @@ class BacktestWindow(QMainWindow):
         # Auch lokal loggen falls vorhanden
         if hasattr(self, 'trade_log'):
             self.trade_log.append(f'[{level}] {message}')
+
+    def _debug(self, message: str):
+        """Loggt DEBUG-Nachricht nur wenn debug_mode aktiv ist."""
+        if self.debug_mode:
+            self._log(f'[DEBUG] {message}', 'DEBUG')
 
     def _setup_ui(self):
         """Erstellt die 3-Spalten Benutzeroberflaeche."""
@@ -216,6 +224,12 @@ class BacktestWindow(QMainWindow):
         self.turbo_check.setStyleSheet("color: rgb(128, 255, 128);")
         self.turbo_check.toggled.connect(self._toggle_turbo)
         speed_layout.addWidget(self.turbo_check)
+
+        # Debug-Modus
+        self.debug_check = QCheckBox("DEBUG-Modus (ausfuehrliches Log)")
+        self.debug_check.setStyleSheet("color: rgb(255, 200, 100);")
+        self.debug_check.toggled.connect(self._toggle_debug)
+        speed_layout.addWidget(self.debug_check)
 
         # Aktuelle Geschwindigkeit
         speed_info = QHBoxLayout()
@@ -497,6 +511,12 @@ class BacktestWindow(QMainWindow):
     def set_data(self, data: pd.DataFrame, signals: pd.Series = None,
                  model=None, model_info: Dict = None):
         """Setzt die Backtest-Daten."""
+        self._debug(f"set_data() aufgerufen")
+        self._debug(f"  data: {type(data).__name__}, {len(data) if data is not None else 'None'} Zeilen")
+        self._debug(f"  signals: {type(signals).__name__ if signals is not None else 'None'}")
+        self._debug(f"  model: {type(model).__name__ if model is not None else 'None'}")
+        self._debug(f"  model_info: {model_info}")
+
         self.data = data
         self.signals = signals
         self.model = model
@@ -507,19 +527,27 @@ class BacktestWindow(QMainWindow):
             lookforward = model_info.get('lookforward_size', 5)
             self.sequence_length = lookback + lookforward
             self.current_index = self.sequence_length + 1
+            self._debug(f"  lookback={lookback}, lookforward={lookforward}, sequence_length={self.sequence_length}")
 
             # Sequenzen fuer Modell-Vorhersage vorbereiten
             if model is not None and data is not None:
+                self._debug(f"  Bereite Sequenzen vor...")
                 self._prepare_sequences(lookback)
+            else:
+                self._debug(f"  WARNUNG: Keine Sequenz-Vorbereitung (model={model is not None}, data={data is not None})")
 
             # Model-Info Anzeige aktualisieren
             self._update_model_info_display()
+        else:
+            self._debug(f"  WARNUNG: Keine model_info vorhanden!")
 
         self._update_datapoint_label()
         self._initialize_charts()
+        self._debug(f"set_data() abgeschlossen")
 
     def _prepare_sequences(self, lookback: int):
         """Bereitet Sequenzen fuer Modell-Vorhersagen vor."""
+        self._debug(f"_prepare_sequences(lookback={lookback}) gestartet")
         try:
             import torch
             from ..data.processor import FeatureProcessor
@@ -528,10 +556,13 @@ class BacktestWindow(QMainWindow):
             # Features aus model_info holen (gleiche wie beim Training)
             features = self.model_info.get('features', ['Open', 'High', 'Low', 'Close', 'PriceChange', 'PriceChangePct'])
             self._log(f"Features aus Training: {features}")
+            self._debug(f"  Features: {features}")
 
             # Features berechnen
             processor = FeatureProcessor(features=features)
             processed = processor.process(self.data)
+            self._debug(f"  Processed Shape: {processed.shape}")
+            self._debug(f"  Processed Columns: {list(processed.columns)}")
 
             # Feature-Matrix (nur trainierte Features)
             feature_cols = [f for f in features if f in processed.columns]
@@ -539,15 +570,20 @@ class BacktestWindow(QMainWindow):
                 # Fallback auf OHLC
                 feature_cols = ['Open', 'High', 'Low', 'Close']
                 self._log(f"Fallback auf OHLC-Features", 'WARNING')
+            self._debug(f"  Verwendete Features: {feature_cols}")
 
             feature_data = processed[feature_cols].values.astype(np.float32)
+            self._debug(f"  Feature-Data Shape: {feature_data.shape}")
 
             # NaN behandeln
+            nan_count = np.isnan(feature_data).sum()
+            self._debug(f"  NaN-Werte vor Behandlung: {nan_count}")
             feature_data = np.nan_to_num(feature_data, nan=0.0)
 
             # Normalisierung (wie beim Training)
             normalizer = ZScoreNormalizer()
             feature_data = normalizer.fit_transform(feature_data)
+            self._debug(f"  Normalisierte Daten - Min: {feature_data.min():.4f}, Max: {feature_data.max():.4f}")
 
             # Sequenzen erstellen
             sequences = []
@@ -559,13 +595,17 @@ class BacktestWindow(QMainWindow):
                 self.prepared_sequences = np.array(sequences)
                 self.sequence_offset = lookback
                 self._log(f"Sequenzen vorbereitet: {len(sequences)} ({len(feature_cols)} Features)")
+                self._debug(f"  Sequenzen Shape: {self.prepared_sequences.shape}")
+                self._debug(f"  Sequence Offset: {self.sequence_offset}")
             else:
                 self._log("Keine Sequenzen generiert", 'WARNING')
+                self._debug(f"  FEHLER: Leere Sequenzliste!")
 
         except Exception as e:
             import traceback
             self._log(f"Sequenz-Vorbereitung fehlgeschlagen: {e}", 'ERROR')
             self._log(traceback.format_exc(), 'ERROR')
+            self._debug(f"  EXCEPTION: {e}")
 
     def _update_model_info_display(self):
         """Aktualisiert die Modell-Info Anzeige im Stats-Panel."""
@@ -648,11 +688,20 @@ class BacktestWindow(QMainWindow):
 
     def _start_backtest(self):
         """Startet den Backtest."""
+        self._debug(f"_start_backtest() aufgerufen")
+
         if self.data is None:
+            self._debug(f"  ABBRUCH: data ist None")
             return
 
         if self.is_running:
+            self._debug(f"  ABBRUCH: bereits running")
             return
+
+        self._debug(f"  Start-Index: {self.current_index}")
+        self._debug(f"  Daten: {len(self.data)} Zeilen")
+        self._debug(f"  Modell: {type(self.model).__name__ if self.model else 'None'}")
+        self._debug(f"  Prepared Sequences: {self.prepared_sequences.shape if self.prepared_sequences is not None else 'None'}")
 
         self.is_running = True
         self.is_paused = False
@@ -668,6 +717,7 @@ class BacktestWindow(QMainWindow):
         self.backtest_timer = QTimer()
         self.backtest_timer.timeout.connect(self._timer_callback)
         self.backtest_timer.start(interval)
+        self._debug(f"  Timer gestartet: {interval}ms Intervall ({self.steps_per_second} steps/s)")
 
         # Geschwindigkeitsmessung starten
         self._step_count = 0
@@ -840,9 +890,17 @@ class BacktestWindow(QMainWindow):
                     self.model.eval()
                     with torch.no_grad():
                         prediction = self.model.predict(sequence)
-                        return int(prediction[0])
-            except Exception:
-                pass
+                        signal = int(prediction[0])
+                        # Nur alle 100 Schritte loggen um Log nicht zu ueberflueten
+                        if self.debug_mode and idx % 100 == 0:
+                            self._debug(f"Idx {idx}: seq_idx={seq_idx}, prediction={signal}")
+                        return signal
+                else:
+                    if self.debug_mode and idx % 100 == 0:
+                        self._debug(f"Idx {idx}: seq_idx={seq_idx} ausserhalb Bereich [0, {len(self.prepared_sequences)})")
+            except Exception as e:
+                if self.debug_mode:
+                    self._debug(f"Idx {idx}: Modell-Fehler: {e}")
 
         return 0  # HOLD als Default
 
@@ -1150,6 +1208,7 @@ class BacktestWindow(QMainWindow):
 
     def _finalize_backtest(self):
         """Finalisiert den Backtest."""
+        self._debug(f"_finalize_backtest() aufgerufen")
         self._stop_backtest()
 
         # Offene Position schliessen
@@ -1161,6 +1220,19 @@ class BacktestWindow(QMainWindow):
         self._add_tradelog("=== Backtest abgeschlossen ===")
         self._add_tradelog(f"Gesamt P/L: ${self.total_pnl:,.2f}")
         self._add_tradelog(f"Trades: {len(self.trades)}")
+
+        # DEBUG-Zusammenfassung
+        self._debug(f"=== Backtest Zusammenfassung ===")
+        self._debug(f"  Datenpunkte verarbeitet: {self.current_index}")
+        self._debug(f"  Signale: BUY={self.buy_count}, SELL={self.sell_count}, HOLD={self.hold_count}")
+        self._debug(f"  Trades: {len(self.trades)}")
+        self._debug(f"  Gesamt P/L: ${self.total_pnl:,.2f}")
+        self._debug(f"  End-Equity: ${self.current_equity:,.2f}")
+        if self.trades:
+            wins = sum(1 for t in self.trades if t.get('pnl', 0) > 0)
+            losses = len(self.trades) - wins
+            self._debug(f"  Gewinn-Trades: {wins}, Verlust-Trades: {losses}")
+        self._debug(f"=== Ende Zusammenfassung ===")
 
     def _update_speed(self, value: int):
         """Aktualisiert die eingestellte Geschwindigkeit."""
@@ -1191,6 +1263,30 @@ class BacktestWindow(QMainWindow):
         self.turbo_mode = checked
         if not checked:
             self._update_charts()
+
+    def _toggle_debug(self, checked: bool):
+        """Schaltet den DEBUG-Modus um."""
+        self.debug_mode = checked
+        if checked:
+            self._log("DEBUG-Modus aktiviert", 'INFO')
+            self._debug_dump_state()
+        else:
+            self._log("DEBUG-Modus deaktiviert", 'INFO')
+
+    def _debug_dump_state(self):
+        """Gibt den aktuellen Zustand im DEBUG-Modus aus."""
+        self._debug(f"=== Backtester State Dump ===")
+        self._debug(f"Daten: {len(self.data) if self.data is not None else 'None'} Zeilen")
+        self._debug(f"Modell: {type(self.model).__name__ if self.model else 'None'}")
+        self._debug(f"Model-Info: {self.model_info}")
+        self._debug(f"Sequenz-Laenge: {self.sequence_length}")
+        self._debug(f"Prepared Sequences: {self.prepared_sequences.shape if self.prepared_sequences is not None else 'None'}")
+        self._debug(f"Aktueller Index: {self.current_index}")
+        self._debug(f"Position: {self.position}")
+        self._debug(f"Equity: ${self.current_equity:,.2f}")
+        self._debug(f"Total P/L: ${self.total_pnl:,.2f}")
+        self._debug(f"Trades: {len(self.trades)}")
+        self._debug(f"=== Ende State Dump ===")
 
     def _add_tradelog(self, message: str):
         """Fuegt eine Nachricht zum Trade-Log hinzu."""

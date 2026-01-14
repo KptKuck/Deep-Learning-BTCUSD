@@ -1327,6 +1327,25 @@ class MainWindow(QMainWindow):
         """Callback wenn Training abgeschlossen."""
         self.model = model
         self.model_loaded.emit(model)
+
+        # model_info aus results und training_info erstellen
+        training_info = self.training_info or {}
+        self.model_info = {
+            'model_type': results.get('model_type', 'bilstm'),
+            'input_size': training_info.get('num_features', len(training_info.get('features', []))),
+            'hidden_size': results.get('hidden_size', 100),
+            'num_layers': results.get('num_layers', 2),
+            'num_classes': training_info.get('num_classes', 2),
+            'sequence_length': training_info.get('params', {}).get('lookback', 100),
+            'features': training_info.get('features', []),
+            'accuracy': results.get('best_accuracy', 0),
+        }
+
+        # backtest_info sollte bereits durch _on_training_data_prepared gesetzt sein
+        if self.backtest_info and 'data' in self.backtest_info:
+            num_points = len(self.backtest_info['data'])
+            self._log(f"Backtest-Daten verfuegbar: {num_points} Punkte", 'INFO')
+
         self._log('Training abgeschlossen', 'SUCCESS')
 
     def _load_model(self):
