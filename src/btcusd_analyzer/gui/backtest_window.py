@@ -15,7 +15,7 @@ from datetime import datetime
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QGroupBox, QLabel, QPushButton, QSlider, QProgressBar, QTextEdit,
-    QSplitter, QCheckBox, QScrollArea
+    QSplitter, QCheckBox, QScrollArea, QTabWidget
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -328,35 +328,256 @@ class BacktestWindow(QMainWindow):
         return scroll
 
     def _create_chart_panel(self) -> QWidget:
-        """Erstellt das Chart-Panel (mittlere Spalte)."""
+        """Erstellt das Chart-Panel (mittlere Spalte) mit Tabs."""
         panel = QWidget()
         panel.setStyleSheet(f"background-color: rgb(46, 46, 46);")
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(10)
+        layout.setSpacing(5)
 
         try:
             from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+            from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
             from matplotlib.figure import Figure
 
-            # Preis-Chart (2/3 der Hoehe)
-            self.price_figure = Figure(figsize=(8, 4), facecolor='#262626')
+            # Toolbar und Zoom-Kontrollen oben (immer sichtbar)
+            controls_widget = QWidget()
+            controls_layout = QVBoxLayout(controls_widget)
+            controls_layout.setContentsMargins(0, 0, 0, 0)
+            controls_layout.setSpacing(2)
+
+            # Zoom-Kontrollen
+            zoom_controls = self._create_zoom_controls()
+            controls_layout.addWidget(zoom_controls)
+
+            layout.addWidget(controls_widget)
+
+            # Tab-Widget fuer Charts
+            self.chart_tabs = QTabWidget()
+            self.chart_tabs.setStyleSheet(self._tab_style())
+
+            # === Tab 1: Preis-Chart ===
+            price_widget = QWidget()
+            price_layout = QVBoxLayout(price_widget)
+            price_layout.setContentsMargins(0, 0, 0, 0)
+
+            self.price_figure = Figure(figsize=(8, 6), facecolor='#262626')
             self.price_canvas = FigureCanvas(self.price_figure)
             self.ax_price = self.price_figure.add_subplot(111)
             self._setup_price_chart()
-            layout.addWidget(self.price_canvas, stretch=2)
 
-            # Equity-Chart (1/3 der Hoehe)
-            self.equity_figure = Figure(figsize=(8, 2), facecolor='#262626')
+            # Toolbar fuer Preis-Chart
+            self.price_toolbar = NavigationToolbar(self.price_canvas, self)
+            self.price_toolbar.setStyleSheet(self._toolbar_style())
+            price_layout.addWidget(self.price_toolbar)
+            price_layout.addWidget(self.price_canvas)
+
+            self.chart_tabs.addTab(price_widget, "Preis + Signale")
+
+            # === Tab 2: Trade-Chart ===
+            trade_widget = QWidget()
+            trade_layout = QVBoxLayout(trade_widget)
+            trade_layout.setContentsMargins(0, 0, 0, 0)
+
+            self.trade_figure = Figure(figsize=(8, 6), facecolor='#262626')
+            self.trade_canvas = FigureCanvas(self.trade_figure)
+            self.ax_trade = self.trade_figure.add_subplot(111)
+            self._setup_trade_chart()
+
+            # Toolbar fuer Trade-Chart
+            self.trade_toolbar = NavigationToolbar(self.trade_canvas, self)
+            self.trade_toolbar.setStyleSheet(self._toolbar_style())
+            trade_layout.addWidget(self.trade_toolbar)
+            trade_layout.addWidget(self.trade_canvas)
+
+            self.chart_tabs.addTab(trade_widget, "Trades")
+
+            # === Tab 3: Equity-Chart ===
+            equity_widget = QWidget()
+            equity_layout = QVBoxLayout(equity_widget)
+            equity_layout.setContentsMargins(0, 0, 0, 0)
+
+            self.equity_figure = Figure(figsize=(8, 6), facecolor='#262626')
             self.equity_canvas = FigureCanvas(self.equity_figure)
             self.ax_equity = self.equity_figure.add_subplot(111)
             self._setup_equity_chart()
-            layout.addWidget(self.equity_canvas, stretch=1)
+
+            # Toolbar fuer Equity-Chart
+            self.equity_toolbar = NavigationToolbar(self.equity_canvas, self)
+            self.equity_toolbar.setStyleSheet(self._toolbar_style())
+            equity_layout.addWidget(self.equity_toolbar)
+            equity_layout.addWidget(self.equity_canvas)
+
+            self.chart_tabs.addTab(equity_widget, "Equity")
+
+            layout.addWidget(self.chart_tabs, stretch=1)
 
         except ImportError:
             layout.addWidget(QLabel("matplotlib nicht installiert"))
 
         return panel
+
+    def _tab_style(self) -> str:
+        """Gibt das Stylesheet fuer die Tab-Widgets zurueck."""
+        return '''
+            QTabWidget::pane {
+                border: 1px solid #4d4d4d;
+                background-color: #262626;
+            }
+            QTabBar::tab {
+                background-color: #333333;
+                color: #b3b3b3;
+                padding: 8px 20px;
+                margin-right: 2px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }
+            QTabBar::tab:selected {
+                background-color: #4da8da;
+                color: white;
+            }
+            QTabBar::tab:hover:!selected {
+                background-color: #444444;
+            }
+        '''
+
+    def _toolbar_style(self) -> str:
+        """Gibt das Stylesheet fuer die Matplotlib-Toolbar zurueck."""
+        return '''
+            QToolBar {
+                background-color: #333333;
+                border: none;
+                spacing: 5px;
+            }
+            QToolButton {
+                background-color: #444444;
+                border: none;
+                border-radius: 3px;
+                padding: 5px;
+                color: white;
+            }
+            QToolButton:hover {
+                background-color: #555555;
+            }
+            QToolButton:checked {
+                background-color: #4da8da;
+            }
+        '''
+
+    def _create_zoom_controls(self) -> QWidget:
+        """Erstellt die Zoom-Kontroll-Buttons fuer den Preis-Chart."""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        # X-Zoom
+        layout.addWidget(QLabel('X:'))
+
+        zoom_x_in = QPushButton('+')
+        zoom_x_in.setFixedWidth(30)
+        zoom_x_in.setStyleSheet(StyleFactory.button_style_hex('#555555', padding='3px 8px'))
+        zoom_x_in.clicked.connect(lambda: self._zoom_price_axis('x', 0.8))
+        layout.addWidget(zoom_x_in)
+
+        zoom_x_out = QPushButton('-')
+        zoom_x_out.setFixedWidth(30)
+        zoom_x_out.setStyleSheet(StyleFactory.button_style_hex('#555555', padding='3px 8px'))
+        zoom_x_out.clicked.connect(lambda: self._zoom_price_axis('x', 1.25))
+        layout.addWidget(zoom_x_out)
+
+        # Y-Zoom
+        layout.addWidget(QLabel('Y:'))
+
+        zoom_y_in = QPushButton('+')
+        zoom_y_in.setFixedWidth(30)
+        zoom_y_in.setStyleSheet(StyleFactory.button_style_hex('#555555', padding='3px 8px'))
+        zoom_y_in.clicked.connect(lambda: self._zoom_price_axis('y', 0.8))
+        layout.addWidget(zoom_y_in)
+
+        zoom_y_out = QPushButton('-')
+        zoom_y_out.setFixedWidth(30)
+        zoom_y_out.setStyleSheet(StyleFactory.button_style_hex('#555555', padding='3px 8px'))
+        zoom_y_out.clicked.connect(lambda: self._zoom_price_axis('y', 1.25))
+        layout.addWidget(zoom_y_out)
+
+        # Reset
+        reset_btn = QPushButton('Reset')
+        reset_btn.setStyleSheet(StyleFactory.button_style_hex('#666666', padding='3px 10px'))
+        reset_btn.clicked.connect(self._reset_price_zoom)
+        layout.addWidget(reset_btn)
+
+        # Aktuellen Bereich anzeigen
+        follow_btn = QPushButton('Folgen')
+        follow_btn.setStyleSheet(StyleFactory.button_style_hex('#4da8da', padding='3px 10px'))
+        follow_btn.setToolTip('Zum aktuellen Datenpunkt springen')
+        follow_btn.clicked.connect(self._follow_current)
+        layout.addWidget(follow_btn)
+
+        layout.addStretch()
+
+        return widget
+
+    def _get_current_chart(self):
+        """Gibt den aktuell ausgewaehlten Chart (ax, canvas) zurueck."""
+        if not hasattr(self, 'chart_tabs'):
+            return self.ax_price, self.price_canvas
+
+        current_tab = self.chart_tabs.currentIndex()
+        if current_tab == 0:
+            return self.ax_price, self.price_canvas
+        elif current_tab == 1:
+            return self.ax_trade, self.trade_canvas
+        else:
+            return self.ax_equity, self.equity_canvas
+
+    def _zoom_price_axis(self, axis: str, factor: float):
+        """Zoomt eine einzelne Achse des aktuell sichtbaren Charts."""
+        ax, canvas = self._get_current_chart()
+
+        if axis == 'x':
+            xlim = ax.get_xlim()
+            center = (xlim[0] + xlim[1]) / 2
+            width = (xlim[1] - xlim[0]) * factor
+            ax.set_xlim(center - width/2, center + width/2)
+        else:
+            ylim = ax.get_ylim()
+            center = (ylim[0] + ylim[1]) / 2
+            height = (ylim[1] - ylim[0]) * factor
+            ax.set_ylim(center - height/2, center + height/2)
+        canvas.draw()
+
+    def _reset_price_zoom(self):
+        """Setzt den Zoom des aktuell sichtbaren Charts zurueck."""
+        ax, canvas = self._get_current_chart()
+        ax.autoscale()
+        canvas.draw()
+
+    def _follow_current(self):
+        """Springt zum aktuellen Datenpunkt im Chart."""
+        if self.data is None or self.current_index == 0:
+            return
+
+        ax, canvas = self._get_current_chart()
+
+        # Fenster um aktuellen Index (200 Punkte sichtbar)
+        window_size = 200
+        start_idx = max(0, self.current_index - window_size // 2)
+        end_idx = min(len(self.data), self.current_index + window_size // 2)
+
+        ax.set_xlim(start_idx, end_idx)
+
+        # Y-Limits an sichtbaren Bereich anpassen
+        visible_data = self.data.iloc[start_idx:end_idx]
+        if len(visible_data) > 0:
+            y_min = visible_data['Close'].min()
+            y_max = visible_data['Close'].max()
+            y_margin = (y_max - y_min) * 0.05
+            ax.set_ylim(y_min - y_margin, y_max + y_margin)
+
+        canvas.draw()
+
+        self.price_canvas.draw()
 
     def _setup_price_chart(self):
         """Konfiguriert den Preis-Chart."""
@@ -366,6 +587,17 @@ class BacktestWindow(QMainWindow):
         for spine in ax.spines.values():
             spine.set_color('#4d4d4d')
         ax.set_title('Preis und Signale', color='white', fontsize=12)
+        ax.set_ylabel('Preis (USD)', color='white')
+        ax.grid(True, alpha=0.3, color='#4d4d4d')
+
+    def _setup_trade_chart(self):
+        """Konfiguriert den Trade-Chart."""
+        ax = self.ax_trade
+        ax.set_facecolor('#1a1a1a')
+        ax.tick_params(colors='white')
+        for spine in ax.spines.values():
+            spine.set_color('#4d4d4d')
+        ax.set_title('Trades', color='white', fontsize=12)
         ax.set_ylabel('Preis (USD)', color='white')
         ax.grid(True, alpha=0.3, color='#4d4d4d')
 
@@ -1233,6 +1465,9 @@ class BacktestWindow(QMainWindow):
         self.price_figure.tight_layout()
         self.price_canvas.draw()
 
+        # Trade-Chart
+        self._update_trade_chart()
+
         # Equity-Chart
         self.ax_equity.clear()
         self._setup_equity_chart()
@@ -1252,6 +1487,106 @@ class BacktestWindow(QMainWindow):
                                  color='white', fontsize=11)
         self.equity_figure.tight_layout()
         self.equity_canvas.draw()
+
+    def _update_trade_chart(self):
+        """Aktualisiert den Trade-Chart mit Entry/Exit und P/L."""
+        if not hasattr(self, 'ax_trade'):
+            return
+
+        self.ax_trade.clear()
+        self._setup_trade_chart()
+
+        if self.data is None:
+            self.trade_canvas.draw()
+            return
+
+        # Preis-Linie (duenn, grau)
+        self.ax_trade.plot(self.data.index, self.data['Close'],
+                          color='#555555', linewidth=0.5, alpha=0.5)
+
+        # Abgeschlossene Trades visualisieren
+        wins = 0
+        losses = 0
+
+        for trade in self.trades:
+            entry_idx = trade.get('entry_index', 0) - 1
+            exit_idx = trade.get('exit_index', 0) - 1
+            pnl = trade.get('pnl', 0)
+
+            if entry_idx < 0 or exit_idx < 0:
+                continue
+            if entry_idx >= len(self.data) or exit_idx >= len(self.data):
+                continue
+
+            entry_date = self.data.index[entry_idx]
+            exit_date = self.data.index[exit_idx]
+            entry_price = trade.get('entry_price', 0)
+            exit_price = trade.get('exit_price', 0)
+            trade_type = trade.get('type', 'LONG')
+
+            # Farbe basierend auf P/L
+            if pnl > 0:
+                color = '#33cc33'  # Gruen
+                wins += 1
+            else:
+                color = '#cc3333'  # Rot
+                losses += 1
+
+            # Verbindungslinie zwischen Entry und Exit
+            self.ax_trade.plot([entry_date, exit_date], [entry_price, exit_price],
+                              color=color, linewidth=2, alpha=0.8)
+
+            # Entry-Marker
+            if trade_type == 'LONG':
+                self.ax_trade.scatter([entry_date], [entry_price],
+                                     marker='^', c='#33cc33', s=80, zorder=5,
+                                     edgecolors='white', linewidths=0.5)
+            else:  # SHORT
+                self.ax_trade.scatter([entry_date], [entry_price],
+                                     marker='v', c='#cc3333', s=80, zorder=5,
+                                     edgecolors='white', linewidths=0.5)
+
+            # Exit-Marker (X)
+            self.ax_trade.scatter([exit_date], [exit_price],
+                                 marker='x', c=color, s=60, zorder=5, linewidths=2)
+
+            # P/L Text am Exit
+            pnl_text = f'+${pnl:.0f}' if pnl > 0 else f'-${abs(pnl):.0f}'
+            self.ax_trade.annotate(pnl_text, (exit_date, exit_price),
+                                  textcoords='offset points', xytext=(5, 5),
+                                  fontsize=8, color=color, fontweight='bold')
+
+        # Aktuelle offene Position
+        if self.position != 'NONE' and self.entry_index > 0:
+            entry_idx = self.entry_index - 1
+            if entry_idx < len(self.data):
+                entry_date = self.data.index[entry_idx]
+                current_idx = min(self.current_index - 1, len(self.data) - 1)
+                current_date = self.data.index[current_idx]
+                current_price = self.data['Close'].iloc[current_idx]
+
+                # Gestrichelte Linie fuer offene Position
+                self.ax_trade.plot([entry_date, current_date],
+                                  [self.entry_price, current_price],
+                                  color='#e6b333', linewidth=2, linestyle='--', alpha=0.8)
+
+                # Entry-Marker
+                marker = '^' if self.position == 'LONG' else 'v'
+                color = '#33cc33' if self.position == 'LONG' else '#cc3333'
+                self.ax_trade.scatter([entry_date], [self.entry_price],
+                                     marker=marker, c=color, s=80, zorder=5,
+                                     edgecolors='white', linewidths=0.5)
+
+        # Titel mit Trade-Statistik
+        total_trades = len(self.trades)
+        win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+        self.ax_trade.set_title(
+            f'Trades | {total_trades} Trades | {wins}W / {losses}L | Win-Rate: {win_rate:.1f}%',
+            color='white', fontsize=11
+        )
+
+        self.trade_figure.tight_layout()
+        self.trade_canvas.draw()
 
     def _finalize_backtest(self):
         """Finalisiert den Backtest."""
