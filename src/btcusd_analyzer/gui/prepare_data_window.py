@@ -912,6 +912,7 @@ class PrepareDataWindow(QMainWindow):
             'Tages-Extrema',
             'Binary'
         ])
+        self.peak_method_combo.setCurrentIndex(2)  # Peak Detection als Standard
         self.peak_method_combo.currentIndexChanged.connect(self._on_peak_method_changed)
         method_row.addWidget(self.peak_method_combo)
         method_layout.addLayout(method_row)
