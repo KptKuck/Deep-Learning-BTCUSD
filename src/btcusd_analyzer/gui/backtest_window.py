@@ -476,8 +476,48 @@ class BacktestWindow(QMainWindow):
             self.sequence_length = lookback + lookforward
             self.current_index = self.sequence_length + 1
 
+            # Sequenzen fuer Modell-Vorhersage vorbereiten
+            if model is not None and data is not None:
+                self._prepare_sequences(lookback)
+
         self._update_datapoint_label()
         self._initialize_charts()
+
+    def _prepare_sequences(self, lookback: int):
+        """Bereitet Sequenzen fuer Modell-Vorhersagen vor."""
+        try:
+            import torch
+            from ..data.feature_processor import FeatureProcessor
+
+            # Features berechnen (Standard-Features)
+            features = ['Open', 'High', 'Low', 'Close', 'PriceChange', 'PriceChangePct']
+            processor = FeatureProcessor(features=features)
+            processed = processor.process(self.data)
+
+            # Feature-Matrix
+            feature_cols = [f for f in features if f in processed.columns]
+            if not feature_cols:
+                feature_cols = ['Open', 'High', 'Low', 'Close']
+            feature_data = processed[feature_cols].values.astype(np.float32)
+
+            # NaN behandeln
+            feature_data = np.nan_to_num(feature_data, nan=0.0)
+
+            # Sequenzen erstellen
+            sequences = []
+            for i in range(lookback, len(feature_data)):
+                seq = feature_data[i - lookback:i]
+                sequences.append(seq)
+
+            if sequences:
+                self.prepared_sequences = np.array(sequences)
+                self.sequence_offset = lookback
+                self._log(f"Sequenzen vorbereitet: {len(sequences)}")
+            else:
+                self._log("Keine Sequenzen generiert", 'WARNING')
+
+        except Exception as e:
+            self._log(f"Sequenz-Vorbereitung fehlgeschlagen: {e}", 'ERROR')
 
     def _start_backtest(self):
         """Startet den Backtest."""

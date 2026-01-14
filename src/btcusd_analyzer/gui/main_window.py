@@ -1441,9 +1441,11 @@ class MainWindow(QMainWindow):
 
         try:
             from .backtest_window import BacktestWindow
-            self.backtest_window = BacktestWindow(
-                self.data, self.model, self.model_info,
-                self.config.paths.results_dir, self
+            self.backtest_window = BacktestWindow(parent=self)
+            self.backtest_window.set_data(
+                data=self.data,
+                model=self.model,
+                model_info=self.model_info
             )
             self.backtest_window.show()
         except Exception as e:
