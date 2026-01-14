@@ -304,25 +304,49 @@ class ChartWidget(QWidget):
         self.ax.clear()
         self._style_axis()
 
-        # Farben fuer verschiedene Features
-        colors = ['#4da8da', '#33cc33', '#cc3333', '#e6b333',
-                  '#b19cd9', '#80cbc4', '#ff9966', '#66ccff']
+        # Erweiterte Farbpalette fuer mehr Features
+        colors = [
+            '#4da8da', '#33cc33', '#cc3333', '#e6b333', '#b19cd9',
+            '#80cbc4', '#ff9966', '#66ccff', '#ff66b2', '#99ff99',
+            '#ffcc99', '#cc99ff', '#99ccff', '#ff9999', '#ccff99',
+            '#66ffcc', '#ff6666', '#6699ff', '#ffff66', '#cc66ff'
+        ]
 
         for i, (name, values) in enumerate(features.items()):
-            # Z-Score Normalisierung fuer Vergleichbarkeit
-            if np.std(values) > 0:
-                normalized = (values - np.mean(values)) / np.std(values)
+            # Z-Score Normalisierung fuer Vergleichbarkeit (mit NaN-Handling)
+            std_val = np.nanstd(values)
+            if std_val > 0:
+                normalized = (values - np.nanmean(values)) / std_val
             else:
                 normalized = values
 
             color = colors[i % len(colors)]
             self.ax.plot(normalized, color=color, linewidth=0.8,
-                        alpha=0.7, label=name)
+                        alpha=0.8, label=name)
 
-        chart_title = title or f'Features ({len(features)} ausgewaehlt)'
+        num_features = len(features)
+        chart_title = title or f'Features ({num_features} ausgewaehlt)'
         self.ax.set_title(chart_title, color='white', fontsize=12)
-        self.ax.legend(loc='upper left', facecolor='#333333',
-                      edgecolor='#555555', labelcolor='white', fontsize=8)
+
+        # Legende: Bei vielen Features kleinere Schrift und mehrere Spalten
+        if num_features > 10:
+            ncol = 3
+            fontsize = 7
+        elif num_features > 6:
+            ncol = 2
+            fontsize = 8
+        else:
+            ncol = 1
+            fontsize = 9
+
+        self.ax.legend(
+            loc='upper left',
+            facecolor='#333333',
+            edgecolor='#555555',
+            labelcolor='white',
+            fontsize=fontsize,
+            ncol=ncol
+        )
 
         self.figure.tight_layout()
         self.canvas.draw()

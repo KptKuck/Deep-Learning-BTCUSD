@@ -3,13 +3,14 @@ Prepare Data Window - Trainingsdaten Vorbereitung
 Refactored: 4 Tabs mit eigenem Chart pro Tab
 """
 
-from typing import Optional, Dict, Any, List
+from dataclasses import dataclass, field
+from typing import Optional, Dict, Any, List, Tuple
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QGroupBox, QScrollArea, QFrame,
     QCheckBox, QComboBox, QSpinBox, QDoubleSpinBox, QSplitter,
-    QTabWidget
+    QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QSlider
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -19,6 +20,274 @@ import numpy as np
 
 from .chart_widget import ChartWidget
 
+
+# =============================================================================
+# Feature-Definitionen
+# =============================================================================
+
+@dataclass
+class FeatureDefinition:
+    """Definition eines einzelnen Features mit optionalen Parametern."""
+    name: str                    # Feature-Name (z.B. "SMA", "RSI")
+    display_name: str            # Anzeigename (z.B. "Simple MA")
+    category: str                # Kategorie (price, technical, etc.)
+    default_enabled: bool = False
+    params: Dict[str, Any] = field(default_factory=dict)
+    param_ranges: Dict[str, tuple] = field(default_factory=dict)  # (min, max, step)
+
+
+# Feature-Registry mit allen verfuegbaren Features
+FEATURE_REGISTRY: Dict[str, List[FeatureDefinition]] = {
+    'price': [
+        FeatureDefinition('Open', 'Open', 'price', default_enabled=True),
+        FeatureDefinition('High', 'High', 'price', default_enabled=True),
+        FeatureDefinition('Low', 'Low', 'price', default_enabled=True),
+        FeatureDefinition('Close', 'Close', 'price', default_enabled=True),
+        FeatureDefinition('PriceChange', 'Price Change', 'price', default_enabled=True),
+        FeatureDefinition('PriceChangePct', 'Price Change %', 'price', default_enabled=True),
+        FeatureDefinition('Range', 'Range (H-L)', 'price'),
+        FeatureDefinition('RangePct', 'Range %', 'price'),
+        FeatureDefinition('TypicalPrice', 'Typical Price', 'price'),
+        FeatureDefinition('OHLC4', 'OHLC/4', 'price'),
+    ],
+    'technical': [
+        FeatureDefinition('SMA', 'SMA', 'technical',
+                         params={'period': 20},
+                         param_ranges={'period': (5, 200, 1)}),
+        FeatureDefinition('EMA', 'EMA', 'technical',
+                         params={'period': 20},
+                         param_ranges={'period': (5, 200, 1)}),
+        FeatureDefinition('RSI', 'RSI', 'technical',
+                         params={'period': 14},
+                         param_ranges={'period': (5, 50, 1)}),
+        FeatureDefinition('MACD', 'MACD', 'technical'),
+        FeatureDefinition('MACD_Signal', 'MACD Signal', 'technical'),
+        FeatureDefinition('MACD_Hist', 'MACD Hist', 'technical'),
+        FeatureDefinition('BB_Upper', 'BB Upper', 'technical',
+                         params={'period': 20},
+                         param_ranges={'period': (10, 50, 1)}),
+        FeatureDefinition('BB_Lower', 'BB Lower', 'technical',
+                         params={'period': 20},
+                         param_ranges={'period': (10, 50, 1)}),
+        FeatureDefinition('BB_Width', 'BB Width', 'technical',
+                         params={'period': 20},
+                         param_ranges={'period': (10, 50, 1)}),
+    ],
+    'volatility': [
+        FeatureDefinition('ATR', 'ATR', 'volatility',
+                         params={'period': 14},
+                         param_ranges={'period': (5, 50, 1)}),
+        FeatureDefinition('ATR_Pct', 'ATR %', 'volatility',
+                         params={'period': 14},
+                         param_ranges={'period': (5, 50, 1)}),
+        FeatureDefinition('RollingStd', 'Rolling Std', 'volatility',
+                         params={'period': 20},
+                         param_ranges={'period': (5, 100, 1)}),
+        FeatureDefinition('RollingStd_Pct', 'Rolling Std %', 'volatility',
+                         params={'period': 20},
+                         param_ranges={'period': (5, 100, 1)}),
+        FeatureDefinition('HighLowRange', 'H-L Range %', 'volatility'),
+        FeatureDefinition('ReturnVol', 'Return Vol', 'volatility',
+                         params={'period': 20},
+                         param_ranges={'period': (5, 100, 1)}),
+        FeatureDefinition('ParkinsonVol', 'Parkinson Vol', 'volatility',
+                         params={'period': 20},
+                         param_ranges={'period': (5, 100, 1)}),
+    ],
+    'volume': [
+        FeatureDefinition('Volume', 'Volume', 'volume'),
+        FeatureDefinition('RelativeVolume', 'Relative Vol', 'volume'),
+    ],
+    'time': [
+        FeatureDefinition('hour_sin', 'Hour (sin)', 'time'),
+        FeatureDefinition('hour_cos', 'Hour (cos)', 'time'),
+    ],
+}
+
+# Kategorie-Anzeigenamen und Farben
+CATEGORY_CONFIG = {
+    'price': {'name': 'Preis-Features', 'color': '#4da8da'},
+    'technical': {'name': 'Technische Indikatoren', 'color': '#b19cd9'},
+    'volatility': {'name': 'Volatilitaet', 'color': '#ff9966'},
+    'volume': {'name': 'Volumen', 'color': '#7fe6b3'},
+    'time': {'name': 'Zeit-Features', 'color': '#e6b333'},
+}
+
+
+# =============================================================================
+# FeatureCategoryWidget
+# =============================================================================
+
+class FeatureCategoryWidget(QGroupBox):
+    """Widget fuer eine Feature-Kategorie mit Checkboxen und Parametern."""
+
+    feature_changed = pyqtSignal()
+
+    def __init__(self, category_key: str, features: List[FeatureDefinition],
+                 color: str, parent=None):
+        category_name = CATEGORY_CONFIG.get(category_key, {}).get('name', category_key)
+        super().__init__(f"{category_name} ({len(features)})", parent)
+
+        self.category_key = category_key
+        self.features = features
+        self.color = color
+        self.feature_widgets: Dict[str, Dict[str, Any]] = {}
+
+        self._init_ui()
+
+    def _init_ui(self):
+        """Initialisiert die UI-Komponenten."""
+        self.setFont(QFont('Segoe UI', 10, QFont.Weight.Bold))
+        self.setStyleSheet(self._get_group_style())
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(4)
+        layout.setContentsMargins(8, 12, 8, 8)
+
+        # "Alle" Checkbox
+        self.all_checkbox = QCheckBox('Alle')
+        self.all_checkbox.setStyleSheet('color: white; font-weight: bold;')
+        self.all_checkbox.stateChanged.connect(self._on_all_toggled)
+        layout.addWidget(self.all_checkbox)
+
+        # Trennlinie
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setStyleSheet('background-color: #444;')
+        layout.addWidget(line)
+
+        # Features
+        for feat_def in self.features:
+            feat_widget = self._create_feature_row(feat_def)
+            layout.addLayout(feat_widget)
+
+        # Initial "Alle" Status aktualisieren
+        self._update_all_checkbox_state()
+
+    def _create_feature_row(self, feat_def: FeatureDefinition) -> QHBoxLayout:
+        """Erstellt eine Zeile fuer ein Feature mit Checkbox und optionalen Parametern."""
+        row = QHBoxLayout()
+        row.setSpacing(5)
+
+        # Checkbox
+        cb = QCheckBox(feat_def.display_name)
+        cb.setChecked(feat_def.default_enabled)
+        cb.setStyleSheet('color: white;')
+        cb.setMinimumWidth(100)
+        cb.stateChanged.connect(self._on_feature_toggled)
+        row.addWidget(cb)
+
+        # Parameter-Widgets speichern
+        widget_data: Dict[str, Any] = {'checkbox': cb, 'params': {}}
+
+        # Parameter-SpinBoxen (falls vorhanden)
+        if feat_def.params:
+            for param_name, default_val in feat_def.params.items():
+                # Label
+                label = QLabel(f'{param_name}:')
+                label.setStyleSheet('color: #aaa; font-size: 10px;')
+                row.addWidget(label)
+
+                # SpinBox
+                spin = QSpinBox()
+                spin.setFixedWidth(60)
+                spin.setStyleSheet('''
+                    QSpinBox {
+                        background-color: #3a3a3a;
+                        border: 1px solid #555;
+                        border-radius: 3px;
+                        color: white;
+                        padding: 2px;
+                    }
+                ''')
+
+                # Range setzen
+                if param_name in feat_def.param_ranges:
+                    min_val, max_val, step = feat_def.param_ranges[param_name]
+                    spin.setRange(int(min_val), int(max_val))
+                    spin.setSingleStep(int(step))
+                else:
+                    spin.setRange(1, 500)
+
+                spin.setValue(int(default_val))
+                spin.valueChanged.connect(self._on_param_changed)
+                row.addWidget(spin)
+
+                widget_data['params'][param_name] = spin
+
+        row.addStretch()
+        self.feature_widgets[feat_def.name] = widget_data
+
+        return row
+
+    def _on_all_toggled(self, state: int):
+        """Wird aufgerufen wenn 'Alle' Checkbox geaendert wird."""
+        checked = state == Qt.CheckState.Checked.value
+        for feat_name, widgets in self.feature_widgets.items():
+            widgets['checkbox'].blockSignals(True)
+            widgets['checkbox'].setChecked(checked)
+            widgets['checkbox'].blockSignals(False)
+        self.feature_changed.emit()
+
+    def _on_feature_toggled(self):
+        """Wird aufgerufen wenn ein Feature-Checkbox geaendert wird."""
+        self._update_all_checkbox_state()
+        self.feature_changed.emit()
+
+    def _on_param_changed(self):
+        """Wird aufgerufen wenn ein Parameter geaendert wird."""
+        self.feature_changed.emit()
+
+    def _update_all_checkbox_state(self):
+        """Aktualisiert den Status der 'Alle' Checkbox."""
+        all_checked = all(w['checkbox'].isChecked() for w in self.feature_widgets.values())
+        none_checked = not any(w['checkbox'].isChecked() for w in self.feature_widgets.values())
+
+        self.all_checkbox.blockSignals(True)
+        if all_checked:
+            self.all_checkbox.setCheckState(Qt.CheckState.Checked)
+        elif none_checked:
+            self.all_checkbox.setCheckState(Qt.CheckState.Unchecked)
+        else:
+            self.all_checkbox.setCheckState(Qt.CheckState.PartiallyChecked)
+        self.all_checkbox.blockSignals(False)
+
+    def get_selected_features(self) -> List[Tuple[str, Dict[str, Any]]]:
+        """Gibt alle ausgewaehlten Features mit ihren Parametern zurueck."""
+        selected = []
+        for feat_name, widgets in self.feature_widgets.items():
+            if widgets['checkbox'].isChecked():
+                params = {}
+                for param_name, spin in widgets['params'].items():
+                    params[param_name] = spin.value()
+                selected.append((feat_name, params))
+        return selected
+
+    def get_selected_count(self) -> int:
+        """Gibt die Anzahl der ausgewaehlten Features zurueck."""
+        return sum(1 for w in self.feature_widgets.values() if w['checkbox'].isChecked())
+
+    def _get_group_style(self) -> str:
+        """Gibt das GroupBox-Stylesheet zurueck."""
+        return f'''
+            QGroupBox {{
+                color: {self.color};
+                border: 1px solid #333;
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }}
+        '''
+
+
+# =============================================================================
+# PrepareDataWindow
+# =============================================================================
 
 class PrepareDataWindow(QMainWindow):
     """
@@ -641,7 +910,7 @@ class PrepareDataWindow(QMainWindow):
     # =========================================================================
 
     def _create_features_tab(self) -> QWidget:
-        """Erstellt Tab 3: Feature-Auswahl."""
+        """Erstellt Tab 3: Feature-Auswahl mit Uebersicht und Detail-Chart."""
         tab = QWidget()
         layout = QHBoxLayout(tab)
         layout.setContentsMargins(5, 5, 5, 5)
@@ -649,23 +918,115 @@ class PrepareDataWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         layout.addWidget(splitter)
 
+        # Charts ZUERST erstellen (werden von _create_features_params referenziert)
+        self.features_chart = ChartWidget('Features (Uebersicht)')
+        self.features_detail_chart = ChartWidget('Features (Detail)')
+
         # Linke Seite: Parameter
         params_widget = self._create_features_params()
         splitter.addWidget(params_widget)
 
-        # Rechte Seite: Chart
-        self.features_chart = ChartWidget('Features')
-        splitter.addWidget(self.features_chart)
+        # Rechte Seite: Zwei Charts uebereinander
+        charts_widget = QWidget()
+        charts_layout = QVBoxLayout(charts_widget)
+        charts_layout.setContentsMargins(0, 0, 0, 0)
+        charts_layout.setSpacing(5)
 
-        splitter.setSizes([400, 1000])
+        # Uebersichts-Chart (oben)
+        charts_layout.addWidget(self.features_chart, 1)
+
+        # Detail-Bereich (unten)
+        detail_widget = QWidget()
+        detail_layout = QVBoxLayout(detail_widget)
+        detail_layout.setContentsMargins(5, 5, 5, 5)
+        detail_layout.setSpacing(5)
+
+        # Detail-Kontrollen
+        detail_controls = QHBoxLayout()
+
+        detail_controls.addWidget(QLabel('Bereich:'))
+
+        self.detail_start_spin = QSpinBox()
+        self.detail_start_spin.setRange(0, max(0, self.total_points - 100))
+        self.detail_start_spin.setValue(0)
+        self.detail_start_spin.setFixedWidth(80)
+        self.detail_start_spin.setStyleSheet('''
+            QSpinBox {
+                background-color: #3a3a3a;
+                border: 1px solid #555;
+                border-radius: 3px;
+                color: white;
+                padding: 3px;
+            }
+        ''')
+        self.detail_start_spin.valueChanged.connect(self._update_detail_chart)
+        detail_controls.addWidget(self.detail_start_spin)
+
+        detail_controls.addWidget(QLabel('Fenster:'))
+
+        self.detail_window_spin = QSpinBox()
+        self.detail_window_spin.setRange(50, 500)
+        self.detail_window_spin.setValue(100)
+        self.detail_window_spin.setSingleStep(10)
+        self.detail_window_spin.setFixedWidth(70)
+        self.detail_window_spin.setStyleSheet('''
+            QSpinBox {
+                background-color: #3a3a3a;
+                border: 1px solid #555;
+                border-radius: 3px;
+                color: white;
+                padding: 3px;
+            }
+        ''')
+        self.detail_window_spin.valueChanged.connect(self._on_detail_window_changed)
+        detail_controls.addWidget(self.detail_window_spin)
+
+        # Slider fuer schnelle Navigation
+        self.detail_slider = QSlider(Qt.Orientation.Horizontal)
+        self.detail_slider.setRange(0, max(0, self.total_points - 100))
+        self.detail_slider.setValue(0)
+        self.detail_slider.setStyleSheet('''
+            QSlider::groove:horizontal {
+                background: #333;
+                height: 8px;
+                border-radius: 4px;
+            }
+            QSlider::handle:horizontal {
+                background: #4da8da;
+                width: 16px;
+                margin: -4px 0;
+                border-radius: 8px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #4da8da;
+                border-radius: 4px;
+            }
+        ''')
+        self.detail_slider.valueChanged.connect(self._on_detail_slider_changed)
+        detail_controls.addWidget(self.detail_slider, 1)
+
+        detail_layout.addLayout(detail_controls)
+        detail_layout.addWidget(self.features_detail_chart, 1)
+
+        charts_layout.addWidget(detail_widget, 1)
+
+        # Datentabelle (unten)
+        table_widget = self._create_features_table()
+        charts_layout.addWidget(table_widget)
+
+        splitter.addWidget(charts_widget)
+        splitter.setSizes([420, 1000])
+
+        # Initiale Chart-Aktualisierung mit Standard-Features
+        self._update_features_preview()
 
         return tab
 
     def _create_features_params(self) -> QWidget:
-        """Erstellt die Parameter-Seite fuer Tab 3."""
+        """Erstellt die Parameter-Seite fuer Tab 3 mit allen Feature-Kategorien."""
         widget = QWidget()
-        widget.setMinimumWidth(380)
-        widget.setMaximumWidth(450)
+        widget.setMinimumWidth(420)
+        widget.setMaximumWidth(500)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -673,66 +1034,24 @@ class PrepareDataWindow(QMainWindow):
 
         scroll_content = QWidget()
         layout = QVBoxLayout(scroll_content)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
 
-        # Preis-Features
-        price_group = QGroupBox('Preis-Features')
-        price_group.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
-        price_group.setStyleSheet(self._group_style('#4da8da'))
-        price_layout = QVBoxLayout(price_group)
+        # Feature-Kategorie Widgets erstellen
+        self.category_widgets: Dict[str, FeatureCategoryWidget] = {}
 
-        self.feature_checks = {}
-        price_features = [
-            ('Close', True), ('High', True), ('Low', True), ('Open', True),
-            ('PriceChange', True), ('PriceChangePct', True)
-        ]
-        for feat, default in price_features:
-            cb = QCheckBox(feat)
-            cb.setChecked(default)
-            cb.setStyleSheet('color: white;')
-            cb.stateChanged.connect(self._on_feature_changed)
-            self.feature_checks[feat] = cb
-            price_layout.addWidget(cb)
-
-        layout.addWidget(price_group)
-
-        # Volumen-Features
-        vol_group = QGroupBox('Volumen-Features')
-        vol_group.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
-        vol_group.setStyleSheet(self._group_style('#7fe6b3'))
-        vol_layout = QVBoxLayout(vol_group)
-
-        for feat in ['Volume', 'RelativeVolume']:
-            cb = QCheckBox(feat)
-            cb.setChecked(False)
-            cb.setStyleSheet('color: white;')
-            cb.stateChanged.connect(self._on_feature_changed)
-            self.feature_checks[feat] = cb
-            vol_layout.addWidget(cb)
-
-        layout.addWidget(vol_group)
-
-        # Volatilitaets-Features
-        volatility_group = QGroupBox('Volatilitaets-Features')
-        volatility_group.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
-        volatility_group.setStyleSheet(self._group_style('#ff9966'))
-        volatility_layout = QVBoxLayout(volatility_group)
-
-        volatility_features = ['ATR', 'ATR_Pct', 'RollingStd', 'HighLowRange']
-        for feat in volatility_features:
-            cb = QCheckBox(feat)
-            cb.setChecked(False)
-            cb.setStyleSheet('color: white;')
-            cb.stateChanged.connect(self._on_feature_changed)
-            self.feature_checks[feat] = cb
-            volatility_layout.addWidget(cb)
-
-        layout.addWidget(volatility_group)
+        for cat_key in ['price', 'technical', 'volatility', 'volume', 'time']:
+            features = FEATURE_REGISTRY.get(cat_key, [])
+            if features:
+                color = CATEGORY_CONFIG.get(cat_key, {}).get('color', '#808080')
+                cat_widget = FeatureCategoryWidget(cat_key, features, color, self)
+                cat_widget.feature_changed.connect(self._on_feature_changed)
+                self.category_widgets[cat_key] = cat_widget
+                layout.addWidget(cat_widget)
 
         # Normalisierung
         norm_group = QGroupBox('Normalisierung')
-        norm_group.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
-        norm_group.setStyleSheet(self._group_style('#b19cd9'))
+        norm_group.setFont(QFont('Segoe UI', 10, QFont.Weight.Bold))
+        norm_group.setStyleSheet(self._group_style('#808080'))
         norm_layout = QHBoxLayout(norm_group)
 
         norm_layout.addWidget(QLabel('Methode:'))
@@ -743,10 +1062,17 @@ class PrepareDataWindow(QMainWindow):
         layout.addWidget(norm_group)
 
         # Feature-Info
-        self.feature_info = QLabel('Aktive Features: 6')
+        self.feature_info = QLabel('Aktive Features: 0')
         self.feature_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.feature_info.setStyleSheet('color: #4da8da; font-weight: bold; padding: 10px;')
         layout.addWidget(self.feature_info)
+
+        # Feature-Details
+        self.features_status = QLabel('')
+        self.features_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.features_status.setStyleSheet('color: #aaa; font-size: 10px; padding: 5px;')
+        self.features_status.setWordWrap(True)
+        layout.addWidget(self.features_status)
 
         # Features bestaetigen Button
         self.confirm_features_btn = QPushButton('Features bestaetigen')
@@ -764,12 +1090,224 @@ class PrepareDataWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(scroll)
 
+        # Initial Feature-Count aktualisieren
+        self._update_feature_count()
+
         return widget
+
+    def _create_features_table(self) -> QWidget:
+        """Erstellt die Datentabelle fuer Feature-Werte mit Navigation."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
+
+        # Navigationsleiste
+        nav_layout = QHBoxLayout()
+
+        # Titel
+        table_title = QLabel('Feature-Daten')
+        table_title.setStyleSheet('color: #4da8da; font-weight: bold;')
+        nav_layout.addWidget(table_title)
+
+        nav_layout.addStretch()
+
+        # Navigation Buttons
+        self.table_first_btn = QPushButton('<<')
+        self.table_first_btn.setFixedWidth(40)
+        self.table_first_btn.setStyleSheet(self._nav_button_style())
+        self.table_first_btn.clicked.connect(lambda: self._navigate_table('first'))
+        nav_layout.addWidget(self.table_first_btn)
+
+        self.table_prev_btn = QPushButton('<')
+        self.table_prev_btn.setFixedWidth(40)
+        self.table_prev_btn.setStyleSheet(self._nav_button_style())
+        self.table_prev_btn.clicked.connect(lambda: self._navigate_table('prev'))
+        nav_layout.addWidget(self.table_prev_btn)
+
+        # Index-Anzeige
+        self.table_index_label = QLabel('0 - 9')
+        self.table_index_label.setStyleSheet('color: white; padding: 0 10px;')
+        self.table_index_label.setMinimumWidth(80)
+        self.table_index_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        nav_layout.addWidget(self.table_index_label)
+
+        self.table_next_btn = QPushButton('>')
+        self.table_next_btn.setFixedWidth(40)
+        self.table_next_btn.setStyleSheet(self._nav_button_style())
+        self.table_next_btn.clicked.connect(lambda: self._navigate_table('next'))
+        nav_layout.addWidget(self.table_next_btn)
+
+        self.table_last_btn = QPushButton('>>')
+        self.table_last_btn.setFixedWidth(40)
+        self.table_last_btn.setStyleSheet(self._nav_button_style())
+        self.table_last_btn.clicked.connect(lambda: self._navigate_table('last'))
+        nav_layout.addWidget(self.table_last_btn)
+
+        # Direkte Index-Eingabe
+        nav_layout.addWidget(QLabel('Idx:'))
+        self.table_index_spin = QSpinBox()
+        self.table_index_spin.setRange(0, max(0, self.total_points - 10))
+        self.table_index_spin.setValue(0)
+        self.table_index_spin.setFixedWidth(80)
+        self.table_index_spin.setStyleSheet('''
+            QSpinBox {
+                background-color: #3a3a3a;
+                border: 1px solid #555;
+                border-radius: 3px;
+                color: white;
+                padding: 3px;
+            }
+        ''')
+        self.table_index_spin.valueChanged.connect(self._on_table_index_changed)
+        nav_layout.addWidget(self.table_index_spin)
+
+        layout.addLayout(nav_layout)
+
+        # Tabelle
+        self.features_table = QTableWidget()
+        self.features_table.setStyleSheet('''
+            QTableWidget {
+                background-color: #1a1a1a;
+                border: 1px solid #333;
+                gridline-color: #333;
+                color: white;
+            }
+            QTableWidget::item {
+                padding: 3px;
+            }
+            QTableWidget::item:selected {
+                background-color: #4da8da;
+            }
+            QHeaderView::section {
+                background-color: #333;
+                color: white;
+                padding: 5px;
+                border: 1px solid #444;
+                font-weight: bold;
+            }
+        ''')
+        self.features_table.setAlternatingRowColors(True)
+        self.features_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.features_table.verticalHeader().setVisible(False)
+        self.features_table.setFixedHeight(280)
+
+        layout.addWidget(self.features_table)
+
+        # Aktueller Tabellenindex
+        self._table_start_index = 0
+
+        return widget
+
+    def _nav_button_style(self) -> str:
+        """Gibt das Stylesheet fuer Navigations-Buttons zurueck."""
+        return '''
+            QPushButton {
+                background-color: #444;
+                color: white;
+                border: none;
+                border-radius: 3px;
+                padding: 5px;
+            }
+            QPushButton:hover {
+                background-color: #555;
+            }
+            QPushButton:pressed {
+                background-color: #333;
+            }
+        '''
+
+    def _navigate_table(self, direction: str):
+        """Navigiert in der Datentabelle."""
+        rows_per_page = 10
+        max_start = max(0, self.total_points - rows_per_page)
+
+        if direction == 'first':
+            self._table_start_index = 0
+        elif direction == 'prev':
+            self._table_start_index = max(0, self._table_start_index - rows_per_page)
+        elif direction == 'next':
+            self._table_start_index = min(max_start, self._table_start_index + rows_per_page)
+        elif direction == 'last':
+            self._table_start_index = max_start
+
+        # SpinBox aktualisieren ohne Signal
+        self.table_index_spin.blockSignals(True)
+        self.table_index_spin.setValue(self._table_start_index)
+        self.table_index_spin.blockSignals(False)
+
+        self._update_features_table()
+
+    def _on_table_index_changed(self, value: int):
+        """Wird aufgerufen wenn der Tabellenindex geaendert wird."""
+        self._table_start_index = value
+        self._update_features_table()
+
+    def _update_features_table(self):
+        """Aktualisiert die Datentabelle mit den aktuellen Feature-Werten."""
+        if not hasattr(self, 'features_table') or self.features_table is None:
+            return
+        if not hasattr(self, '_cached_features_dict') or not self._cached_features_dict:
+            self.features_table.clear()
+            self.features_table.setRowCount(0)
+            self.features_table.setColumnCount(0)
+            return
+
+        rows_per_page = 10
+        start = self._table_start_index
+        end = min(start + rows_per_page, self.total_points)
+
+        # Index-Label aktualisieren
+        self.table_index_label.setText(f'{start} - {end - 1}')
+
+        # Spalten: Index + alle Features
+        feature_names = list(self._cached_features_dict.keys())
+        columns = ['Index'] + feature_names
+
+        self.features_table.setColumnCount(len(columns))
+        self.features_table.setHorizontalHeaderLabels(columns)
+        self.features_table.setRowCount(end - start)
+
+        # Daten einfuegen
+        for row, idx in enumerate(range(start, end)):
+            # Index-Spalte
+            idx_item = QTableWidgetItem(str(idx))
+            idx_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.features_table.setItem(row, 0, idx_item)
+
+            # Feature-Werte
+            for col, feat_name in enumerate(feature_names, start=1):
+                values = self._cached_features_dict[feat_name]
+                if idx < len(values):
+                    val = values[idx]
+                    if np.isnan(val):
+                        text = 'NaN'
+                    else:
+                        # Formatierung je nach Groesse
+                        if abs(val) >= 1000:
+                            text = f'{val:,.0f}'
+                        elif abs(val) >= 1:
+                            text = f'{val:.2f}'
+                        else:
+                            text = f'{val:.4f}'
+                else:
+                    text = '-'
+
+                item = QTableWidgetItem(text)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.features_table.setItem(row, col, item)
+
+        # Spaltenbreiten anpassen
+        self.features_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Fixed)
+        self.features_table.setColumnWidth(0, 60)
+        for col in range(1, len(columns)):
+            self.features_table.horizontalHeader().setSectionResizeMode(
+                col, QHeaderView.ResizeMode.Stretch)
 
     def _on_feature_changed(self):
         """Wird aufgerufen wenn sich die Feature-Auswahl aendert."""
-        count = self._count_selected_features()
-        self.feature_info.setText(f'Aktive Features: {count}')
+        self._update_feature_count()
 
         if self.features_valid:
             self.features_valid = False
@@ -777,49 +1315,201 @@ class PrepareDataWindow(QMainWindow):
             self._update_tab_status()
 
         # Chart-Vorschau aktualisieren
-        self._update_features_chart()
+        self._update_features_preview()
 
-    def _count_selected_features(self) -> int:
-        """Zaehlt die ausgewaehlten Features."""
-        count = 0
-        for name, cb in self.feature_checks.items():
-            if cb.isChecked():
-                count += 1
-        return count
+    def _update_feature_count(self):
+        """Aktualisiert die Anzeige der aktiven Feature-Anzahl."""
+        total = 0
+        details = []
 
-    def _update_features_chart(self):
-        """Aktualisiert den Feature-Chart."""
-        close_col = 'Close' if 'Close' in self.data.columns else 'close'
-        high_col = 'High' if 'High' in self.data.columns else 'high'
-        low_col = 'Low' if 'Low' in self.data.columns else 'low'
+        for cat_key, cat_widget in self.category_widgets.items():
+            count = cat_widget.get_selected_count()
+            total += count
+            if count > 0:
+                cat_name = CATEGORY_CONFIG.get(cat_key, {}).get('name', cat_key)
+                details.append(f"{cat_name[:8]}: {count}")
 
-        features = {}
-
-        for name, cb in self.feature_checks.items():
-            if cb.isChecked():
-                if name == 'Close' and close_col in self.data.columns:
-                    features['Close'] = self.data[close_col].values
-                elif name == 'High' and high_col in self.data.columns:
-                    features['High'] = self.data[high_col].values
-                elif name == 'Low' and low_col in self.data.columns:
-                    features['Low'] = self.data[low_col].values
-
-        if features:
-            self.features_chart.update_features_chart(features)
+        self.feature_info.setText(f'Aktive Features: {total}')
+        if details:
+            self.features_status.setText(' | '.join(details))
         else:
+            self.features_status.setText('Keine Features ausgewaehlt')
+
+    def _get_all_selected_features(self) -> List[Tuple[str, Dict[str, Any]]]:
+        """Sammelt alle aktiven Features aus allen Kategorien."""
+        all_features = []
+        for cat_widget in self.category_widgets.values():
+            all_features.extend(cat_widget.get_selected_features())
+        return all_features
+
+    def _update_features_preview(self):
+        """Aktualisiert den Feature-Chart mit allen aktiven Features (normalisiert)."""
+        # Sicherheitspruefung: Chart und Daten muessen existieren
+        if not hasattr(self, 'features_chart') or self.features_chart is None:
+            return
+        if not hasattr(self, 'data') or self.data is None or self.data.empty:
+            return
+
+        selected_features = self._get_all_selected_features()
+
+        if not selected_features:
             self.features_chart.clear()
+            return
+
+        try:
+            # Feature-Dict fuer Chart erstellen
+            features_dict: Dict[str, np.ndarray] = {}
+
+            # Spalten-Namen mapping
+            col_map = {}
+            for col in self.data.columns:
+                col_map[col.lower()] = col
+
+            for feat_name, feat_params in selected_features:
+                # Basis-Features aus Daten
+                feat_lower = feat_name.lower()
+                if feat_lower in col_map:
+                    features_dict[feat_name] = self.data[col_map[feat_lower]].values
+                elif feat_name == 'PriceChange':
+                    close_col = col_map.get('close', 'Close')
+                    if close_col in self.data.columns:
+                        features_dict[feat_name] = self.data[close_col].diff().values
+                elif feat_name == 'PriceChangePct':
+                    close_col = col_map.get('close', 'Close')
+                    if close_col in self.data.columns:
+                        features_dict[feat_name] = self.data[close_col].pct_change().values * 100
+                elif feat_name == 'Range':
+                    high_col = col_map.get('high', 'High')
+                    low_col = col_map.get('low', 'Low')
+                    if high_col in self.data.columns and low_col in self.data.columns:
+                        features_dict[feat_name] = (self.data[high_col] - self.data[low_col]).values
+                elif feat_name == 'TypicalPrice':
+                    high_col = col_map.get('high', 'High')
+                    low_col = col_map.get('low', 'Low')
+                    close_col = col_map.get('close', 'Close')
+                    if all(c in self.data.columns for c in [high_col, low_col, close_col]):
+                        features_dict[feat_name] = ((self.data[high_col] + self.data[low_col] +
+                                                     self.data[close_col]) / 3).values
+                elif feat_name == 'SMA':
+                    close_col = col_map.get('close', 'Close')
+                    period = feat_params.get('period', 20)
+                    if close_col in self.data.columns:
+                        features_dict[f'SMA({period})'] = self.data[close_col].rolling(period).mean().values
+                elif feat_name == 'EMA':
+                    close_col = col_map.get('close', 'Close')
+                    period = feat_params.get('period', 20)
+                    if close_col in self.data.columns:
+                        features_dict[f'EMA({period})'] = self.data[close_col].ewm(span=period).mean().values
+                elif feat_name == 'RSI':
+                    close_col = col_map.get('close', 'Close')
+                    period = feat_params.get('period', 14)
+                    if close_col in self.data.columns:
+                        delta = self.data[close_col].diff()
+                        gain = delta.where(delta > 0, 0).rolling(period).mean()
+                        loss = (-delta.where(delta < 0, 0)).rolling(period).mean()
+                        rs = gain / loss.replace(0, np.nan)
+                        features_dict[f'RSI({period})'] = (100 - 100 / (1 + rs)).values
+                elif feat_name == 'ATR':
+                    period = feat_params.get('period', 14)
+                    high_col = col_map.get('high', 'High')
+                    low_col = col_map.get('low', 'Low')
+                    close_col = col_map.get('close', 'Close')
+                    if all(c in self.data.columns for c in [high_col, low_col, close_col]):
+                        tr = np.maximum(
+                            self.data[high_col] - self.data[low_col],
+                            np.maximum(
+                                abs(self.data[high_col] - self.data[close_col].shift(1)),
+                                abs(self.data[low_col] - self.data[close_col].shift(1))
+                            )
+                        )
+                        features_dict[f'ATR({period})'] = tr.rolling(period).mean().values
+                elif feat_name == 'RollingStd':
+                    close_col = col_map.get('close', 'Close')
+                    period = feat_params.get('period', 20)
+                    if close_col in self.data.columns:
+                        features_dict[f'Std({period})'] = self.data[close_col].rolling(period).std().values
+
+            # Charts und Tabelle aktualisieren
+            if features_dict:
+                self.features_chart.update_features_chart(features_dict)
+                # Feature-Dict speichern fuer Detail-Chart und Tabelle
+                self._cached_features_dict = features_dict
+                self._update_detail_chart()
+                self._update_features_table()
+            else:
+                self.features_chart.clear()
+                if hasattr(self, 'features_detail_chart'):
+                    self.features_detail_chart.clear()
+                self._cached_features_dict = {}
+                self._update_features_table()
+
+        except Exception as e:
+            self._log(f'Feature-Vorschau Fehler: {e}', 'WARNING')
+            self.features_chart.clear()
+
+    def _on_detail_slider_changed(self, value: int):
+        """Wird aufgerufen wenn der Detail-Slider bewegt wird."""
+        self.detail_start_spin.blockSignals(True)
+        self.detail_start_spin.setValue(value)
+        self.detail_start_spin.blockSignals(False)
+        self._update_detail_chart()
+
+    def _on_detail_window_changed(self, value: int):
+        """Wird aufgerufen wenn die Fenstergroesse geaendert wird."""
+        # Slider-Maximum anpassen
+        max_start = max(0, self.total_points - value)
+        self.detail_slider.setMaximum(max_start)
+        self.detail_start_spin.setMaximum(max_start)
+        self._update_detail_chart()
+
+    def _update_detail_chart(self):
+        """Aktualisiert den Detail-Chart mit dem ausgewaehlten Bereich."""
+        if not hasattr(self, 'features_detail_chart') or self.features_detail_chart is None:
+            return
+
+        if not hasattr(self, '_cached_features_dict') or not self._cached_features_dict:
+            self.features_detail_chart.clear()
+            return
+
+        try:
+            start = self.detail_start_spin.value()
+            window = self.detail_window_spin.value()
+            end = min(start + window, self.total_points)
+
+            # Ausschnitt der Features erstellen
+            detail_features = {}
+            for name, values in self._cached_features_dict.items():
+                detail_features[name] = values[start:end]
+
+            if detail_features:
+                self.features_detail_chart.update_features_chart(
+                    detail_features,
+                    title=f'Detail: Index {start} - {end} ({end - start} Punkte)'
+                )
+            else:
+                self.features_detail_chart.clear()
+
+        except Exception as e:
+            self._log(f'Detail-Chart Fehler: {e}', 'WARNING')
 
     def _confirm_features(self):
         """Bestaetigt die Feature-Auswahl."""
-        count = self._count_selected_features()
+        selected = self._get_all_selected_features()
+        count = len(selected)
 
         if count == 0:
             self.feature_info.setText('Mindestens ein Feature auswaehlen!')
             self.feature_info.setStyleSheet('color: #cc4d33; font-weight: bold;')
             return
 
-        # Features speichern
-        self.selected_features = [name for name, cb in self.feature_checks.items() if cb.isChecked()]
+        # Features mit Parametern speichern
+        self.selected_features_with_params = selected  # List[Tuple[name, params_dict]]
+
+        # Fuer Rueckwaertskompatibilitaet: Nur Feature-Namen als Liste
+        self.selected_features = [f[0] for f in selected]
+
+        # Feature-Parameter speichern (fuer FeatureProcessor)
+        self.feature_params = {f[0]: f[1] for f in selected if f[1]}
 
         self.features_valid = True
         self.samples_valid = False
