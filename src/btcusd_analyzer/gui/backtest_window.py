@@ -449,6 +449,32 @@ class BacktestWindow(QMainWindow):
 
         layout.addWidget(signal_group)
 
+        # === Modell-Info (aufklappbar) ===
+        self.model_info_group = QGroupBox("Modell-Info")
+        self.model_info_group.setStyleSheet(self._group_style((0.6, 0.8, 1.0)))
+        self.model_info_group.setCheckable(True)
+        self.model_info_group.setChecked(False)  # Standardmaessig eingeklappt
+        model_info_layout = QVBoxLayout(self.model_info_group)
+
+        # TextEdit fuer formatierte Modell-Informationen
+        self.model_info_text = QTextEdit()
+        self.model_info_text.setReadOnly(True)
+        self.model_info_text.setMaximumHeight(250)
+        self.model_info_text.setStyleSheet('''
+            QTextEdit {
+                background-color: #1a1a2e;
+                border: 1px solid #333;
+                border-radius: 3px;
+                color: #ccc;
+                font-family: Consolas, monospace;
+                font-size: 9px;
+            }
+        ''')
+        self.model_info_text.setPlainText("Kein Modell geladen")
+        model_info_layout.addWidget(self.model_info_text)
+
+        layout.addWidget(self.model_info_group)
+
         layout.addStretch()
 
         scroll.setWidget(panel)
@@ -479,6 +505,9 @@ class BacktestWindow(QMainWindow):
             # Sequenzen fuer Modell-Vorhersage vorbereiten
             if model is not None and data is not None:
                 self._prepare_sequences(lookback)
+
+            # Model-Info Anzeige aktualisieren
+            self._update_model_info_display()
 
         self._update_datapoint_label()
         self._initialize_charts()
@@ -531,6 +560,85 @@ class BacktestWindow(QMainWindow):
             import traceback
             self._log(f"Sequenz-Vorbereitung fehlgeschlagen: {e}", 'ERROR')
             self._log(traceback.format_exc(), 'ERROR')
+
+    def _update_model_info_display(self):
+        """Aktualisiert die Modell-Info Anzeige im Stats-Panel."""
+        if not self.model_info:
+            self.model_info_text.setPlainText("Kein Modell geladen")
+            return
+
+        info = self.model_info
+        lines = []
+
+        # Modell-Identifikation
+        lines.append("=== MODELL ===")
+        lines.append(f"Typ:        {info.get('model_type', '-')}")
+        lines.append(f"Trainiert:  {info.get('trained_at', '-')}")
+        if info.get('training_duration_sec'):
+            mins = info['training_duration_sec'] / 60
+            lines.append(f"Dauer:      {mins:.1f} min")
+
+        # Architektur
+        lines.append("")
+        lines.append("=== ARCHITEKTUR ===")
+        lines.append(f"Hidden:     {info.get('hidden_size', '-')}")
+        lines.append(f"Layers:     {info.get('num_layers', '-')}")
+        lines.append(f"Dropout:    {info.get('dropout', '-')}")
+        lines.append(f"Klassen:    {info.get('num_classes', '-')}")
+
+        # Daten-Parameter
+        lines.append("")
+        lines.append("=== DATEN ===")
+        lines.append(f"Lookback:   {info.get('lookback_size', '-')}")
+        lines.append(f"Lookfwd:    {info.get('lookforward_size', '-')}")
+        lines.append(f"Lookahead:  {info.get('lookahead_bars', '-')}")
+        lines.append(f"Split:      {info.get('train_test_split', '-')}%")
+
+        # Samples
+        if info.get('total_samples'):
+            lines.append(f"Samples:    {info.get('total_samples', 0):,}")
+            lines.append(f"  Train:    {info.get('train_samples', 0):,}")
+            lines.append(f"  Val:      {info.get('val_samples', 0):,}")
+
+        # Features
+        lines.append("")
+        lines.append("=== FEATURES ===")
+        features = info.get('features', [])
+        lines.append(f"Anzahl:     {len(features)}")
+        if features:
+            # Features in Kurzform
+            feat_str = ', '.join(features[:5])
+            if len(features) > 5:
+                feat_str += f", +{len(features)-5}"
+            lines.append(f"Liste:      {feat_str}")
+
+        # Training
+        lines.append("")
+        lines.append("=== TRAINING ===")
+        lines.append(f"Epochen:    {info.get('epochs_trained', '-')}/{info.get('epochs_configured', '-')}")
+        lines.append(f"Batch:      {info.get('batch_size', '-')}")
+        lines.append(f"LR:         {info.get('learning_rate', '-')}")
+        lines.append(f"Patience:   {info.get('patience', '-')}")
+        lines.append(f"Early Stop: {'Ja' if info.get('stopped_early') else 'Nein'}")
+
+        # Ergebnisse
+        lines.append("")
+        lines.append("=== ERGEBNISSE ===")
+        lines.append(f"Accuracy:   {info.get('best_accuracy', 0):.1f}%")
+        lines.append(f"Val Loss:   {info.get('final_val_loss', 0):.4f}")
+        lines.append(f"BUY Peaks:  {info.get('num_buy_peaks', '-')}")
+        lines.append(f"SELL Peaks: {info.get('num_sell_peaks', '-')}")
+
+        # Class Weights
+        if info.get('class_weights'):
+            cw = info['class_weights']
+            lines.append("")
+            lines.append("=== CLASS WEIGHTS ===")
+            labels = ['HOLD', 'BUY', 'SELL']
+            for i, w in enumerate(cw[:3]):
+                lines.append(f"{labels[i]:6}:     {w:.2f}")
+
+        self.model_info_text.setPlainText('\n'.join(lines))
 
     def _start_backtest(self):
         """Startet den Backtest."""

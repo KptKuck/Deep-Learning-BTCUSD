@@ -829,6 +829,7 @@ class TrainingWindow(QMainWindow):
         # Training-Config
         config = {
             'epochs': self.epochs_spin.value(),
+            'batch_size': self.batch_size_spin.value(),
             'learning_rate': self.lr_spin.value(),
             'early_stopping': self.early_stopping_check.isChecked(),
             'patience': self.patience_spin.value(),
@@ -873,8 +874,10 @@ class TrainingWindow(QMainWindow):
         """
         from PyQt6.QtWidgets import QApplication
         from pathlib import Path
+        from datetime import datetime
         import gc
 
+        training_start = datetime.now()
         self._log("=== Synchrones Training gestartet ===")
         self._stop_requested = False
 
@@ -991,30 +994,88 @@ class TrainingWindow(QMainWindow):
             # Modell speichern
             if config.get('save_best', True):
                 from datetime import datetime
+                import json
                 save_path = Path(config.get('save_path', 'models'))
                 save_path.mkdir(parents=True, exist_ok=True)
                 model_name = self.model.name.lower().replace(' ', '_')
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M')
                 final_path = save_path / f'{model_name}_{timestamp}_acc{best_val_acc:.1f}.pt'
 
-                # model_info fuer Backtester und spaeteres Laden
+                # Trainingszeit berechnen
+                training_end = datetime.now()
+                training_duration = (training_end - training_start).total_seconds()
+
+                # Class Weights extrahieren
+                class_weights_list = None
+                if self.training_data and 'class_weights' in self.training_data:
+                    cw = self.training_data['class_weights']
+                    class_weights_list = cw.tolist() if hasattr(cw, 'tolist') else list(cw)
+
+                # Vollstaendige model_info (Trainings-Plakette)
                 model_info = {
+                    # === Modell-Identifikation ===
                     'model_type': model_name,
                     'trained_at': timestamp,
+                    'training_duration_sec': round(training_duration, 1),
+
+                    # === Architektur ===
                     'input_size': self.model.input_size if hasattr(self.model, 'input_size') else None,
                     'hidden_size': self.hidden_size_spin.value(),
                     'num_layers': self.num_layers_spin.value(),
+                    'dropout': self.dropout_spin.value() if hasattr(self, 'dropout_spin') else 0.2,
+                    'bidirectional': True,
+
+                    # === Daten-Parameter ===
                     'num_classes': self.training_info.get('num_classes', 3) if self.training_info else 3,
                     'lookback_size': self.training_info.get('params', {}).get('lookback', 100) if self.training_info else 100,
                     'lookforward_size': self.training_info.get('params', {}).get('lookforward', 10) if self.training_info else 10,
+                    'lookahead_bars': self.training_info.get('lookahead_bars', 0) if self.training_info else 0,
+                    'train_test_split': self.training_info.get('params', {}).get('train_test_split', 80) if self.training_info else 80,
+
+                    # === Samples ===
+                    'total_samples': self.training_info.get('actual_samples', 0) if self.training_info else 0,
+                    'train_samples': len(self.train_loader.dataset) if self.train_loader else 0,
+                    'val_samples': len(self.val_loader.dataset) if self.val_loader else 0,
+
+                    # === Features ===
                     'features': self.training_info.get('features', []) if self.training_info else [],
+                    'num_features': len(self.training_info.get('features', [])) if self.training_info else 0,
+
+                    # === Training-Hyperparameter ===
+                    'epochs_trained': epoch,
+                    'epochs_configured': config['epochs'],
+                    'batch_size': config['batch_size'],
+                    'learning_rate': config['learning_rate'],
+                    'optimizer': 'Adam',
+                    'scheduler': 'ReduceLROnPlateau',
+                    'early_stopping': config.get('early_stopping', True),
+                    'patience': patience,
+
+                    # === Class Weights ===
+                    'class_weights': class_weights_list,
+
+                    # === Ergebnisse ===
+                    'best_accuracy': round(best_val_acc, 2),
+                    'final_val_loss': round(avg_val_loss, 4),
+                    'stopped_early': patience_counter >= patience,
+
+                    # === Peak-Detection (aus training_info) ===
+                    'num_buy_peaks': len(self.training_info.get('buy_indices', [])) if self.training_info else 0,
+                    'num_sell_peaks': len(self.training_info.get('sell_indices', [])) if self.training_info else 0,
                 }
 
+                # Modell speichern
                 self.model.save(final_path,
                     metrics={'best_accuracy': best_val_acc, 'epochs_trained': epoch},
                     model_info=model_info
                 )
                 self._log(f"Modell gespeichert: {final_path}")
+
+                # JSON-Plakette separat speichern (fuer einfaches Lesen)
+                json_path = final_path.with_suffix('.json')
+                with open(json_path, 'w', encoding='utf-8') as f:
+                    json.dump(model_info, f, indent=2, ensure_ascii=False)
+                self._log(f"Trainings-Info: {json_path.name}")
 
             # Training beendet
             self._on_training_finished({
