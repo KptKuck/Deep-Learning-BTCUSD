@@ -1438,7 +1438,7 @@ class MainWindow(QMainWindow):
             # 1. Backtest-Daten laden
             backtest_data = manager.load_backtest_data()
             if backtest_data is not None:
-                self.backtest_data = {'data': backtest_data}
+                self.backtest_info = {'data': backtest_data}
                 self._log(f"Backtest-Daten geladen: {len(backtest_data)} Punkte", 'SUCCESS')
 
             # 2. Modell laden
@@ -1487,6 +1487,26 @@ class MainWindow(QMainWindow):
             self._log(f"Session-Ladefehler: {e}", 'ERROR')
             self._log(traceback.format_exc(), 'ERROR')
 
+    def _auto_load_latest_session(self):
+        """Laedt automatisch die neueste Session mit Modell."""
+        from ..core.session_manager import SessionManager
+
+        try:
+            sessions = SessionManager.list_sessions(self.config.paths.log_dir)
+
+            # Finde neueste Session mit Modell
+            for session in sessions:
+                if session.get('has_model'):
+                    session_dir = session['session_dir']
+                    self._log(f"Auto-Load: {session['session_name']}", 'INFO')
+                    self._load_session_from_dir(session_dir)
+                    return
+
+            self._log("Keine Session mit Modell gefunden", 'DEBUG')
+
+        except Exception as e:
+            self._log(f"Auto-Load fehlgeschlagen: {e}", 'DEBUG')
+
     def _make_prediction(self):
         """Fuehrt eine Vorhersage durch."""
         if self.model is None:
@@ -1533,9 +1553,18 @@ class MainWindow(QMainWindow):
 
     def _open_backtester(self):
         """Oeffnet das Backtester-Fenster."""
-        if self.model is None or self.data is None:
-            QMessageBox.warning(self, 'Fehler', 'Bitte zuerst Daten und Modell laden')
+        # Auto-Load: Neueste Session laden wenn kein Modell/Backtest-Daten vorhanden
+        if self.model is None or self.backtest_info is None:
+            self._auto_load_latest_session()
+
+        # Pruefen ob Daten vorhanden
+        if self.data is None:
+            QMessageBox.warning(self, 'Fehler', 'Bitte zuerst Daten laden')
             return
+
+        # Warnung wenn kein Modell, aber trotzdem fortfahren (fuer Chart-Ansicht)
+        if self.model is None:
+            self._log('Kein Modell geladen - Backtester ohne Vorhersagen', 'WARNING')
 
         self._log('Oeffne Backtester...', 'INFO')
 
