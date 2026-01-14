@@ -117,6 +117,77 @@ CATEGORY_CONFIG = {
 
 
 # =============================================================================
+# PipelineState - Status-Management fuer die 4-Tab Pipeline
+# =============================================================================
+
+class PipelineStage(IntEnum):
+    """Stufen der Datenvorbereitungs-Pipeline."""
+    NONE = 0       # Keine Stufe abgeschlossen
+    PEAKS = 1      # Tab 1: Peaks gefunden
+    LABELS = 2     # Tab 2: Labels generiert
+    FEATURES = 3   # Tab 3: Features ausgewaehlt
+    SAMPLES = 4    # Tab 4: Samples berechnet
+
+
+class PipelineState:
+    """
+    Verwaltet den Status der Datenvorbereitungs-Pipeline.
+    Ersetzt die 4 separaten Boolean-Flags durch eine zentrale Zustandsverwaltung.
+    """
+
+    def __init__(self):
+        self._current_stage = PipelineStage.NONE
+
+    @property
+    def current_stage(self) -> PipelineStage:
+        """Gibt die aktuelle Stufe zurueck."""
+        return self._current_stage
+
+    def advance_to(self, stage: PipelineStage):
+        """Setzt die Pipeline auf eine bestimmte Stufe."""
+        self._current_stage = stage
+
+    def invalidate_from(self, stage: PipelineStage):
+        """
+        Invalidiert alle Stufen ab der angegebenen Stufe.
+        Wird aufgerufen wenn sich Parameter aendern.
+        """
+        if self._current_stage >= stage:
+            self._current_stage = PipelineStage(max(0, stage - 1))
+
+    def is_valid(self, stage: PipelineStage) -> bool:
+        """Prueft ob eine Stufe gueltig (abgeschlossen) ist."""
+        return self._current_stage >= stage
+
+    @property
+    def peaks_valid(self) -> bool:
+        """Kompatibilitaet: Prueft ob Peaks gefunden wurden."""
+        return self.is_valid(PipelineStage.PEAKS)
+
+    @property
+    def labels_valid(self) -> bool:
+        """Kompatibilitaet: Prueft ob Labels generiert wurden."""
+        return self.is_valid(PipelineStage.LABELS)
+
+    @property
+    def features_valid(self) -> bool:
+        """Kompatibilitaet: Prueft ob Features ausgewaehlt wurden."""
+        return self.is_valid(PipelineStage.FEATURES)
+
+    @property
+    def samples_valid(self) -> bool:
+        """Kompatibilitaet: Prueft ob Samples berechnet wurden."""
+        return self.is_valid(PipelineStage.SAMPLES)
+
+    def reset(self):
+        """Setzt die Pipeline zurueck."""
+        self._current_stage = PipelineStage.NONE
+
+    def __repr__(self) -> str:
+        return f'PipelineState(stage={self._current_stage.name})'
+
+
+# =============================================================================
 # Worker-Threads fuer Hintergrund-Berechnungen
 # =============================================================================
 
@@ -663,11 +734,8 @@ class PrepareDataWindow(QMainWindow):
         self.result_info: Dict[str, Any] = {}
         self.current_num_classes = 3
 
-        # Tab-Validierungsstatus (Pipeline)
-        self.peaks_valid = False       # Tab 1: Peaks gefunden?
-        self.labels_valid = False      # Tab 2: Labels generiert?
-        self.features_valid = False    # Tab 3: Features gewaehlt?
-        self.samples_valid = False     # Tab 4: Samples berechnet?
+        # Pipeline-Status (ersetzt die 4 Boolean-Flags)
+        self._pipeline = PipelineState()
 
         # Feature-Cache initialisieren
         self._feature_cache = FeatureCache()
@@ -680,6 +748,51 @@ class PrepareDataWindow(QMainWindow):
         # UI initialisieren
         self._init_ui()
         self._update_dynamic_limits()
+
+    # Properties fuer Abwaertskompatibilitaet mit Boolean-Flags
+    @property
+    def peaks_valid(self) -> bool:
+        return self._pipeline.peaks_valid
+
+    @peaks_valid.setter
+    def peaks_valid(self, value: bool):
+        if value:
+            self._pipeline.advance_to(PipelineStage.PEAKS)
+        else:
+            self._pipeline.invalidate_from(PipelineStage.PEAKS)
+
+    @property
+    def labels_valid(self) -> bool:
+        return self._pipeline.labels_valid
+
+    @labels_valid.setter
+    def labels_valid(self, value: bool):
+        if value:
+            self._pipeline.advance_to(PipelineStage.LABELS)
+        else:
+            self._pipeline.invalidate_from(PipelineStage.LABELS)
+
+    @property
+    def features_valid(self) -> bool:
+        return self._pipeline.features_valid
+
+    @features_valid.setter
+    def features_valid(self, value: bool):
+        if value:
+            self._pipeline.advance_to(PipelineStage.FEATURES)
+        else:
+            self._pipeline.invalidate_from(PipelineStage.FEATURES)
+
+    @property
+    def samples_valid(self) -> bool:
+        return self._pipeline.samples_valid
+
+    @samples_valid.setter
+    def samples_valid(self, value: bool):
+        if value:
+            self._pipeline.advance_to(PipelineStage.SAMPLES)
+        else:
+            self._pipeline.invalidate_from(PipelineStage.SAMPLES)
 
     def _log(self, message: str, level: str = 'INFO'):
         """Loggt eine Nachricht an MainWindow."""
