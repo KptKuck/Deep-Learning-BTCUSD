@@ -3,7 +3,7 @@ Sequenz-Generator Modul - Erstellt Sequenzen fuer LSTM/Transformer Training
 Entspricht prepare_training_data.m aus dem MATLAB-Projekt
 """
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 
 import numpy as np
 import pandas as pd
@@ -12,6 +12,91 @@ from torch.utils.data import Dataset, DataLoader
 
 from ..core.logger import get_logger
 from .normalizer import ZScoreNormalizer
+
+
+def expand_labels_lookahead(
+    labels: np.ndarray,
+    lookahead: int = 5,
+    hold_label: int = 0,
+    buy_label: int = 1,
+    sell_label: int = 2
+) -> np.ndarray:
+    """
+    Erweitert Labels mit Lookahead - Bars vor einem Peak erhalten das Peak-Label.
+
+    Das Modell lernt so, einen Peak vorherzusagen BEVOR er eintritt.
+
+    Beispiel mit lookahead=3:
+        Original:  [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 2, 0, 0]
+        Erweitert: [0, 0, 1, 1, 1, 1, 0, 0, 2, 2, 2, 0, 0]
+                          ^--lookahead--^     ^--lookahead--^
+
+    Args:
+        labels: Original-Label-Array
+        lookahead: Anzahl Bars vor dem Peak die das Label erhalten
+        hold_label: Label-Wert fuer HOLD (wird nicht erweitert)
+        buy_label: Label-Wert fuer BUY
+        sell_label: Label-Wert fuer SELL
+
+    Returns:
+        Erweitertes Label-Array
+    """
+    expanded = labels.copy()
+    n = len(labels)
+
+    # BUY-Peaks erweitern
+    buy_indices = np.where(labels == buy_label)[0]
+    for idx in buy_indices:
+        start = max(0, idx - lookahead)
+        expanded[start:idx] = buy_label
+
+    # SELL-Peaks erweitern
+    sell_indices = np.where(labels == sell_label)[0]
+    for idx in sell_indices:
+        start = max(0, idx - lookahead)
+        expanded[start:idx] = sell_label
+
+    return expanded
+
+
+def compute_class_weights(
+    labels: np.ndarray,
+    num_classes: int = 3,
+    ignore_label: int = -1
+) -> torch.Tensor:
+    """
+    Berechnet Class Weights fuer unbalancierte Daten.
+
+    Verwendung: criterion = nn.CrossEntropyLoss(weight=class_weights)
+
+    Args:
+        labels: Label-Array
+        num_classes: Anzahl Klassen
+        ignore_label: Label das ignoriert werden soll
+
+    Returns:
+        Tensor mit Gewichten pro Klasse
+    """
+    # Nur gueltige Labels zaehlen
+    valid_labels = labels[labels != ignore_label]
+
+    if len(valid_labels) == 0:
+        return torch.ones(num_classes)
+
+    # Haeufigkeit pro Klasse
+    counts = np.zeros(num_classes)
+    for i in range(num_classes):
+        counts[i] = np.sum(valid_labels == i)
+
+    # Inverse Frequency als Gewicht
+    # Klassen mit weniger Samples bekommen hoeheres Gewicht
+    total = counts.sum()
+    weights = total / (num_classes * counts + 1e-6)
+
+    # Normalisieren damit Durchschnitt = 1
+    weights = weights / weights.mean()
+
+    return torch.tensor(weights, dtype=torch.float32)
 
 
 class SequenceGenerator:

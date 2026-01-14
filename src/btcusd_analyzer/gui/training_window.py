@@ -885,8 +885,14 @@ class TrainingWindow(QMainWindow):
                 self.model = self.model.to(self.device)
                 self._log(f"Modell auf GPU verschoben: {self.device}")
 
-            # Loss und Optimizer
-            criterion = torch.nn.CrossEntropyLoss()
+            # Loss und Optimizer (mit Class Weights falls vorhanden)
+            class_weights = self.training_data.get('class_weights')
+            if class_weights is not None:
+                class_weights = class_weights.to(self.device)
+                self._log(f"Class Weights: {class_weights.cpu().numpy().round(2)}")
+                criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+            else:
+                criterion = torch.nn.CrossEntropyLoss()
             optimizer = torch.optim.Adam(
                 self.model.parameters(),
                 lr=config['learning_rate'],
@@ -1246,8 +1252,13 @@ class TrainingWindow(QMainWindow):
             model = model.to(device)
             self._log(f"Modell auf GPU geladen")
 
-            # Loss und Optimizer
-            criterion = torch.nn.CrossEntropyLoss()
+            # Loss und Optimizer (mit Class Weights falls vorhanden)
+            class_weights = self.training_data.get('class_weights') if self.training_data else None
+            if class_weights is not None:
+                class_weights = class_weights.to(device)
+                criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+            else:
+                criterion = torch.nn.CrossEntropyLoss()
             optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
             # 5 Test-Epochen trainieren

@@ -1493,7 +1493,11 @@ class PrepareDataWindow(QMainWindow):
 
         try:
             from ..data.processor import FeatureProcessor
-            from ..training.sequence import SequenceGenerator
+            from ..training.sequence import (
+                SequenceGenerator,
+                expand_labels_lookahead,
+                compute_class_weights,
+            )
 
             # 1. Features berechnen
             processor = FeatureProcessor(features=self.selected_features)
@@ -1511,12 +1515,41 @@ class PrepareDataWindow(QMainWindow):
                 features = np.nan_to_num(features, nan=0.0)
                 self._log("NaN-Werte in Features durch 0 ersetzt", 'WARNING')
 
-            # 3. Labels verwenden
+            # 3. Labels mit Lookahead erweitern
             labels = self.generated_labels
+            num_classes = self.result_info.get('num_classes', 3)
+            lookforward = self.params['lookforward']
+
+            # Lookahead = lookforward / 2, damit das Modell lernt VOR dem Peak zu erkennen
+            lookahead_bars = max(1, lookforward // 2)
+
+            if num_classes == 3:
+                # 3 Klassen: HOLD=0, BUY=1, SELL=2
+                expanded_labels = expand_labels_lookahead(
+                    labels,
+                    lookahead=lookahead_bars,
+                    hold_label=0,
+                    buy_label=1,
+                    sell_label=2
+                )
+            else:
+                # 2 Klassen: BUY=0, SELL=1, ignorieren bei -1
+                expanded_labels = expand_labels_lookahead(
+                    labels,
+                    lookahead=lookahead_bars,
+                    hold_label=-1,  # wird ignoriert
+                    buy_label=0,
+                    sell_label=1
+                )
+
+            # Statistik der erweiterten Labels
+            original_signals = np.sum(labels != 0) if num_classes == 3 else np.sum(labels >= 0)
+            expanded_signals = np.sum(expanded_labels != 0) if num_classes == 3 else np.sum(expanded_labels >= 0)
+            self._log(f"Labels erweitert: {original_signals} -> {expanded_signals} "
+                      f"(Lookahead={lookahead_bars} Bars)", 'INFO')
 
             # 4. Sequenzen generieren
             lookback = self.params['lookback']
-            lookforward = self.params['lookforward']
 
             generator = SequenceGenerator(
                 lookback=lookback,
@@ -1524,18 +1557,21 @@ class PrepareDataWindow(QMainWindow):
                 normalize=True
             )
 
-            X, Y = generator.generate(features, labels)
+            X, Y = generator.generate(features, expanded_labels)
 
             if len(X) == 0:
                 raise ValueError("Keine Sequenzen generiert - zu wenig Daten")
 
-            # 5. Training-Daten zusammenstellen
-            num_classes = self.result_info.get('num_classes', 3)
+            # 5. Class Weights berechnen
+            class_weights = compute_class_weights(Y, num_classes=num_classes)
+            self._log(f"Class Weights: {class_weights.numpy()}", 'DEBUG')
 
+            # 6. Training-Daten zusammenstellen
             training_data = {
                 'X': X,
                 'Y': Y,
                 'params': self.params.copy(),
+                'class_weights': class_weights,
             }
 
             training_info = self.result_info.copy()
@@ -1544,6 +1580,7 @@ class PrepareDataWindow(QMainWindow):
             training_info['feature_columns'] = feature_columns
             training_info['num_classes'] = num_classes
             training_info['actual_samples'] = len(X)
+            training_info['lookahead_bars'] = lookahead_bars
 
             # Signal senden
             self.data_prepared.emit(training_data, training_info)
