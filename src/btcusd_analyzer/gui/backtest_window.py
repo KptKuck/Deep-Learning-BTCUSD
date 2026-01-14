@@ -7,6 +7,7 @@ Layout: 3-Spalten (280px | flexible | 280px)
 - Rechts: Performance-Statistiken (P/L, Trade-Stats, Signal-Verteilung)
 """
 
+import time
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from datetime import datetime
@@ -80,6 +81,11 @@ class BacktestWindow(QMainWindow):
         # Geschwindigkeit
         self.steps_per_second = 10
         self.turbo_mode = False
+
+        # Geschwindigkeitsmessung
+        self._step_count = 0
+        self._last_speed_update = 0.0
+        self._speed_update_timer: Optional[QTimer] = None
 
         # Vorbereitete Sequenzen fuer Modell-Vorhersage
         self.prepared_sequences = None
@@ -663,8 +669,15 @@ class BacktestWindow(QMainWindow):
         self.backtest_timer.timeout.connect(self._timer_callback)
         self.backtest_timer.start(interval)
 
-        # Geschwindigkeit anzeigen
-        self.actual_speed_label.setText(f"{self.steps_per_second} Schritte/Sek")
+        # Geschwindigkeitsmessung starten
+        self._step_count = 0
+        self._last_speed_update = time.perf_counter()
+        self._speed_update_timer = QTimer()
+        self._speed_update_timer.timeout.connect(self._update_actual_speed)
+        self._speed_update_timer.start(500)  # Alle 500ms aktualisieren
+
+        # Geschwindigkeit anzeigen (Ziel)
+        self.actual_speed_label.setText(f"0 / {self.steps_per_second} Schritte/Sek")
 
         self._add_tradelog("Backtest gestartet")
 
@@ -676,6 +689,11 @@ class BacktestWindow(QMainWindow):
         if self.backtest_timer:
             self.backtest_timer.stop()
             self.backtest_timer = None
+
+        # Geschwindigkeitsmess-Timer stoppen
+        if self._speed_update_timer:
+            self._speed_update_timer.stop()
+            self._speed_update_timer = None
 
         # Buttons aktualisieren
         self.start_btn.setEnabled(True)
@@ -695,6 +713,11 @@ class BacktestWindow(QMainWindow):
         if self.backtest_timer:
             self.backtest_timer.stop()
             self.backtest_timer = None
+
+        # Geschwindigkeitsmess-Timer stoppen
+        if self._speed_update_timer:
+            self._speed_update_timer.stop()
+            self._speed_update_timer = None
 
         # Status zuruecksetzen
         self.is_running = False
@@ -746,6 +769,7 @@ class BacktestWindow(QMainWindow):
             return
 
         self._process_step()
+        self._step_count += 1  # Schritt zaehlen fuer Geschwindigkeitsmessung
         self._update_ui()
 
         # Charts nur im Nicht-Turbo-Modus aktualisieren
@@ -1139,14 +1163,28 @@ class BacktestWindow(QMainWindow):
         self._add_tradelog(f"Trades: {len(self.trades)}")
 
     def _update_speed(self, value: int):
-        """Aktualisiert die Geschwindigkeit."""
+        """Aktualisiert die eingestellte Geschwindigkeit."""
         self.steps_per_second = value
         self.speed_label.setText(str(value))
 
         # Timer neu starten falls aktiv
         if self.is_running and self.backtest_timer:
             self.backtest_timer.setInterval(int(1000 / value))
-            self.actual_speed_label.setText(f"{value} Schritte/Sek")
+
+    def _update_actual_speed(self):
+        """Berechnet und zeigt die tatsaechliche Geschwindigkeit an."""
+        now = time.perf_counter()
+        elapsed = now - self._last_speed_update
+
+        if elapsed > 0:
+            actual_speed = self._step_count / elapsed
+            self.actual_speed_label.setText(
+                f"{actual_speed:.1f} / {self.steps_per_second} Schritte/Sek"
+            )
+
+        # Zaehler zuruecksetzen
+        self._step_count = 0
+        self._last_speed_update = now
 
     def _toggle_turbo(self, checked: bool):
         """Schaltet den Turbo-Modus um."""
@@ -1175,4 +1213,6 @@ class BacktestWindow(QMainWindow):
         """Behandelt das Schliessen des Fensters."""
         if self.backtest_timer:
             self.backtest_timer.stop()
+        if self._speed_update_timer:
+            self._speed_update_timer.stop()
         event.accept()
