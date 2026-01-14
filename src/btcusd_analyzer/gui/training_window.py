@@ -990,14 +990,17 @@ class TrainingWindow(QMainWindow):
 
             # Modell speichern
             if config.get('save_best', True):
+                from datetime import datetime
                 save_path = Path(config.get('save_path', 'models'))
                 save_path.mkdir(parents=True, exist_ok=True)
                 model_name = self.model.name.lower().replace(' ', '_')
-                final_path = save_path / f'{model_name}_final_acc{best_val_acc:.1f}.pt'
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+                final_path = save_path / f'{model_name}_{timestamp}_acc{best_val_acc:.1f}.pt'
 
                 # model_info fuer Backtester und spaeteres Laden
                 model_info = {
                     'model_type': model_name,
+                    'trained_at': timestamp,
                     'input_size': self.model.input_size if hasattr(self.model, 'input_size') else None,
                     'hidden_size': self.hidden_size_spin.value(),
                     'num_layers': self.num_layers_spin.value(),
