@@ -663,6 +663,9 @@ class BacktestWindow(QMainWindow):
         self.backtest_timer.timeout.connect(self._timer_callback)
         self.backtest_timer.start(interval)
 
+        # Geschwindigkeit anzeigen
+        self.actual_speed_label.setText(f"{self.steps_per_second} Schritte/Sek")
+
         self._add_tradelog("Backtest gestartet")
 
     def _stop_backtest(self):
@@ -1143,6 +1146,7 @@ class BacktestWindow(QMainWindow):
         # Timer neu starten falls aktiv
         if self.is_running and self.backtest_timer:
             self.backtest_timer.setInterval(int(1000 / value))
+            self.actual_speed_label.setText(f"{value} Schritte/Sek")
 
     def _toggle_turbo(self, checked: bool):
         """Schaltet den Turbo-Modus um."""
