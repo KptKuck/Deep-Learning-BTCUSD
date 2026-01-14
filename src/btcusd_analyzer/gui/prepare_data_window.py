@@ -1492,27 +1492,64 @@ class PrepareDataWindow(QMainWindow):
         self.samples_status.setText('Generiere Trainingsdaten...')
 
         try:
-            # Training-Daten erstellen (Platzhalter - echte Implementierung spaeter)
+            from ..data.processor import FeatureProcessor
+            from ..training.sequence import SequenceGenerator
+
+            # 1. Features berechnen
+            processor = FeatureProcessor(features=self.selected_features)
+            processed_df = processor.process(self.data)
+
+            # 2. Feature-Matrix erstellen (nur ausgewaehlte Features)
+            feature_columns = [f for f in self.selected_features if f in processed_df.columns]
+            if not feature_columns:
+                raise ValueError("Keine gueltigen Features gefunden")
+
+            features = processed_df[feature_columns].values.astype(np.float32)
+
+            # NaN-Werte behandeln (durch 0 ersetzen oder interpolieren)
+            if np.isnan(features).any():
+                features = np.nan_to_num(features, nan=0.0)
+                self._log("NaN-Werte in Features durch 0 ersetzt", 'WARNING')
+
+            # 3. Labels verwenden
+            labels = self.generated_labels
+
+            # 4. Sequenzen generieren
+            lookback = self.params['lookback']
+            lookforward = self.params['lookforward']
+
+            generator = SequenceGenerator(
+                lookback=lookback,
+                lookforward=lookforward,
+                normalize=True
+            )
+
+            X, Y = generator.generate(features, labels)
+
+            if len(X) == 0:
+                raise ValueError("Keine Sequenzen generiert - zu wenig Daten")
+
+            # 5. Training-Daten zusammenstellen
             num_classes = self.result_info.get('num_classes', 3)
 
             training_data = {
-                'X': np.random.randn(
-                    self.result_info['total'],
-                    self.result_info['lookback'],
-                    self.result_info['num_features']
-                ),
-                'Y': np.random.randint(0, num_classes, self.result_info['total']),
+                'X': X,
+                'Y': Y,
                 'params': self.params.copy(),
             }
 
             training_info = self.result_info.copy()
             training_info['params'] = self.params.copy()
             training_info['features'] = self.selected_features.copy()
+            training_info['feature_columns'] = feature_columns
+            training_info['num_classes'] = num_classes
+            training_info['actual_samples'] = len(X)
 
             # Signal senden
             self.data_prepared.emit(training_data, training_info)
 
-            self._log(f"Trainingsdaten generiert: {self.result_info['total']} Samples", 'SUCCESS')
+            self._log(f"Trainingsdaten generiert: {len(X)} Sequenzen, "
+                      f"{len(feature_columns)} Features, Lookback={lookback}", 'SUCCESS')
 
             self.close()
 
