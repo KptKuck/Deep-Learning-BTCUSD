@@ -10,7 +10,8 @@ from PyQt6.QtCore import QThread, pyqtSignal
 class PeakFinderWorker(QThread):
     """Worker-Thread fuer Peak-Erkennung."""
 
-    finished = pyqtSignal(dict)  # {buy_indices, sell_indices, labeler}
+    # Umbenennt um Konflikt mit QThread.finished zu vermeiden
+    result_ready = pyqtSignal(dict)  # {buy_indices, sell_indices, labeler}
     progress = pyqtSignal(str)   # Status-Meldung
     error = pyqtSignal(str)      # Fehlermeldung
 
@@ -23,6 +24,9 @@ class PeakFinderWorker(QThread):
         """Fuehrt die Peak-Erkennung im Hintergrund aus."""
         try:
             from ...training.labeler import DailyExtremaLabeler, LabelingConfig
+            from ...core.logger import get_logger
+
+            logger = get_logger()
 
             self.progress.emit('Initialisiere Labeler...')
 
@@ -47,21 +51,32 @@ class PeakFinderWorker(QThread):
             self.progress.emit('Peaks gefunden!')
 
             # Ergebnis zurueckgeben
+            buy_indices = list(labeler.buy_signal_indices)
+            sell_indices = list(labeler.sell_signal_indices)
+
+            logger.debug(f'[PeakFinderWorker] Erstelle Ergebnis: {len(buy_indices)} BUY, {len(sell_indices)} SELL')
+
             result = {
-                'buy_indices': labeler.buy_signal_indices.copy(),
-                'sell_indices': labeler.sell_signal_indices.copy(),
+                'buy_indices': buy_indices,
+                'sell_indices': sell_indices,
                 'labeler': labeler
             }
-            self.finished.emit(result)
+
+            logger.debug('[PeakFinderWorker] Sende result_ready Signal...')
+            self.result_ready.emit(result)
+            logger.debug('[PeakFinderWorker] Signal gesendet')
 
         except Exception as e:
-            self.error.emit(str(e))
+            import traceback
+            error_msg = f'{str(e)}\n\n{traceback.format_exc()}'
+            self.error.emit(error_msg)
 
 
 class LabelGeneratorWorker(QThread):
     """Worker-Thread fuer Label-Generierung."""
 
-    finished = pyqtSignal(dict)  # {labels, stats}
+    # Umbenennt um Konflikt mit QThread.finished zu vermeiden
+    result_ready = pyqtSignal(dict)  # {labels, stats}
     progress = pyqtSignal(str)
     error = pyqtSignal(str)
 
@@ -93,7 +108,7 @@ class LabelGeneratorWorker(QThread):
                 'stats': stats,
                 'labeler': self.labeler
             }
-            self.finished.emit(result)
+            self.result_ready.emit(result)
 
         except Exception as e:
             self.error.emit(str(e))

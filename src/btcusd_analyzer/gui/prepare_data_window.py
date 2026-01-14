@@ -454,7 +454,7 @@ class PrepareDataWindow(QMainWindow):
         # Worker starten
         self._peak_worker = PeakFinderWorker(self.data, config, self)
         self._peak_worker.progress.connect(self._on_peak_progress)
-        self._peak_worker.finished.connect(self._on_peaks_found)
+        self._peak_worker.result_ready.connect(self._on_peaks_found)
         self._peak_worker.error.connect(self._on_peak_error)
         self._peak_worker.start()
 
