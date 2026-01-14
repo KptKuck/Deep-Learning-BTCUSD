@@ -7,9 +7,9 @@ from typing import Dict, Any, List, Tuple
 
 from PyQt6.QtWidgets import (
     QGroupBox, QVBoxLayout, QHBoxLayout, QCheckBox, QSpinBox,
-    QLabel, QFrame
+    QLabel, QFrame, QWidget, QPushButton, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont
 
 
@@ -107,54 +107,123 @@ CATEGORY_CONFIG = {
 
 
 # =============================================================================
-# FeatureCategoryWidget
+# FeatureCategoryWidget (Collapsible)
 # =============================================================================
 
-class FeatureCategoryWidget(QGroupBox):
-    """Widget fuer eine Feature-Kategorie mit Checkboxen und Parametern."""
+class FeatureCategoryWidget(QWidget):
+    """Aufklappbares Widget fuer eine Feature-Kategorie mit Checkboxen und Parametern."""
 
     feature_changed = pyqtSignal()
 
     def __init__(self, category_key: str, features: List[FeatureDefinition],
                  color: str, parent=None):
-        category_name = CATEGORY_CONFIG.get(category_key, {}).get('name', category_key)
-        super().__init__(f"{category_name} ({len(features)})", parent)
+        super().__init__(parent)
 
         self.category_key = category_key
+        self.category_name = CATEGORY_CONFIG.get(category_key, {}).get('name', category_key)
         self.features = features
         self.color = color
         self.feature_widgets: Dict[str, Dict[str, Any]] = {}
+        self._is_collapsed = True  # Startet eingeklappt
 
         self._init_ui()
 
     def _init_ui(self):
         """Initialisiert die UI-Komponenten."""
-        self.setFont(QFont('Segoe UI', 10, QFont.Weight.Bold))
-        self.setStyleSheet(self._get_group_style())
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        layout = QVBoxLayout(self)
-        layout.setSpacing(4)
-        layout.setContentsMargins(8, 12, 8, 8)
+        # Header-Button (immer sichtbar)
+        self.header_btn = QPushButton()
+        self.header_btn.setCheckable(True)
+        self.header_btn.setChecked(False)
+        self.header_btn.clicked.connect(self._toggle_collapse)
+        self._update_header_text()
+        self.header_btn.setStyleSheet(self._get_header_style())
+        self.header_btn.setFixedHeight(36)
+        main_layout.addWidget(self.header_btn)
+
+        # Content-Container (aufklappbar)
+        self.content_widget = QWidget()
+        self.content_widget.setStyleSheet(f'''
+            QWidget {{
+                background-color: #2a2a2a;
+                border: 1px solid #333;
+                border-top: none;
+                border-bottom-left-radius: 5px;
+                border-bottom-right-radius: 5px;
+            }}
+        ''')
+
+        content_layout = QVBoxLayout(self.content_widget)
+        content_layout.setSpacing(4)
+        content_layout.setContentsMargins(8, 8, 8, 8)
 
         # "Alle" Checkbox
-        self.all_checkbox = QCheckBox('Alle')
+        self.all_checkbox = QCheckBox('Alle auswaehlen')
         self.all_checkbox.setStyleSheet('color: white; font-weight: bold;')
         self.all_checkbox.stateChanged.connect(self._on_all_toggled)
-        layout.addWidget(self.all_checkbox)
+        content_layout.addWidget(self.all_checkbox)
 
         # Trennlinie
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setStyleSheet('background-color: #444;')
-        layout.addWidget(line)
+        line.setFixedHeight(1)
+        content_layout.addWidget(line)
 
         # Features
         for feat_def in self.features:
             feat_widget = self._create_feature_row(feat_def)
-            layout.addLayout(feat_widget)
+            content_layout.addLayout(feat_widget)
 
-        # Initial "Alle" Status aktualisieren
+        main_layout.addWidget(self.content_widget)
+
+        # Initial: eingeklappt
+        self.content_widget.setVisible(False)
+
+        # Initial "Alle" Status und Header aktualisieren
         self._update_all_checkbox_state()
+        self._update_header_text()
+
+    def _toggle_collapse(self):
+        """Klappt den Content-Bereich ein/aus."""
+        self._is_collapsed = not self._is_collapsed
+        self.content_widget.setVisible(not self._is_collapsed)
+        self.header_btn.setChecked(not self._is_collapsed)
+        self._update_header_text()
+
+    def _update_header_text(self):
+        """Aktualisiert den Header-Text mit Pfeil und Anzahl."""
+        arrow = "v" if not self._is_collapsed else ">"
+        selected = self.get_selected_count()
+        total = len(self.features)
+        self.header_btn.setText(f"  {arrow}  {self.category_name}  [{selected}/{total}]")
+
+    def _get_header_style(self) -> str:
+        """Gibt das Header-Button Stylesheet zurueck."""
+        return f'''
+            QPushButton {{
+                background-color: #333;
+                color: {self.color};
+                border: 1px solid #444;
+                border-radius: 5px;
+                text-align: left;
+                padding-left: 10px;
+                font-weight: bold;
+                font-size: 11px;
+            }}
+            QPushButton:hover {{
+                background-color: #3a3a3a;
+                border-color: {self.color};
+            }}
+            QPushButton:checked {{
+                background-color: #2a2a2a;
+                border-bottom-left-radius: 0px;
+                border-bottom-right-radius: 0px;
+            }}
+        '''
 
     def _create_feature_row(self, feat_def: FeatureDefinition) -> QHBoxLayout:
         """Erstellt eine Zeile fuer ein Feature mit Checkbox und optionalen Parametern."""
@@ -219,11 +288,13 @@ class FeatureCategoryWidget(QGroupBox):
             widgets['checkbox'].blockSignals(True)
             widgets['checkbox'].setChecked(checked)
             widgets['checkbox'].blockSignals(False)
+        self._update_header_text()
         self.feature_changed.emit()
 
     def _on_feature_toggled(self):
         """Wird aufgerufen wenn ein Feature-Checkbox geaendert wird."""
         self._update_all_checkbox_state()
+        self._update_header_text()
         self.feature_changed.emit()
 
     def _on_param_changed(self):
@@ -232,6 +303,9 @@ class FeatureCategoryWidget(QGroupBox):
 
     def _update_all_checkbox_state(self):
         """Aktualisiert den Status der 'Alle' Checkbox."""
+        if not self.feature_widgets:
+            return
+
         all_checked = all(w['checkbox'].isChecked() for w in self.feature_widgets.values())
         none_checked = not any(w['checkbox'].isChecked() for w in self.feature_widgets.values())
 
@@ -259,19 +333,16 @@ class FeatureCategoryWidget(QGroupBox):
         """Gibt die Anzahl der ausgewaehlten Features zurueck."""
         return sum(1 for w in self.feature_widgets.values() if w['checkbox'].isChecked())
 
-    def _get_group_style(self) -> str:
-        """Gibt das GroupBox-Stylesheet zurueck."""
-        return f'''
-            QGroupBox {{
-                color: {self.color};
-                border: 1px solid #333;
-                border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 10px;
-            }}
-            QGroupBox::title {{
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-            }}
-        '''
+    def expand(self):
+        """Klappt die Kategorie auf."""
+        if self._is_collapsed:
+            self._toggle_collapse()
+
+    def collapse(self):
+        """Klappt die Kategorie zu."""
+        if not self._is_collapsed:
+            self._toggle_collapse()
+
+    def is_collapsed(self) -> bool:
+        """Gibt zurueck ob die Kategorie eingeklappt ist."""
+        return self._is_collapsed

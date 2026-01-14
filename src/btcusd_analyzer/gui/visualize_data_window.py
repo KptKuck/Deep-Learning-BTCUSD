@@ -87,7 +87,7 @@ class VisualizeDataWindow(QMainWindow):
 
     def _init_ui(self):
         """Initialisiert die UI-Komponenten."""
-        self.setWindowTitle('Trainingsdaten Visualisierung')
+        self.setWindowTitle('5 - Visualize')
         self.setMinimumSize(1400, 900)
         self.setStyleSheet(self._get_stylesheet())
 

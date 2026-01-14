@@ -122,7 +122,7 @@ class MainWindow(QMainWindow):
 
     def _init_ui(self):
         """Initialisiert die UI-Komponenten."""
-        self.setWindowTitle('BTCUSD Analyzer')
+        self.setWindowTitle('1 - Main')
         self.setMinimumSize(1400, 950)
 
         # Fenstergroesse als Prozent der Bildschirmgroesse (85%)

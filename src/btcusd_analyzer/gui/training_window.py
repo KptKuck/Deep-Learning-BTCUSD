@@ -228,7 +228,7 @@ class TrainingWindow(QMainWindow):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("BTCUSD Analyzer - Training")
+        self.setWindowTitle("3 - Training")
         self.setMinimumSize(1200, 800)
         self._parent = parent
 

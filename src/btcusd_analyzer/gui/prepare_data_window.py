@@ -146,7 +146,7 @@ class PrepareDataWindow(QMainWindow):
 
     def _init_ui(self):
         """Initialisiert die UI-Komponenten."""
-        self.setWindowTitle('Trainingsdaten Vorbereitung')
+        self.setWindowTitle('2 - Prepare Data')
         self.setMinimumSize(1600, 950)
         self.setStyleSheet(self._get_stylesheet())
 
@@ -1581,6 +1581,8 @@ class PrepareDataWindow(QMainWindow):
             training_info['num_classes'] = num_classes
             training_info['actual_samples'] = len(X)
             training_info['lookahead_bars'] = lookahead_bars
+            training_info['buy_indices'] = self.detected_peaks['buy_indices'].copy()
+            training_info['sell_indices'] = self.detected_peaks['sell_indices'].copy()
 
             # Signal senden
             self.data_prepared.emit(training_data, training_info)

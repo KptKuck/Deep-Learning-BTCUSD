@@ -179,7 +179,7 @@ class TradingWindow(QMainWindow):
         self.worker = None
         self._parent = parent
 
-        self.setWindowTitle(f"BTCUSD Analyzer - Trading ({mode.value.upper()})")
+        self.setWindowTitle(f"6 - Trading ({mode.value.upper()})")
         self.setMinimumSize(1100, 750)
 
         # Live-Modus Warnung

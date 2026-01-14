@@ -42,7 +42,7 @@ class BacktestWindow(QMainWindow):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Backtester - BILSTM Trading Simulation")
+        self.setWindowTitle("4 - Backtest")
         self.setMinimumSize(1200, 800)
         self._parent = parent
 
