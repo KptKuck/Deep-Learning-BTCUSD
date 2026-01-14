@@ -25,7 +25,7 @@ import pandas as pd
 from ..core.config import Config
 from ..core.logger import get_logger, Logger
 from ..data.reader import CSVReader
-from .styles import get_stylesheet, COLORS
+from .styles import get_stylesheet, COLORS, StyleFactory
 
 
 class GUILogHandler(logging.Handler):
@@ -900,31 +900,7 @@ class MainWindow(QMainWindow):
 
     def _button_style(self, color: tuple) -> str:
         """Generiert Button-Stylesheet aus RGB-Tuple (0-1 Range)."""
-        r, g, b = [int(c * 255) for c in color]
-        # Dunklere Version fuer Hover
-        r_h, g_h, b_h = [min(255, int(c * 255 * 1.2)) for c in color]
-        # Noch dunklere Version fuer Pressed
-        r_p, g_p, b_p = [int(c * 255 * 0.8) for c in color]
-
-        return f'''
-            QPushButton {{
-                background-color: rgb({r}, {g}, {b});
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 10px;
-            }}
-            QPushButton:hover {{
-                background-color: rgb({r_h}, {g_h}, {b_h});
-            }}
-            QPushButton:pressed {{
-                background-color: rgb({r_p}, {g_p}, {b_p});
-            }}
-            QPushButton:disabled {{
-                background-color: rgb(80, 80, 80);
-                color: rgb(120, 120, 120);
-            }}
-        '''
+        return StyleFactory.button_style(color, padding='5px 10px')
 
     def _create_status_bar(self):
         """Erstellt die Status-Leiste."""

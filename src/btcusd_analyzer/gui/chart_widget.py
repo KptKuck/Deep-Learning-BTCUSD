@@ -15,6 +15,8 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 
+from .styles import StyleFactory
+
 
 class ChartWidget(QWidget):
     """
@@ -144,29 +146,7 @@ class ChartWidget(QWidget):
 
     def _button_style(self, hex_color: str) -> str:
         """Generiert Button-Stylesheet."""
-        hex_color = hex_color.lstrip('#')
-        r = int(hex_color[0:2], 16)
-        g = int(hex_color[2:4], 16)
-        b = int(hex_color[4:6], 16)
-
-        r_h, g_h, b_h = [min(255, int(c * 1.2)) for c in (r, g, b)]
-        r_p, g_p, b_p = [int(c * 0.8) for c in (r, g, b)]
-
-        return f'''
-            QPushButton {{
-                background-color: rgb({r}, {g}, {b});
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 10px;
-            }}
-            QPushButton:hover {{
-                background-color: rgb({r_h}, {g_h}, {b_h});
-            }}
-            QPushButton:pressed {{
-                background-color: rgb({r_p}, {g_p}, {b_p});
-            }}
-        '''
+        return StyleFactory.button_style_hex(hex_color, padding='5px 10px')
 
     def update_price_chart(self, prices: np.ndarray,
                            buy_indices: List[int] = None,

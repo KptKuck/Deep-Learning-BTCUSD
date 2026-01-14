@@ -4,6 +4,7 @@ Refactored: 4 Tabs mit eigenem Chart pro Tab
 """
 
 from dataclasses import dataclass, field
+from enum import IntEnum
 from typing import Optional, Dict, Any, List, Tuple
 
 from PyQt6.QtWidgets import (
@@ -12,13 +13,14 @@ from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QSpinBox, QDoubleSpinBox, QSplitter,
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QSlider
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from PyQt6.QtGui import QFont
 
 import pandas as pd
 import numpy as np
 
 from .chart_widget import ChartWidget
+from .styles import StyleFactory, COLORS
 
 
 # =============================================================================
@@ -112,6 +114,336 @@ CATEGORY_CONFIG = {
     'volume': {'name': 'Volumen', 'color': '#7fe6b3'},
     'time': {'name': 'Zeit-Features', 'color': '#e6b333'},
 }
+
+
+# =============================================================================
+# Worker-Threads fuer Hintergrund-Berechnungen
+# =============================================================================
+
+class PeakFinderWorker(QThread):
+    """Worker-Thread fuer Peak-Erkennung."""
+
+    finished = pyqtSignal(dict)  # {buy_indices, sell_indices, labeler}
+    progress = pyqtSignal(str)   # Status-Meldung
+    error = pyqtSignal(str)      # Fehlermeldung
+
+    def __init__(self, data: pd.DataFrame, config: dict, parent=None):
+        super().__init__(parent)
+        self.data = data
+        self.config = config
+
+    def run(self):
+        """Fuehrt die Peak-Erkennung im Hintergrund aus."""
+        try:
+            from ..training.labeler import DailyExtremaLabeler, LabelingConfig
+
+            self.progress.emit('Initialisiere Labeler...')
+
+            # Config erstellen (bereits als LabelingConfig oder dict)
+            if isinstance(self.config, dict):
+                config = LabelingConfig(**self.config)
+            else:
+                config = self.config
+
+            # Labeler erstellen
+            labeler = DailyExtremaLabeler(
+                lookforward=config.lookforward,
+                threshold_pct=config.threshold_pct,
+                num_classes=3
+            )
+
+            self.progress.emit('Suche Peaks...')
+
+            # Labels generieren (findet auch Peaks)
+            _ = labeler.generate_labels(self.data, config=config)
+
+            self.progress.emit('Peaks gefunden!')
+
+            # Ergebnis zurueckgeben
+            result = {
+                'buy_indices': labeler.buy_signal_indices.copy(),
+                'sell_indices': labeler.sell_signal_indices.copy(),
+                'labeler': labeler
+            }
+            self.finished.emit(result)
+
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+class LabelGeneratorWorker(QThread):
+    """Worker-Thread fuer Label-Generierung."""
+
+    finished = pyqtSignal(dict)  # {labels, stats}
+    progress = pyqtSignal(str)
+    error = pyqtSignal(str)
+
+    def __init__(self, labeler, data: pd.DataFrame, num_classes: int, parent=None):
+        super().__init__(parent)
+        self.labeler = labeler
+        self.data = data
+        self.num_classes = num_classes
+
+    def run(self):
+        """Generiert Labels im Hintergrund."""
+        try:
+            self.progress.emit('Generiere Labels...')
+
+            # Labeler mit neuer Klassenanzahl konfigurieren
+            self.labeler.num_classes = self.num_classes
+
+            # Labels generieren
+            labels = self.labeler.generate_labels(self.data)
+
+            # Statistiken berechnen
+            unique, counts = np.unique(labels[labels >= 0], return_counts=True)
+            stats = dict(zip(unique.astype(int), counts.astype(int)))
+
+            self.progress.emit('Labels generiert!')
+
+            result = {
+                'labels': labels,
+                'stats': stats,
+                'labeler': self.labeler
+            }
+            self.finished.emit(result)
+
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+# =============================================================================
+# Feature-Cache fuer optimierte Berechnung
+# =============================================================================
+
+class FeatureCache:
+    """
+    Intelligenter Cache fuer Feature-Berechnungen.
+    Cached berechnete Features und berechnet nur bei Aenderungen neu.
+    """
+
+    def __init__(self):
+        self._cache: Dict[str, np.ndarray] = {}
+        self._data_id: Optional[int] = None  # ID der Daten (id(df))
+
+    def invalidate(self):
+        """Leert den gesamten Cache."""
+        self._cache.clear()
+        self._data_id = None
+
+    def set_data(self, data: pd.DataFrame):
+        """Setzt neue Basisdaten und invalidiert Cache wenn noetig."""
+        new_id = id(data)
+        if new_id != self._data_id:
+            self._cache.clear()
+            self._data_id = new_id
+
+    def get(self, key: str) -> Optional[np.ndarray]:
+        """Holt gecachtes Feature oder None."""
+        return self._cache.get(key)
+
+    def set(self, key: str, values: np.ndarray):
+        """Speichert berechnetes Feature."""
+        self._cache[key] = values
+
+    def has(self, key: str) -> bool:
+        """Prueft ob Feature gecached ist."""
+        return key in self._cache
+
+    def compute_or_get(self, key: str, compute_fn) -> np.ndarray:
+        """Berechnet Feature falls nicht gecached."""
+        if key not in self._cache:
+            self._cache[key] = compute_fn()
+        return self._cache[key]
+
+    @property
+    def cached_features(self) -> Dict[str, np.ndarray]:
+        """Gibt alle gecachten Features zurueck."""
+        return self._cache.copy()
+
+    def compute_feature(self, data: pd.DataFrame, feat_name: str,
+                        feat_params: Dict[str, Any]) -> Optional[np.ndarray]:
+        """
+        Berechnet ein einzelnes Feature mit Caching.
+
+        Args:
+            data: DataFrame mit OHLCV Daten
+            feat_name: Name des Features
+            feat_params: Parameter (z.B. {'period': 20})
+
+        Returns:
+            numpy array mit Feature-Werten oder None
+        """
+        # Cache-Key mit Parametern
+        param_str = '_'.join(f'{k}{v}' for k, v in sorted(feat_params.items()))
+        cache_key = f'{feat_name}_{param_str}' if param_str else feat_name
+
+        # Falls gecached, zurueckgeben
+        if self.has(cache_key):
+            return self.get(cache_key)
+
+        # Spalten-Namen mapping (case-insensitive)
+        col_map = {col.lower(): col for col in data.columns}
+        close_col = col_map.get('close', 'Close')
+        high_col = col_map.get('high', 'High')
+        low_col = col_map.get('low', 'Low')
+        open_col = col_map.get('open', 'Open')
+
+        result = None
+        feat_lower = feat_name.lower()
+
+        # Basis-Features aus Daten
+        if feat_lower in col_map:
+            result = data[col_map[feat_lower]].values
+
+        # Preis-Features
+        elif feat_name == 'PriceChange':
+            if close_col in data.columns:
+                result = data[close_col].diff().values
+        elif feat_name == 'PriceChangePct':
+            if close_col in data.columns:
+                result = data[close_col].pct_change().values * 100
+        elif feat_name == 'Range':
+            if high_col in data.columns and low_col in data.columns:
+                result = (data[high_col] - data[low_col]).values
+        elif feat_name == 'RangePct':
+            if all(c in data.columns for c in [high_col, low_col, close_col]):
+                result = ((data[high_col] - data[low_col]) / data[close_col] * 100).values
+        elif feat_name == 'TypicalPrice':
+            if all(c in data.columns for c in [high_col, low_col, close_col]):
+                result = ((data[high_col] + data[low_col] + data[close_col]) / 3).values
+        elif feat_name == 'OHLC4':
+            if all(c in data.columns for c in [open_col, high_col, low_col, close_col]):
+                result = ((data[open_col] + data[high_col] +
+                          data[low_col] + data[close_col]) / 4).values
+
+        # Technische Indikatoren
+        elif feat_name == 'SMA':
+            period = feat_params.get('period', 20)
+            if close_col in data.columns:
+                result = data[close_col].rolling(period).mean().values
+        elif feat_name == 'EMA':
+            period = feat_params.get('period', 20)
+            if close_col in data.columns:
+                result = data[close_col].ewm(span=period).mean().values
+        elif feat_name == 'RSI':
+            period = feat_params.get('period', 14)
+            if close_col in data.columns:
+                delta = data[close_col].diff()
+                gain = delta.where(delta > 0, 0).rolling(period).mean()
+                loss = (-delta.where(delta < 0, 0)).rolling(period).mean()
+                rs = gain / loss.replace(0, np.nan)
+                result = (100 - 100 / (1 + rs)).values
+
+        # Volatilitaet
+        elif feat_name == 'ATR':
+            period = feat_params.get('period', 14)
+            if all(c in data.columns for c in [high_col, low_col, close_col]):
+                tr = np.maximum(
+                    data[high_col] - data[low_col],
+                    np.maximum(
+                        abs(data[high_col] - data[close_col].shift(1)),
+                        abs(data[low_col] - data[close_col].shift(1))
+                    )
+                )
+                result = tr.rolling(period).mean().values
+        elif feat_name == 'ATR_Pct':
+            period = feat_params.get('period', 14)
+            if all(c in data.columns for c in [high_col, low_col, close_col]):
+                tr = np.maximum(
+                    data[high_col] - data[low_col],
+                    np.maximum(
+                        abs(data[high_col] - data[close_col].shift(1)),
+                        abs(data[low_col] - data[close_col].shift(1))
+                    )
+                )
+                atr = tr.rolling(period).mean()
+                result = (atr / data[close_col] * 100).values
+        elif feat_name == 'RollingStd':
+            period = feat_params.get('period', 20)
+            if close_col in data.columns:
+                result = data[close_col].rolling(period).std().values
+        elif feat_name == 'RollingStd_Pct':
+            period = feat_params.get('period', 20)
+            if close_col in data.columns:
+                std = data[close_col].rolling(period).std()
+                result = (std / data[close_col] * 100).values
+
+        # Cachen und zurueckgeben
+        if result is not None:
+            self.set(cache_key, result)
+        return result
+
+
+# =============================================================================
+# PipelineState - Zustandsverwaltung fuer die 4-Tab Pipeline
+# =============================================================================
+
+class PipelineStage(IntEnum):
+    """Stufen der Datenvorbereitungs-Pipeline."""
+    NONE = 0
+    PEAKS = 1       # Tab 1: Peaks gefunden
+    LABELS = 2      # Tab 2: Labels generiert
+    FEATURES = 3    # Tab 3: Features ausgewaehlt
+    SAMPLES = 4     # Tab 4: Samples berechnet
+
+
+class PipelineState:
+    """
+    Verwaltet den Zustand der 4-Tab Pipeline.
+    Ersetzt die 4 einzelnen Boolean-Flags durch einen konsistenten Zustand.
+    """
+
+    def __init__(self):
+        self._current_stage = PipelineStage.NONE
+
+    @property
+    def current_stage(self) -> PipelineStage:
+        """Gibt die aktuelle Pipeline-Stufe zurueck."""
+        return self._current_stage
+
+    def advance_to(self, stage: PipelineStage):
+        """Setzt die Pipeline auf eine bestimmte Stufe (wenn hoeher als aktuell)."""
+        if stage > self._current_stage:
+            self._current_stage = stage
+
+    def set_stage(self, stage: PipelineStage):
+        """Setzt die Pipeline auf eine bestimmte Stufe (direkt)."""
+        self._current_stage = stage
+
+    def invalidate_from(self, stage: PipelineStage):
+        """
+        Invalidiert alle Stufen ab der angegebenen Stufe.
+        Wenn z.B. Peaks neu gesucht werden, sind Labels/Features/Samples ungueltig.
+        """
+        if self._current_stage >= stage:
+            # Setze auf die Stufe davor
+            self._current_stage = PipelineStage(max(0, stage - 1))
+
+    def is_valid(self, stage: PipelineStage) -> bool:
+        """Prueft ob eine bestimmte Stufe erreicht wurde."""
+        return self._current_stage >= stage
+
+    def reset(self):
+        """Setzt die Pipeline zurueck."""
+        self._current_stage = PipelineStage.NONE
+
+    # Convenience Properties fuer Rueckwaertskompatibilitaet
+    @property
+    def peaks_valid(self) -> bool:
+        return self.is_valid(PipelineStage.PEAKS)
+
+    @property
+    def labels_valid(self) -> bool:
+        return self.is_valid(PipelineStage.LABELS)
+
+    @property
+    def features_valid(self) -> bool:
+        return self.is_valid(PipelineStage.FEATURES)
+
+    @property
+    def samples_valid(self) -> bool:
+        return self.is_valid(PipelineStage.SAMPLES)
 
 
 # =============================================================================
@@ -336,6 +668,14 @@ class PrepareDataWindow(QMainWindow):
         self.labels_valid = False      # Tab 2: Labels generiert?
         self.features_valid = False    # Tab 3: Features gewaehlt?
         self.samples_valid = False     # Tab 4: Samples berechnet?
+
+        # Feature-Cache initialisieren
+        self._feature_cache = FeatureCache()
+        self._feature_cache.set_data(data)
+
+        # Worker-Referenzen
+        self._peak_worker: Optional[PeakFinderWorker] = None
+        self._label_worker: Optional[LabelGeneratorWorker] = None
 
         # UI initialisieren
         self._init_ui()
@@ -618,83 +958,97 @@ class PrepareDataWindow(QMainWindow):
             self.method_params_group.hide()
 
     def _find_peaks(self):
-        """Findet Peaks basierend auf der gewaehlten Methode."""
-        from ..training.labeler import DailyExtremaLabeler, LabelingConfig, LabelingMethod
+        """Findet Peaks basierend auf der gewaehlten Methode (im Worker-Thread)."""
+        from ..training.labeler import LabelingConfig, LabelingMethod
 
+        # Button deaktivieren waehrend Suche
+        self.find_peaks_btn.setEnabled(False)
         self.peaks_status.setText('Suche Peaks...')
         self.peaks_status.setStyleSheet('color: #4da8da;')
 
-        try:
-            # Methoden-Mapping
-            method_map = {
-                0: LabelingMethod.FUTURE_RETURN,
-                1: LabelingMethod.ZIGZAG,
-                2: LabelingMethod.PEAKS,
-                3: LabelingMethod.FRACTALS,
-                4: LabelingMethod.PIVOTS,
-                5: LabelingMethod.EXTREMA_DAILY,
-                6: LabelingMethod.BINARY,
-            }
+        # Methoden-Mapping
+        method_map = {
+            0: LabelingMethod.FUTURE_RETURN,
+            1: LabelingMethod.ZIGZAG,
+            2: LabelingMethod.PEAKS,
+            3: LabelingMethod.FRACTALS,
+            4: LabelingMethod.PIVOTS,
+            5: LabelingMethod.EXTREMA_DAILY,
+            6: LabelingMethod.BINARY,
+        }
 
-            # Config erstellen
-            config = LabelingConfig(
-                method=method_map[self.peak_method_combo.currentIndex()],
-                lookforward=self.peak_lookforward_spin.value(),
-                threshold_pct=self.peak_threshold_spin.value(),
-                num_classes=3,  # Immer 3 fuer Peak-Erkennung
-                zigzag_threshold=self.zigzag_threshold_spin.value(),
-                peak_distance=self.peak_distance_spin.value(),
-                peak_prominence=self.prominence_spin.value(),
-                peak_width=self.peak_width_spin.value() if self.peak_width_spin.value() > 0 else None,
-                fractal_order=self.fractal_order_spin.value(),
-                pivot_lookback=self.pivot_lookback_spin.value(),
-            )
+        # Config erstellen
+        config = LabelingConfig(
+            method=method_map[self.peak_method_combo.currentIndex()],
+            lookforward=self.peak_lookforward_spin.value(),
+            threshold_pct=self.peak_threshold_spin.value(),
+            num_classes=3,  # Immer 3 fuer Peak-Erkennung
+            zigzag_threshold=self.zigzag_threshold_spin.value(),
+            peak_distance=self.peak_distance_spin.value(),
+            peak_prominence=self.prominence_spin.value(),
+            peak_width=self.peak_width_spin.value() if self.peak_width_spin.value() > 0 else None,
+            fractal_order=self.fractal_order_spin.value(),
+            pivot_lookback=self.pivot_lookback_spin.value(),
+        )
 
-            # Labeler erstellen und Peaks finden
-            self.labeler = DailyExtremaLabeler(
-                lookforward=config.lookforward,
-                threshold_pct=config.threshold_pct,
-                num_classes=3
-            )
-            _ = self.labeler.generate_labels(self.data, config=config)
+        # Worker starten
+        self._peak_worker = PeakFinderWorker(self.data, config, self)
+        self._peak_worker.progress.connect(self._on_peak_progress)
+        self._peak_worker.finished.connect(self._on_peaks_found)
+        self._peak_worker.error.connect(self._on_peak_error)
+        self._peak_worker.start()
 
-            # Peaks speichern
-            self.detected_peaks = {
-                'buy_indices': self.labeler.buy_signal_indices.copy(),
-                'sell_indices': self.labeler.sell_signal_indices.copy()
-            }
+    def _on_peak_progress(self, message: str):
+        """Callback fuer Peak-Finding Fortschritt."""
+        self.peaks_status.setText(message)
 
-            num_buy = len(self.detected_peaks['buy_indices'])
-            num_sell = len(self.detected_peaks['sell_indices'])
+    def _on_peaks_found(self, result: dict):
+        """Callback wenn Peaks gefunden wurden."""
+        # Worker-Referenz freigeben
+        self._peak_worker = None
+        self.find_peaks_btn.setEnabled(True)
 
-            # Status aktualisieren
-            self.peaks_valid = True
-            self.labels_valid = False
-            self.features_valid = False
-            self.samples_valid = False
+        # Ergebnisse speichern
+        self.labeler = result['labeler']
+        self.detected_peaks = {
+            'buy_indices': result['buy_indices'],
+            'sell_indices': result['sell_indices']
+        }
 
-            self.peaks_status.setText(f'Gefunden: {num_buy} BUY-Peaks, {num_sell} SELL-Peaks')
-            self.peaks_status.setStyleSheet('color: #33b34d;')
+        num_buy = len(self.detected_peaks['buy_indices'])
+        num_sell = len(self.detected_peaks['sell_indices'])
 
-            # Chart aktualisieren
-            close_col = 'Close' if 'Close' in self.data.columns else 'close'
-            prices = self.data[close_col].values
-            self.peaks_chart.update_price_chart(
-                prices,
-                self.detected_peaks['buy_indices'],
-                self.detected_peaks['sell_indices'],
-                'Erkannte Peaks'
-            )
+        # Status aktualisieren
+        self.peaks_valid = True
+        self.labels_valid = False
+        self.features_valid = False
+        self.samples_valid = False
 
-            # Tabs aktualisieren
-            self._update_tab_status()
+        self.peaks_status.setText(f'Gefunden: {num_buy} BUY-Peaks, {num_sell} SELL-Peaks')
+        self.peaks_status.setStyleSheet('color: #33b34d;')
 
-            self._log(f'Peaks gefunden: {num_buy} BUY, {num_sell} SELL', 'SUCCESS')
+        # Chart aktualisieren
+        close_col = 'Close' if 'Close' in self.data.columns else 'close'
+        prices = self.data[close_col].values
+        self.peaks_chart.update_price_chart(
+            prices,
+            self.detected_peaks['buy_indices'],
+            self.detected_peaks['sell_indices'],
+            'Erkannte Peaks'
+        )
 
-        except Exception as e:
-            self.peaks_status.setText(f'Fehler: {e}')
-            self.peaks_status.setStyleSheet('color: #cc4d33;')
-            self._log(f'Peak-Erkennung fehlgeschlagen: {e}', 'ERROR')
+        # Tabs aktualisieren
+        self._update_tab_status()
+
+        self._log(f'Peaks gefunden: {num_buy} BUY, {num_sell} SELL', 'SUCCESS')
+
+    def _on_peak_error(self, error_msg: str):
+        """Callback bei Peak-Finding Fehler."""
+        self._peak_worker = None
+        self.find_peaks_btn.setEnabled(True)
+        self.peaks_status.setText(f'Fehler: {error_msg}')
+        self.peaks_status.setStyleSheet('color: #cc4d33;')
+        self._log(f'Peak-Erkennung fehlgeschlagen: {error_msg}', 'ERROR')
 
     def _invalidate_peaks(self):
         """Invalidiert Peaks wenn Parameter geaendert werden."""
@@ -1357,77 +1711,23 @@ class PrepareDataWindow(QMainWindow):
             return
 
         try:
-            # Feature-Dict fuer Chart erstellen
+            # Feature-Dict fuer Chart erstellen (mit Caching)
             features_dict: Dict[str, np.ndarray] = {}
 
-            # Spalten-Namen mapping
-            col_map = {}
-            for col in self.data.columns:
-                col_map[col.lower()] = col
-
             for feat_name, feat_params in selected_features:
-                # Basis-Features aus Daten
-                feat_lower = feat_name.lower()
-                if feat_lower in col_map:
-                    features_dict[feat_name] = self.data[col_map[feat_lower]].values
-                elif feat_name == 'PriceChange':
-                    close_col = col_map.get('close', 'Close')
-                    if close_col in self.data.columns:
-                        features_dict[feat_name] = self.data[close_col].diff().values
-                elif feat_name == 'PriceChangePct':
-                    close_col = col_map.get('close', 'Close')
-                    if close_col in self.data.columns:
-                        features_dict[feat_name] = self.data[close_col].pct_change().values * 100
-                elif feat_name == 'Range':
-                    high_col = col_map.get('high', 'High')
-                    low_col = col_map.get('low', 'Low')
-                    if high_col in self.data.columns and low_col in self.data.columns:
-                        features_dict[feat_name] = (self.data[high_col] - self.data[low_col]).values
-                elif feat_name == 'TypicalPrice':
-                    high_col = col_map.get('high', 'High')
-                    low_col = col_map.get('low', 'Low')
-                    close_col = col_map.get('close', 'Close')
-                    if all(c in self.data.columns for c in [high_col, low_col, close_col]):
-                        features_dict[feat_name] = ((self.data[high_col] + self.data[low_col] +
-                                                     self.data[close_col]) / 3).values
-                elif feat_name == 'SMA':
-                    close_col = col_map.get('close', 'Close')
-                    period = feat_params.get('period', 20)
-                    if close_col in self.data.columns:
-                        features_dict[f'SMA({period})'] = self.data[close_col].rolling(period).mean().values
-                elif feat_name == 'EMA':
-                    close_col = col_map.get('close', 'Close')
-                    period = feat_params.get('period', 20)
-                    if close_col in self.data.columns:
-                        features_dict[f'EMA({period})'] = self.data[close_col].ewm(span=period).mean().values
-                elif feat_name == 'RSI':
-                    close_col = col_map.get('close', 'Close')
-                    period = feat_params.get('period', 14)
-                    if close_col in self.data.columns:
-                        delta = self.data[close_col].diff()
-                        gain = delta.where(delta > 0, 0).rolling(period).mean()
-                        loss = (-delta.where(delta < 0, 0)).rolling(period).mean()
-                        rs = gain / loss.replace(0, np.nan)
-                        features_dict[f'RSI({period})'] = (100 - 100 / (1 + rs)).values
-                elif feat_name == 'ATR':
-                    period = feat_params.get('period', 14)
-                    high_col = col_map.get('high', 'High')
-                    low_col = col_map.get('low', 'Low')
-                    close_col = col_map.get('close', 'Close')
-                    if all(c in self.data.columns for c in [high_col, low_col, close_col]):
-                        tr = np.maximum(
-                            self.data[high_col] - self.data[low_col],
-                            np.maximum(
-                                abs(self.data[high_col] - self.data[close_col].shift(1)),
-                                abs(self.data[low_col] - self.data[close_col].shift(1))
-                            )
-                        )
-                        features_dict[f'ATR({period})'] = tr.rolling(period).mean().values
-                elif feat_name == 'RollingStd':
-                    close_col = col_map.get('close', 'Close')
-                    period = feat_params.get('period', 20)
-                    if close_col in self.data.columns:
-                        features_dict[f'Std({period})'] = self.data[close_col].rolling(period).std().values
+                # Feature ueber Cache berechnen (oder gecachtes holen)
+                values = self._feature_cache.compute_feature(
+                    self.data, feat_name, feat_params
+                )
+
+                if values is not None:
+                    # Display-Name mit Parametern
+                    if feat_params:
+                        param_str = ','.join(f'{v}' for v in feat_params.values())
+                        display_name = f'{feat_name}({param_str})'
+                    else:
+                        display_name = feat_name
+                    features_dict[display_name] = values
 
             # Charts und Tabelle aktualisieren
             if features_dict:
@@ -1809,112 +2109,18 @@ class PrepareDataWindow(QMainWindow):
 
     def _group_style(self, color: str) -> str:
         """Generiert GroupBox-Stylesheet."""
-        return f'''
-            QGroupBox {{
-                color: {color};
-                border: 1px solid #333;
-                border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 10px;
-            }}
-            QGroupBox::title {{
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-            }}
-        '''
+        return StyleFactory.group_style(hex_color=color)
 
     def _button_style(self, color: tuple) -> str:
         """Generiert Button-Stylesheet."""
-        r, g, b = [int(c * 255) for c in color]
-        r_h, g_h, b_h = [min(255, int(c * 255 * 1.2)) for c in color]
-        r_p, g_p, b_p = [int(c * 255 * 0.8) for c in color]
-
-        return f'''
-            QPushButton {{
-                background-color: rgb({r}, {g}, {b});
-                color: white;
-                border: none;
-                border-radius: 4px;
-            }}
-            QPushButton:hover {{
-                background-color: rgb({r_h}, {g_h}, {b_h});
-            }}
-            QPushButton:pressed {{
-                background-color: rgb({r_p}, {g_p}, {b_p});
-            }}
-            QPushButton:disabled {{
-                background-color: rgb(80, 80, 80);
-                color: rgb(120, 120, 120);
-            }}
-        '''
+        return StyleFactory.button_style(color)
 
     def _get_tab_stylesheet(self) -> str:
         """Gibt das Tab-Widget Stylesheet zurueck."""
-        return '''
-            QTabWidget::pane {
-                border: 1px solid #333;
-                background-color: #2a2a2a;
-            }
-            QTabBar::tab {
-                background: #333;
-                color: #aaa;
-                padding: 10px 20px;
-                margin-right: 2px;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-                font-weight: bold;
-            }
-            QTabBar::tab:selected {
-                background: #4da8da;
-                color: white;
-            }
-            QTabBar::tab:hover:!selected {
-                background: #444;
-            }
-            QTabBar::tab:disabled {
-                background: #222;
-                color: #555;
-            }
-        '''
+        return StyleFactory.tab_style()
 
     def _get_stylesheet(self) -> str:
         """Gibt das Fenster-Stylesheet zurueck."""
-        return '''
-            QMainWindow {
-                background-color: #262626;
-            }
-            QWidget {
-                color: white;
-            }
-            QLabel {
-                color: white;
-            }
-            QScrollArea {
-                background-color: #2e2e2e;
-            }
-            QComboBox {
-                background-color: #3a3a3a;
-                border: 1px solid #555;
-                border-radius: 3px;
-                padding: 5px;
-                color: white;
-            }
-            QComboBox:drop-down {
-                border: none;
-            }
-            QSpinBox, QDoubleSpinBox {
-                background-color: #3a3a3a;
-                border: 1px solid #555;
-                border-radius: 3px;
-                padding: 3px;
-                color: white;
-            }
-            QCheckBox {
-                color: white;
-            }
-            QCheckBox::indicator {
-                width: 16px;
-                height: 16px;
-            }
-        '''
+        return (StyleFactory.window_style() +
+                StyleFactory.combobox_style() +
+                StyleFactory.spinbox_style())

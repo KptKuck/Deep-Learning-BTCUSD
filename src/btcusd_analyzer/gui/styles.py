@@ -463,3 +463,236 @@ LIVE_BANNER_STYLE = f"""
     padding: 10px;
     border-radius: 4px;
 """
+
+
+# =============================================================================
+# StyleFactory - Zentrale Style-Generierung
+# =============================================================================
+
+class StyleFactory:
+    """
+    Factory-Klasse fuer konsistente Style-Generierung.
+    Ersetzt duplizierte _button_style() und _group_style() Methoden.
+    """
+
+    @staticmethod
+    def rgb_to_hex(color: tuple) -> str:
+        """Konvertiert RGB-Tuple (0-1 Range) zu Hex-String."""
+        r, g, b = [int(c * 255) for c in color]
+        return f'#{r:02x}{g:02x}{b:02x}'
+
+    @staticmethod
+    def hex_to_rgb(hex_color: str) -> tuple:
+        """Konvertiert Hex-String zu RGB-Tuple (0-255)."""
+        hex_color = hex_color.lstrip('#')
+        return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+
+    @staticmethod
+    def button_style(color: tuple, padding: str = '8px 12px') -> str:
+        """
+        Generiert Button-Stylesheet aus RGB-Tuple (0-1 Range).
+
+        Args:
+            color: RGB-Tuple im Bereich 0-1, z.B. (0.3, 0.6, 0.9)
+            padding: CSS padding, default '8px 12px'
+
+        Returns:
+            Stylesheet-String fuer QPushButton
+        """
+        r, g, b = [int(c * 255) for c in color]
+        r_h, g_h, b_h = [min(255, int(c * 255 * 1.2)) for c in color]
+        r_p, g_p, b_p = [int(c * 255 * 0.8) for c in color]
+
+        return f'''
+            QPushButton {{
+                background-color: rgb({r}, {g}, {b});
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: {padding};
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: rgb({r_h}, {g_h}, {b_h});
+            }}
+            QPushButton:pressed {{
+                background-color: rgb({r_p}, {g_p}, {b_p});
+            }}
+            QPushButton:disabled {{
+                background-color: rgb(80, 80, 80);
+                color: rgb(120, 120, 120);
+            }}
+        '''
+
+    @staticmethod
+    def button_style_hex(hex_color: str, padding: str = '8px 12px') -> str:
+        """
+        Generiert Button-Stylesheet aus Hex-Farbe.
+
+        Args:
+            hex_color: Hex-Farbe, z.B. '#4da8da'
+            padding: CSS padding, default '8px 12px'
+
+        Returns:
+            Stylesheet-String fuer QPushButton
+        """
+        r, g, b = StyleFactory.hex_to_rgb(hex_color)
+        r_h, g_h, b_h = [min(255, int(c * 1.2)) for c in (r, g, b)]
+        r_p, g_p, b_p = [int(c * 0.8) for c in (r, g, b)]
+
+        return f'''
+            QPushButton {{
+                background-color: rgb({r}, {g}, {b});
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: {padding};
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: rgb({r_h}, {g_h}, {b_h});
+            }}
+            QPushButton:pressed {{
+                background-color: rgb({r_p}, {g_p}, {b_p});
+            }}
+            QPushButton:disabled {{
+                background-color: rgb(80, 80, 80);
+                color: rgb(120, 120, 120);
+            }}
+        '''
+
+    @staticmethod
+    def group_style(title_color: tuple = None, hex_color: str = None) -> str:
+        """
+        Generiert GroupBox-Stylesheet mit farbigem Titel.
+
+        Args:
+            title_color: RGB-Tuple (0-1 Range) fuer Titelfarbe
+            hex_color: Alternativ Hex-Farbe fuer Titel
+
+        Returns:
+            Stylesheet-String fuer QGroupBox
+        """
+        if hex_color:
+            color_str = hex_color
+        elif title_color:
+            r, g, b = [int(c * 255) for c in title_color]
+            color_str = f'rgb({r}, {g}, {b})'
+        else:
+            color_str = COLORS['accent']
+
+        return f'''
+            QGroupBox {{
+                background-color: rgb(51, 51, 51);
+                border: 1px solid rgb(68, 68, 68);
+                border-radius: 4px;
+                margin-top: 12px;
+                padding-top: 10px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+                color: {color_str};
+                font-weight: bold;
+            }}
+        '''
+
+    @staticmethod
+    def tab_style() -> str:
+        """Generiert Tab-Widget Stylesheet."""
+        return f'''
+            QTabWidget::pane {{
+                border: 1px solid #333;
+                background-color: #2a2a2a;
+            }}
+            QTabBar::tab {{
+                background: #333;
+                color: #aaa;
+                padding: 10px 20px;
+                margin-right: 2px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                font-weight: bold;
+            }}
+            QTabBar::tab:selected {{
+                background: {COLORS['accent']};
+                color: white;
+            }}
+            QTabBar::tab:hover:!selected {{
+                background: #444;
+            }}
+            QTabBar::tab:disabled {{
+                background: #222;
+                color: #555;
+            }}
+        '''
+
+    @staticmethod
+    def spinbox_style() -> str:
+        """Generiert SpinBox-Stylesheet."""
+        return f'''
+            QSpinBox, QDoubleSpinBox {{
+                background-color: #3a3a3a;
+                border: 1px solid #555;
+                border-radius: 3px;
+                padding: 3px;
+                color: white;
+            }}
+            QSpinBox:focus, QDoubleSpinBox:focus {{
+                border-color: {COLORS['accent']};
+            }}
+        '''
+
+    @staticmethod
+    def combobox_style() -> str:
+        """Generiert ComboBox-Stylesheet."""
+        return f'''
+            QComboBox {{
+                background-color: #3a3a3a;
+                border: 1px solid #555;
+                border-radius: 3px;
+                padding: 5px;
+                color: white;
+            }}
+            QComboBox:hover {{
+                border-color: {COLORS['accent']};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+            }}
+        '''
+
+    @staticmethod
+    def window_style() -> str:
+        """Generiert Basis-Fenster-Stylesheet."""
+        return '''
+            QMainWindow {
+                background-color: #262626;
+            }
+            QWidget {
+                color: white;
+            }
+            QLabel {
+                color: white;
+            }
+            QScrollArea {
+                background-color: #2e2e2e;
+            }
+        '''
+
+
+# Shortcut-Funktionen fuer einfacheren Zugriff
+def button_style(color: tuple, padding: str = '8px 12px') -> str:
+    """Shortcut fuer StyleFactory.button_style()"""
+    return StyleFactory.button_style(color, padding)
+
+
+def button_style_hex(hex_color: str, padding: str = '8px 12px') -> str:
+    """Shortcut fuer StyleFactory.button_style_hex()"""
+    return StyleFactory.button_style_hex(hex_color, padding)
+
+
+def group_style(title_color: tuple = None, hex_color: str = None) -> str:
+    """Shortcut fuer StyleFactory.group_style()"""
+    return StyleFactory.group_style(title_color, hex_color)

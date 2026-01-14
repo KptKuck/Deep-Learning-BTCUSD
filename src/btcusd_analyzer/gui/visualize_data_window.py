@@ -19,6 +19,8 @@ import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
+from .styles import StyleFactory
+
 
 class VisualizeDataWindow(QMainWindow):
     """
@@ -351,40 +353,11 @@ class VisualizeDataWindow(QMainWindow):
 
     def _group_style(self, color: str) -> str:
         """Generiert GroupBox-Style."""
-        return f'''
-            QGroupBox {{
-                color: {color};
-                border: 1px solid #333333;
-                border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 10px;
-                background-color: #333333;
-            }}
-            QGroupBox::title {{
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-            }}
-        '''
+        return StyleFactory.group_style(hex_color=color)
 
     def _button_style_hex(self, color: str) -> str:
         """Generiert Button-Style aus Hex-Farbe."""
-        return f'''
-            QPushButton {{
-                background-color: {color};
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 5px 10px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {color}cc;
-            }}
-            QPushButton:pressed {{
-                background-color: {color}99;
-            }}
-        '''
+        return StyleFactory.button_style_hex(color, padding='5px 10px')
 
     # === Navigation ===
 
@@ -585,14 +558,4 @@ class VisualizeDataWindow(QMainWindow):
 
     def _get_stylesheet(self) -> str:
         """Gibt das Fenster-Stylesheet zurueck."""
-        return '''
-            QMainWindow {
-                background-color: #262626;
-            }
-            QWidget {
-                color: white;
-            }
-            QScrollArea {
-                background-color: #2e2e2e;
-            }
-        '''
+        return StyleFactory.window_style()

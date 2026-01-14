@@ -22,7 +22,7 @@ from PyQt6.QtGui import QFont
 import pandas as pd
 import numpy as np
 
-from .styles import get_stylesheet, COLORS
+from .styles import get_stylesheet, COLORS, StyleFactory
 
 
 class BacktestWindow(QMainWindow):
@@ -452,49 +452,11 @@ class BacktestWindow(QMainWindow):
 
     def _group_style(self, color: tuple) -> str:
         """Generiert GroupBox-Style mit farbigem Titel."""
-        r, g, b = [int(c * 255) for c in color]
-        return f"""
-            QGroupBox {{
-                background-color: rgb(51, 51, 51);
-                border: 1px solid rgb(68, 68, 68);
-                border-radius: 4px;
-                margin-top: 12px;
-                padding-top: 10px;
-            }}
-            QGroupBox::title {{
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-                color: rgb({r}, {g}, {b});
-                font-weight: bold;
-            }}
-        """
+        return StyleFactory.group_style(title_color=color)
 
     def _button_style(self, color: tuple) -> str:
         """Generiert Button-Style aus RGB-Tuple (0-1 Range)."""
-        r, g, b = [int(c * 255) for c in color]
-        r_h, g_h, b_h = [min(255, int(c * 255 * 1.2)) for c in color]
-        r_p, g_p, b_p = [int(c * 255 * 0.8) for c in color]
-        return f"""
-            QPushButton {{
-                background-color: rgb({r}, {g}, {b});
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 12px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: rgb({r_h}, {g_h}, {b_h});
-            }}
-            QPushButton:pressed {{
-                background-color: rgb({r_p}, {g_p}, {b_p});
-            }}
-            QPushButton:disabled {{
-                background-color: rgb(80, 80, 80);
-                color: rgb(150, 150, 150);
-            }}
-        """
+        return StyleFactory.button_style(color)
 
     def set_data(self, data: pd.DataFrame, signals: pd.Series = None,
                  model=None, model_info: Dict = None):
