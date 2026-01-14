@@ -97,6 +97,9 @@ class BacktestWindow(QMainWindow):
         # DEBUG-Modus
         self.debug_mode = False
 
+        # Signal-Invertierung
+        self.invert_signals = False
+
         self._setup_ui()
         self.setStyleSheet(get_stylesheet())
 
@@ -230,6 +233,13 @@ class BacktestWindow(QMainWindow):
         self.debug_check.setStyleSheet("color: rgb(255, 200, 100);")
         self.debug_check.toggled.connect(self._toggle_debug)
         speed_layout.addWidget(self.debug_check)
+
+        # Signal-Invertierung
+        self.invert_check = QCheckBox("Signale invertieren (BUY<->SELL)")
+        self.invert_check.setStyleSheet("color: rgb(255, 128, 255);")
+        self.invert_check.setToolTip("Tauscht BUY und SELL Signale")
+        self.invert_check.toggled.connect(self._toggle_invert)
+        speed_layout.addWidget(self.invert_check)
 
         # Aktuelle Geschwindigkeit
         speed_info = QHBoxLayout()
@@ -863,6 +873,14 @@ class BacktestWindow(QMainWindow):
         # Naechster Schritt
         self.current_index += 1
 
+    def _invert_signal(self, signal: int) -> int:
+        """Invertiert ein Signal (BUY<->SELL), HOLD bleibt unveraendert."""
+        if signal == 1:  # BUY -> SELL
+            return 2
+        elif signal == 2:  # SELL -> BUY
+            return 1
+        return signal  # HOLD bleibt 0
+
     def _get_signal(self, idx: int) -> int:
         """Ermittelt das Signal fuer den aktuellen Index.
 
@@ -874,18 +892,20 @@ class BacktestWindow(QMainWindow):
         Bei 2-Klassen-Modellen: Modell gibt 0=BUY, 1=SELL zurueck
         Bei 3-Klassen-Modellen: Modell gibt 0=HOLD, 1=BUY, 2=SELL zurueck
         """
+        signal = 0  # Default: HOLD
+
         # Wenn Signale vorhanden, diese verwenden
         if self.signals is not None and idx < len(self.signals):
             sig = self.signals.iloc[idx]
             if sig == 'BUY' or sig == 1:
-                return 1
+                signal = 1
             elif sig == 'SELL' or sig == 2:
-                return 2
+                signal = 2
             else:
-                return 0
+                signal = 0
 
         # Modell-Vorhersage wenn verfuegbar
-        if self.model is not None and self.prepared_sequences is not None:
+        elif self.model is not None and self.prepared_sequences is not None:
             try:
                 import torch
                 # Pruefe ob Index im Bereich der vorbereiteten Sequenzen liegt
@@ -912,13 +932,6 @@ class BacktestWindow(QMainWindow):
                         else:
                             # 3-Klassen: 0=HOLD, 1=BUY, 2=SELL (passt bereits)
                             signal = raw_signal
-
-                        # Nur alle 100 Schritte loggen um Log nicht zu ueberflueten
-                        if self.debug_mode and idx % 100 == 0:
-                            signal_names = {0: 'HOLD', 1: 'BUY', 2: 'SELL'}
-                            self._debug(f"Idx {idx}: seq_idx={seq_idx}, raw={raw_signal}, "
-                                       f"num_classes={num_classes}, signal={signal_names.get(signal, signal)}")
-                        return signal
                 else:
                     if self.debug_mode and idx % 100 == 0:
                         self._debug(f"Idx {idx}: seq_idx={seq_idx} ausserhalb Bereich [0, {len(self.prepared_sequences)})")
@@ -926,7 +939,17 @@ class BacktestWindow(QMainWindow):
                 if self.debug_mode:
                     self._debug(f"Idx {idx}: Modell-Fehler: {e}")
 
-        return 0  # HOLD als Default
+        # Signal-Invertierung wenn aktiviert
+        if self.invert_signals and signal != 0:
+            signal = self._invert_signal(signal)
+
+        # Debug-Logging
+        if self.debug_mode and idx % 100 == 0:
+            signal_names = {0: 'HOLD', 1: 'BUY', 2: 'SELL'}
+            invert_str = " (invertiert)" if self.invert_signals else ""
+            self._debug(f"Idx {idx}: signal={signal_names.get(signal, signal)}{invert_str}")
+
+        return signal
 
     def _process_signal(self, signal: int, price: float, idx: int):
         """Verarbeitet ein Trading-Signal."""
@@ -1296,6 +1319,14 @@ class BacktestWindow(QMainWindow):
             self._debug_dump_state()
         else:
             self._log("DEBUG-Modus deaktiviert", 'INFO')
+
+    def _toggle_invert(self, checked: bool):
+        """Schaltet die Signal-Invertierung um."""
+        self.invert_signals = checked
+        if checked:
+            self._log("Signal-Invertierung aktiviert (BUY<->SELL)", 'INFO')
+        else:
+            self._log("Signal-Invertierung deaktiviert", 'INFO')
 
     def _debug_dump_state(self):
         """Gibt den aktuellen Zustand im DEBUG-Modus aus."""
