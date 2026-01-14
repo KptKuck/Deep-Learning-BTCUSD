@@ -488,20 +488,31 @@ class BacktestWindow(QMainWindow):
         try:
             import torch
             from ..data.feature_processor import FeatureProcessor
+            from ..training.normalizer import ZScoreNormalizer
 
-            # Features berechnen (Standard-Features)
-            features = ['Open', 'High', 'Low', 'Close', 'PriceChange', 'PriceChangePct']
+            # Features aus model_info holen (gleiche wie beim Training)
+            features = self.model_info.get('features', ['Open', 'High', 'Low', 'Close', 'PriceChange', 'PriceChangePct'])
+            self._log(f"Features aus Training: {features}")
+
+            # Features berechnen
             processor = FeatureProcessor(features=features)
             processed = processor.process(self.data)
 
-            # Feature-Matrix
+            # Feature-Matrix (nur trainierte Features)
             feature_cols = [f for f in features if f in processed.columns]
             if not feature_cols:
+                # Fallback auf OHLC
                 feature_cols = ['Open', 'High', 'Low', 'Close']
+                self._log(f"Fallback auf OHLC-Features", 'WARNING')
+
             feature_data = processed[feature_cols].values.astype(np.float32)
 
             # NaN behandeln
             feature_data = np.nan_to_num(feature_data, nan=0.0)
+
+            # Normalisierung (wie beim Training)
+            normalizer = ZScoreNormalizer()
+            feature_data = normalizer.fit_transform(feature_data)
 
             # Sequenzen erstellen
             sequences = []
@@ -512,12 +523,14 @@ class BacktestWindow(QMainWindow):
             if sequences:
                 self.prepared_sequences = np.array(sequences)
                 self.sequence_offset = lookback
-                self._log(f"Sequenzen vorbereitet: {len(sequences)}")
+                self._log(f"Sequenzen vorbereitet: {len(sequences)} ({len(feature_cols)} Features)")
             else:
                 self._log("Keine Sequenzen generiert", 'WARNING')
 
         except Exception as e:
+            import traceback
             self._log(f"Sequenz-Vorbereitung fehlgeschlagen: {e}", 'ERROR')
+            self._log(traceback.format_exc(), 'ERROR')
 
     def _start_backtest(self):
         """Startet den Backtest."""

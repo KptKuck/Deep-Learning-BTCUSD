@@ -994,10 +994,23 @@ class TrainingWindow(QMainWindow):
                 save_path.mkdir(parents=True, exist_ok=True)
                 model_name = self.model.name.lower().replace(' ', '_')
                 final_path = save_path / f'{model_name}_final_acc{best_val_acc:.1f}.pt'
-                self.model.save(final_path, metrics={
-                    'best_accuracy': best_val_acc,
-                    'epochs_trained': epoch
-                })
+
+                # model_info fuer Backtester und spaeteres Laden
+                model_info = {
+                    'model_type': model_name,
+                    'input_size': self.model.input_size if hasattr(self.model, 'input_size') else None,
+                    'hidden_size': self.hidden_size_spin.value(),
+                    'num_layers': self.num_layers_spin.value(),
+                    'num_classes': self.training_info.get('num_classes', 3) if self.training_info else 3,
+                    'lookback_size': self.training_info.get('params', {}).get('lookback', 100) if self.training_info else 100,
+                    'lookforward_size': self.training_info.get('params', {}).get('lookforward', 10) if self.training_info else 10,
+                    'features': self.training_info.get('features', []) if self.training_info else [],
+                }
+
+                self.model.save(final_path,
+                    metrics={'best_accuracy': best_val_acc, 'epochs_trained': epoch},
+                    model_info=model_info
+                )
                 self._log(f"Modell gespeichert: {final_path}")
 
             # Training beendet
