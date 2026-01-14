@@ -15,15 +15,14 @@
 | Config.load() implementiert | Erledigt |
 | GUI TODOs (main_window.py) implementiert | Erledigt |
 | GUI TODOs (backtest_window.py) implementiert | Erledigt |
-| Test-Suite Grundstruktur erstellt | Erledigt |
+| ~~Test-Suite Grundstruktur erstellt~~ | Entfernt |
 | Widget-Extraktion (gui/widgets/) | Erledigt |
 | Custom Exceptions (core/exceptions.py) | Erledigt |
 | Input-Validierung (CSVReader, FeatureProcessor) | Erledigt |
 
 **Naechste Schritte:**
 - GUI-Refactoring (grosse Dateien weiter aufteilen)
-- Weitere Tests schreiben
-- trading_window.py TODOs vervollstaendigen
+- Alle TODOs im Code sind erledigt
 
 ---
 
