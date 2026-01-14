@@ -2083,7 +2083,12 @@ class TradeStatisticsDialog(QDialog):
                 return dt
             # Versuche DateTime-Spalte
             if 'DateTime' in self.data.columns:
-                return self.data['DateTime'].iloc[idx]
+                dt_val = self.data['DateTime'].iloc[idx]
+                # Falls String, in Timestamp konvertieren
+                if isinstance(dt_val, str):
+                    return pd.to_datetime(dt_val)
+                if hasattr(dt_val, 'strftime'):
+                    return dt_val
         except:
             pass
         return None
