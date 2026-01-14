@@ -56,7 +56,8 @@ class SequenceGenerator:
     def generate(
         self,
         features: np.ndarray,
-        labels: np.ndarray
+        labels: np.ndarray,
+        ignore_label: int = -1
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Generiert Sequenzen aus Feature-Matrix und Labels.
@@ -64,6 +65,7 @@ class SequenceGenerator:
         Args:
             features: Feature-Matrix [n_samples, n_features]
             labels: Label-Array [n_samples]
+            ignore_label: Label-Wert der ignoriert werden soll (default: -1)
 
         Returns:
             Tuple aus (X, y) Arrays
@@ -81,11 +83,22 @@ class SequenceGenerator:
         self.logger.debug(f'Generiere {n_sequences} Sequenzen '
                          f'(Lookback: {self.lookback}, Lookforward: {self.lookforward})')
 
-        # Arrays vorbereiten
-        X = np.zeros((n_sequences, self.lookback, n_features), dtype=np.float32)
-        y = np.zeros(n_sequences, dtype=np.int64)
+        # Temporaere Listen fuer Filterung
+        X_list = []
+        y_list = []
 
         for i in range(n_sequences):
+            # Label-Index berechnen
+            label_idx = i + self.lookback - 1
+            if label_idx >= len(labels):
+                label_idx = len(labels) - 1
+
+            current_label = labels[label_idx]
+
+            # Samples mit ignore_label ueberspringen
+            if current_label == ignore_label:
+                continue
+
             # Input-Sequenz (lookback Zeitschritte)
             seq = features[i:i + self.lookback].copy()
 
@@ -93,16 +106,18 @@ class SequenceGenerator:
             if self.normalize and self.normalizer:
                 seq = self.normalizer.fit_transform(seq)
 
-            X[i] = seq
+            X_list.append(seq)
+            y_list.append(current_label)
 
-            # Label (am Ende des lookforward-Fensters)
-            label_idx = i + self.lookback + self.lookforward - 1
-            if label_idx < len(labels):
-                y[i] = labels[i + self.lookback - 1]  # Label am letzten lookback Punkt
-            else:
-                y[i] = labels[-1]
+        if len(X_list) == 0:
+            self.logger.warning('Keine gueltigen Sequenzen generiert (alle Labels ignoriert)')
+            return np.array([]), np.array([])
 
-        self.logger.success(f'{n_sequences} Sequenzen generiert')
+        X = np.array(X_list, dtype=np.float32)
+        y = np.array(y_list, dtype=np.int64)
+
+        self.logger.success(f'{len(X)} Sequenzen generiert '
+                           f'({n_sequences - len(X)} ignoriert)')
         return X, y
 
     def generate_single(
