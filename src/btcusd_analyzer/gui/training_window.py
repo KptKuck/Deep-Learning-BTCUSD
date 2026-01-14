@@ -975,16 +975,18 @@ class TrainingWindow(QMainWindow):
                 self._on_epoch_completed(epoch, avg_train_loss, train_acc, avg_val_loss, val_acc)
                 QApplication.processEvents()
 
+                # Beste Accuracy tracken (immer, nicht nur bei Early Stopping)
+                if val_acc > best_val_acc:
+                    best_val_acc = val_acc
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+
                 # Early Stopping Check
                 if config.get('early_stopping', True):
-                    if val_acc > best_val_acc:
-                        best_val_acc = val_acc
-                        patience_counter = 0
-                    else:
-                        patience_counter += 1
-                        if patience_counter >= patience:
-                            self._log(f"Early Stopping nach {epoch} Epochen")
-                            break
+                    if patience_counter >= patience:
+                        self._log(f"Early Stopping nach {epoch} Epochen")
+                        break
 
             # Modell speichern
             if config.get('save_best', True):
