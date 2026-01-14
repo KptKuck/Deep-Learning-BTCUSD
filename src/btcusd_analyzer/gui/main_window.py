@@ -1410,8 +1410,15 @@ class MainWindow(QMainWindow):
         """Laedt eine komplette Session (Daten + Modell)."""
         from PyQt6.QtWidgets import QFileDialog
         from .session_loader_dialog import SessionLoaderDialog
+        from ..core.session_manager import SessionManager
 
-        dialog = SessionLoaderDialog(self.config.paths.log_dir, parent=self)
+        # Debug: Sessions auflisten
+        log_dir = self.config.paths.log_dir
+        self._log(f"Suche Sessions in: {log_dir}", 'DEBUG')
+        sessions = SessionManager.list_sessions(log_dir)
+        self._log(f"Gefundene Sessions: {len(sessions)}", 'DEBUG')
+
+        dialog = SessionLoaderDialog(log_dir, parent=self)
         if dialog.exec():
             session_dir = dialog.get_selected_session()
             if session_dir:
