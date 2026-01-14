@@ -864,7 +864,16 @@ class BacktestWindow(QMainWindow):
         self.current_index += 1
 
     def _get_signal(self, idx: int) -> int:
-        """Ermittelt das Signal fuer den aktuellen Index."""
+        """Ermittelt das Signal fuer den aktuellen Index.
+
+        Rueckgabe-Mapping (intern):
+            0 = HOLD (kein Trade)
+            1 = BUY (Long oeffnen)
+            2 = SELL (Short oeffnen)
+
+        Bei 2-Klassen-Modellen: Modell gibt 0=BUY, 1=SELL zurueck
+        Bei 3-Klassen-Modellen: Modell gibt 0=HOLD, 1=BUY, 2=SELL zurueck
+        """
         # Wenn Signale vorhanden, diese verwenden
         if self.signals is not None and idx < len(self.signals):
             sig = self.signals.iloc[idx]
@@ -890,10 +899,25 @@ class BacktestWindow(QMainWindow):
                     self.model.eval()
                     with torch.no_grad():
                         prediction = self.model.predict(sequence)
-                        signal = int(prediction[0])
+                        raw_signal = int(prediction[0])
+
+                        # Signal-Mapping basierend auf num_classes
+                        num_classes = 3
+                        if self.model_info:
+                            num_classes = self.model_info.get('num_classes', 3)
+
+                        if num_classes == 2:
+                            # 2-Klassen: 0=BUY, 1=SELL -> intern 1=BUY, 2=SELL
+                            signal = raw_signal + 1  # 0->1 (BUY), 1->2 (SELL)
+                        else:
+                            # 3-Klassen: 0=HOLD, 1=BUY, 2=SELL (passt bereits)
+                            signal = raw_signal
+
                         # Nur alle 100 Schritte loggen um Log nicht zu ueberflueten
                         if self.debug_mode and idx % 100 == 0:
-                            self._debug(f"Idx {idx}: seq_idx={seq_idx}, prediction={signal}")
+                            signal_names = {0: 'HOLD', 1: 'BUY', 2: 'SELL'}
+                            self._debug(f"Idx {idx}: seq_idx={seq_idx}, raw={raw_signal}, "
+                                       f"num_classes={num_classes}, signal={signal_names.get(signal, signal)}")
                         return signal
                 else:
                     if self.debug_mode and idx % 100 == 0:
