@@ -1720,12 +1720,75 @@ class PrepareDataWindow(QMainWindow):
             self._log(f"Backtest-Daten reserviert: {len(backtest_data)} Datenpunkte "
                       f"(nicht im Training verwendet)", 'SUCCESS')
 
+            # Session-Daten speichern
+            self._save_session_data(X, Y, feature_columns, backtest_data, training_info)
+
             self.close()
 
         except Exception as e:
             self.samples_status.setText(f'Fehler: {e}')
             self.samples_status.setStyleSheet('color: #cc4d33;')
             self._log(f'Fehler bei Datengenerierung: {e}', 'ERROR')
+
+    # =========================================================================
+    # Session-Speicherung
+    # =========================================================================
+
+    def _save_session_data(self, X, Y, feature_columns, backtest_data, training_info):
+        """Speichert alle Session-Daten fuer spaetere Reproduzierbarkeit."""
+        try:
+            from ..core.logger import get_logger
+            from ..core.session_manager import SessionManager
+
+            logger = get_logger()
+            session_dir = logger.get_session_dir()
+
+            if session_dir is None:
+                self._log("Session-Ordner nicht verfuegbar", 'WARNING')
+                return
+
+            manager = SessionManager(session_dir)
+
+            # 1. Trainingsdaten speichern
+            manager.save_training_data(
+                sequences=X.numpy() if hasattr(X, 'numpy') else X,
+                labels=Y.numpy() if hasattr(Y, 'numpy') else Y,
+                features=feature_columns,
+                params=self.params.copy()
+            )
+            self._log(f"Trainingsdaten gespeichert: {session_dir.name}/training_data.npz")
+
+            # 2. Backtest-Daten speichern
+            manager.save_backtest_data(backtest_data)
+            self._log(f"Backtest-Daten gespeichert: {session_dir.name}/backtest_data.csv")
+
+            # 3. Session-Konfiguration speichern
+            config = {
+                'source_file': str(self.data_file) if hasattr(self, 'data_file') else '-',
+                'features': feature_columns,
+                'params': self.params.copy(),
+                'peak_detection': {
+                    'method': getattr(self, '_current_peak_method', 'unknown'),
+                    'distance': self.detected_peaks.get('distance', 0) if self.detected_peaks else 0,
+                    'prominence': float(self.detected_peaks.get('prominence', 0)) if self.detected_peaks else 0,
+                    'num_buy_peaks': len(self.detected_peaks.get('buy_indices', [])) if self.detected_peaks else 0,
+                    'num_sell_peaks': len(self.detected_peaks.get('sell_indices', [])) if self.detected_peaks else 0,
+                },
+                'training_info': {
+                    'num_classes': training_info.get('num_classes', 3),
+                    'actual_samples': training_info.get('actual_samples', 0),
+                    'lookahead_bars': training_info.get('lookahead_bars', 0),
+                    'train_split_pct': training_info.get('train_split_pct', 80),
+                },
+                'backtest_info': {
+                    'num_points': len(backtest_data),
+                }
+            }
+            manager.save_config(config)
+            self._log(f"Session-Config gespeichert: {session_dir.name}/session_config.json")
+
+        except Exception as e:
+            self._log(f"Session-Speicherung fehlgeschlagen: {e}", 'ERROR')
 
     # =========================================================================
     # Hilfsmethoden

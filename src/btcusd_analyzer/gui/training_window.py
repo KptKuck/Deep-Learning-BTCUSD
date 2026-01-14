@@ -1077,6 +1077,9 @@ class TrainingWindow(QMainWindow):
                     json.dump(model_info, f, indent=2, ensure_ascii=False)
                 self._log(f"Trainings-Info: {json_path.name}")
 
+                # Modell in Session-Ordner kopieren
+                self._save_model_to_session(final_path)
+
             # Training beendet
             self._on_training_finished({
                 'best_accuracy': best_val_acc,
@@ -1174,6 +1177,26 @@ class TrainingWindow(QMainWindow):
             self, "Training abgeschlossen",
             f"Training erfolgreich!\n\nBeste Accuracy: {best_acc:.1f}%\n\nModell: {model_path}"
         )
+
+    def _save_model_to_session(self, model_path: Path):
+        """Kopiert das Modell in den Session-Ordner."""
+        try:
+            from ..core.logger import get_logger
+            from ..core.session_manager import SessionManager
+
+            logger = get_logger()
+            session_dir = logger.get_session_dir()
+
+            if session_dir is None:
+                self._log("Session-Ordner nicht verfuegbar", level='WARNING')
+                return
+
+            manager = SessionManager(session_dir)
+            dest_path = manager.save_model(model_path)
+            self._log(f"Modell in Session kopiert: {dest_path.name}")
+
+        except Exception as e:
+            self._log(f"Modell-Kopie in Session fehlgeschlagen: {e}", level='WARNING')
 
     def _on_training_error(self, error: str):
         """Callback bei Fehler."""

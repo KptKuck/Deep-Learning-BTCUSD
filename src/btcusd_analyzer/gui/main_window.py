@@ -644,14 +644,26 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(btn_row)
 
-        # Backtester Button
+        # Button-Reihe: Backtester | Session laden
+        btn_row2 = QHBoxLayout()
+
         self.backtest_btn = QPushButton('Backtester')
         self.backtest_btn.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
         self.backtest_btn.setFixedHeight(26)
         self.backtest_btn.setStyleSheet(self._button_style((0.7, 0.4, 0.8)))
         self.backtest_btn.setEnabled(False)
         self.backtest_btn.clicked.connect(self._open_backtester)
-        layout.addWidget(self.backtest_btn)
+        btn_row2.addWidget(self.backtest_btn)
+
+        self.load_session_btn = QPushButton('Session')
+        self.load_session_btn.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
+        self.load_session_btn.setFixedHeight(26)
+        self.load_session_btn.setStyleSheet(self._button_style((0.3, 0.6, 0.8)))
+        self.load_session_btn.setToolTip('Session-Ordner laden (Daten + Modell)')
+        self.load_session_btn.clicked.connect(self._load_session)
+        btn_row2.addWidget(self.load_session_btn)
+
+        layout.addLayout(btn_row2)
 
         # Modell Info Labels
         self.model_name_label = QLabel('Modell: -')
@@ -1393,6 +1405,80 @@ class MainWindow(QMainWindow):
                 self._log(f'Fehler: {e}', 'ERROR')
         else:
             self._log('Kein vorheriges Modell gefunden', 'WARNING')
+
+    def _load_session(self):
+        """Laedt eine komplette Session (Daten + Modell)."""
+        from PyQt6.QtWidgets import QFileDialog
+        from .session_loader_dialog import SessionLoaderDialog
+
+        dialog = SessionLoaderDialog(self.config.paths.log_dir, parent=self)
+        if dialog.exec():
+            session_dir = dialog.get_selected_session()
+            if session_dir:
+                self._load_session_from_dir(session_dir)
+
+    def _load_session_from_dir(self, session_dir):
+        """Laedt Session-Daten aus einem Ordner."""
+        from pathlib import Path
+        from ..core.session_manager import SessionManager
+
+        try:
+            session_dir = Path(session_dir)
+            manager = SessionManager(session_dir)
+
+            self._log(f"Lade Session: {session_dir.name}", 'INFO')
+
+            # 1. Backtest-Daten laden
+            backtest_data = manager.load_backtest_data()
+            if backtest_data is not None:
+                self.backtest_data = {'data': backtest_data}
+                self._log(f"Backtest-Daten geladen: {len(backtest_data)} Punkte", 'SUCCESS')
+
+            # 2. Modell laden
+            model_path = manager.get_model_path()
+            if model_path:
+                import torch
+                from ..models import ModelFactory
+
+                checkpoint = torch.load(model_path, map_location='cpu', weights_only=False)
+
+                # Model-Info extrahieren
+                model_info = checkpoint.get('model_info', {})
+                self.model_info = model_info
+
+                # Modell rekonstruieren
+                model_name = model_info.get('model_type', 'bilstm')
+                self.model = ModelFactory.create(
+                    model_name,
+                    input_size=model_info.get('input_size', 6),
+                    hidden_size=model_info.get('hidden_size', 128),
+                    num_layers=model_info.get('num_layers', 2),
+                    num_classes=model_info.get('num_classes', 3),
+                    dropout=model_info.get('dropout', 0.2)
+                )
+                self.model.load_state_dict(checkpoint['model_state_dict'])
+                self.model_path = model_path
+
+                self._log(f"Modell geladen: {model_path.name}", 'SUCCESS')
+                self._log(f"  Accuracy: {model_info.get('best_accuracy', 0):.1f}%", 'INFO')
+
+                # UI aktualisieren
+                self.model_name_label.setText(f'Modell: {model_path.name}')
+                self.model_folder_label.setText(f'Session: {session_dir.name}')
+                self.backtest_btn.setEnabled(True)
+                self.predict_btn.setEnabled(True)
+
+            # 3. Config laden
+            config = manager.load_config()
+            if config:
+                self._log(f"Config: {len(config.get('features', []))} Features", 'DEBUG')
+
+            self._log(f"Session geladen: {session_dir.name}", 'SUCCESS')
+
+        except Exception as e:
+            import traceback
+            self._log(f"Session-Ladefehler: {e}", 'ERROR')
+            self._log(traceback.format_exc(), 'ERROR')
 
     def _make_prediction(self):
         """Fuehrt eine Vorhersage durch."""
