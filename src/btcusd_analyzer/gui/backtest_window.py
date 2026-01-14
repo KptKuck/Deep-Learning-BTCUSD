@@ -81,6 +81,10 @@ class BacktestWindow(QMainWindow):
         self.steps_per_second = 10
         self.turbo_mode = False
 
+        # Vorbereitete Sequenzen fuer Modell-Vorhersage
+        self.prepared_sequences = None
+        self.sequence_offset = 0  # Index-Offset zwischen Daten und Sequenzen
+
         # Timer
         self.backtest_timer: Optional[QTimer] = None
 
@@ -633,7 +637,25 @@ class BacktestWindow(QMainWindow):
             else:
                 return 0
 
-        # TODO: Modell-Vorhersage implementieren
+        # Modell-Vorhersage wenn verfuegbar
+        if self.model is not None and self.prepared_sequences is not None:
+            try:
+                import torch
+                # Pruefe ob Index im Bereich der vorbereiteten Sequenzen liegt
+                seq_idx = idx - self.sequence_offset
+                if 0 <= seq_idx < len(self.prepared_sequences):
+                    sequence = self.prepared_sequences[seq_idx]
+                    if not isinstance(sequence, torch.Tensor):
+                        sequence = torch.FloatTensor(sequence)
+                    sequence = sequence.unsqueeze(0)  # Batch-Dimension hinzufuegen
+
+                    self.model.eval()
+                    with torch.no_grad():
+                        prediction = self.model.predict(sequence)
+                        return int(prediction[0])
+            except Exception:
+                pass
+
         return 0  # HOLD als Default
 
     def _process_signal(self, signal: int, price: float, idx: int):

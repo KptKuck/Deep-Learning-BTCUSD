@@ -213,7 +213,84 @@ class Config:
 
     @classmethod
     def load(cls, filepath: Path) -> 'Config':
-        """Laedt Konfiguration aus Datei (vereinfacht)."""
+        """
+        Laedt Konfiguration aus Datei.
+
+        Unterstuetzte Formate:
+        - .txt: Einfaches Key-Value Format (von save() erzeugt)
+
+        Args:
+            filepath: Pfad zur Konfigurationsdatei
+
+        Returns:
+            Config-Objekt mit geladenen Werten
+        """
         config = cls()
-        # TODO: Implementiere vollstaendiges Laden
+
+        if not filepath.exists():
+            raise FileNotFoundError(f"Konfigurationsdatei nicht gefunden: {filepath}")
+
+        with open(filepath, 'r', encoding='utf-8') as f:
+            current_section = None
+
+            for line in f:
+                line = line.strip()
+
+                # Kommentare und leere Zeilen ueberspringen
+                if not line or line.startswith('#'):
+                    continue
+
+                # Sektion erkennen
+                if line.startswith('##'):
+                    current_section = line[2:].strip().lower()
+                    continue
+
+                # Key-Value Paare parsen
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    key = key.strip()
+                    value = value.strip()
+
+                    # Werte in entsprechende Sektion eintragen
+                    if current_section == 'training':
+                        config._parse_training_value(key, value)
+                    elif current_section == 'backtest':
+                        config._parse_backtest_value(key, value)
+
         return config
+
+    def _parse_training_value(self, key: str, value: str) -> None:
+        """Parst und setzt Training-Konfigurationswerte."""
+        try:
+            if key == 'lookback':
+                self.training.lookback = int(value)
+            elif key == 'lookforward':
+                self.training.lookforward = int(value)
+            elif key == 'epochs':
+                self.training.epochs = int(value)
+            elif key == 'batch_size':
+                self.training.batch_size = int(value)
+            elif key == 'learning_rate':
+                self.training.learning_rate = float(value)
+            elif key == 'hidden_size':
+                self.training.hidden_size = int(value)
+            elif key == 'num_layers':
+                self.training.num_layers = int(value)
+            elif key == 'dropout':
+                self.training.dropout = float(value)
+            elif key == 'features':
+                self.training.features = [f.strip() for f in value.split(',')]
+        except ValueError:
+            pass  # Ungueltige Werte werden uebersprungen
+
+    def _parse_backtest_value(self, key: str, value: str) -> None:
+        """Parst und setzt Backtest-Konfigurationswerte."""
+        try:
+            if key == 'initial_capital':
+                self.backtest.initial_capital = float(value)
+            elif key == 'commission':
+                self.backtest.commission = float(value)
+            elif key == 'slippage':
+                self.backtest.slippage = float(value)
+        except ValueError:
+            pass  # Ungueltige Werte werden uebersprungen
