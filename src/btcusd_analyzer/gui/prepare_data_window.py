@@ -571,6 +571,7 @@ class PrepareDataWindow(QMainWindow):
             '3 Klassen (BUY / HOLD / SELL)',
             '2 Klassen (BUY / SELL)'
         ])
+        self.num_classes_combo.setCurrentIndex(1)  # 2 Klassen als Standard
         self.num_classes_combo.setToolTip(
             '3 Klassen: Peaks werden BUY/SELL, Rest wird HOLD\n'
             '2 Klassen: Nur BUY/SELL, kein HOLD'
