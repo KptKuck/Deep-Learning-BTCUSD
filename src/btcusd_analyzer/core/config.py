@@ -17,7 +17,7 @@ class PathConfig:
     base_dir: Path = field(default_factory=lambda: Path.cwd())
     data_dir: Path = field(default_factory=lambda: Path.cwd() / 'data')
     results_dir: Path = field(default_factory=lambda: Path.cwd() / 'results')
-    log_dir: Path = field(default_factory=lambda: Path.cwd() / 'logs')
+    log_dir: Path = field(default_factory=lambda: Path.cwd() / 'log')
     models_dir: Path = field(default_factory=lambda: Path.cwd() / 'models')
 
     def __post_init__(self):
@@ -177,7 +177,7 @@ class Config:
             base_dir=base,
             data_dir=base / 'data',
             results_dir=base / 'results',
-            log_dir=base / 'logs',
+            log_dir=base / 'log',
             models_dir=base / 'models'
         )
         self.training = TrainingConfig()
