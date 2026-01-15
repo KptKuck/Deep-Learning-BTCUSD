@@ -405,6 +405,11 @@ class WalkForwardEngine:
             model_info: Modell-Metadaten (features, lookback, etc.)
             config: Walk-Forward Konfiguration
         """
+        logger.debug("[WalkForward] === Engine Initialisierung ===")
+        logger.debug(f"[WalkForward] Daten: {len(data)} Zeilen, Spalten: {list(data.columns)}")
+        logger.debug(f"[WalkForward] Model-Info: {model_info}")
+        logger.debug(f"[WalkForward] Config: {config}")
+
         self.data = data.copy()
         self.model_info = model_info
         self.config = config
@@ -414,25 +419,34 @@ class WalkForwardEngine:
         self.lookback = model_info.get('lookback_size', 50)
         self.num_classes = model_info.get('num_classes', 3)
 
+        logger.debug(f"[WalkForward] Features: {self.features}")
+        logger.debug(f"[WalkForward] Lookback: {self.lookback}, Num Classes: {self.num_classes}")
+
         # Device
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        logger.debug(f"[WalkForward] Device: {self.device}")
 
         # Modell auf CPU kopieren (vermeidet CUDA-Threading-Probleme)
         # deepcopy erstellt eine unabhaengige Kopie des Modells
+        logger.debug("[WalkForward] Kopiere Modell mit deepcopy...")
         self.model = copy.deepcopy(model)
-        self.model.to('cpu')  # Sicherstellen dass Modell auf CPU ist
+        logger.debug("[WalkForward] Verschiebe Modell auf CPU...")
+        self.model.to('cpu')
+        logger.debug("[WalkForward] Modell erfolgreich auf CPU kopiert")
 
         # Abbruch-Flag
         self._cancel_requested = False
         self._lock = threading.Lock()
 
         # Processor und Generator
+        logger.debug(f"[WalkForward] Erstelle FeatureProcessor mit {len(self.features)} Features")
         self.processor = FeatureProcessor(features=self.features)
         self.seq_gen = SequenceGenerator(
             lookback=self.lookback,
             lookforward=0,
             normalize=True
         )
+        logger.debug("[WalkForward] === Engine Initialisierung abgeschlossen ===")
 
     def request_cancel(self):
         """Abbruch anfordern."""
@@ -455,15 +469,18 @@ class WalkForwardEngine:
         Returns:
             WalkForwardResult mit allen Ergebnissen
         """
+        logger.debug("[WalkForward] === run() gestartet ===")
         start_time = time.time()
         self._cancel_requested = False
 
         # Reproduzierbarkeit
         if self.config.random_seed is not None:
+            logger.debug(f"[WalkForward] Setze Random Seed: {self.config.random_seed}")
             torch.manual_seed(self.config.random_seed)
             np.random.seed(self.config.random_seed)
 
         # Splits generieren
+        logger.debug("[WalkForward] Generiere Splits...")
         splits = self.generate_splits()
         logger.info(f"[WalkForward] {len(splits)} Splits generiert")
 
@@ -474,6 +491,7 @@ class WalkForwardEngine:
         # Modus-spezifische Verarbeitung
         mode = self.config.mode
         logger.info(f"[WalkForward] Starte im Modus: {mode.value}")
+        logger.debug(f"[WalkForward] Model auf Device: {next(self.model.parameters()).device}")
 
         if mode == BacktestMode.INFERENCE_ONLY:
             max_workers = self._calculate_max_parallel()
@@ -597,28 +615,39 @@ class WalkForwardEngine:
         Batch-Verarbeitung, schnellster Modus.
         """
         logger.info(f"[WalkForward] Inference Only mit {max_workers} Workers")
+        logger.debug(f"[WalkForward] Device: {self.device}, CUDA verfuegbar: {torch.cuda.is_available()}")
 
         # CUDA synchronisieren falls GPU verwendet wird
         if torch.cuda.is_available():
+            logger.debug("[WalkForward] CUDA sync vor Model-Transfer...")
             torch.cuda.synchronize()
+            logger.debug("[WalkForward] CUDA sync abgeschlossen")
 
         # Modell auf GPU laden
+        logger.debug(f"[WalkForward] Verschiebe Model auf {self.device}...")
         self.model.to(self.device)
         self.model.eval()
+        logger.debug("[WalkForward] Model auf Device verschoben und in eval() Modus")
 
         # Nochmals synchronisieren nach Model-Transfer
         if torch.cuda.is_available():
+            logger.debug("[WalkForward] CUDA sync nach Model-Transfer...")
             torch.cuda.synchronize()
+            logger.debug("[WalkForward] CUDA sync abgeschlossen")
 
         results = []
         completed = 0
 
         # Sequenziell oder parallel
+        logger.debug(f"[WalkForward] Starte {len(splits)} Splits (sequenziell: {max_workers <= 1})")
         if max_workers <= 1:
             for i, split in enumerate(splits):
                 if self.is_cancelled():
+                    logger.debug("[WalkForward] Abbruch erkannt, stoppe Verarbeitung")
                     break
+                logger.debug(f"[WalkForward] === Starte Split {i} ===")
                 result = self._process_inference_split(i, split)
+                logger.debug(f"[WalkForward] Split {i} abgeschlossen: {result.num_trades} Trades")
                 results.append(result)
                 completed += 1
                 if callback:
@@ -650,44 +679,77 @@ class WalkForwardEngine:
 
     def _process_inference_split(self, split_idx: int, split_info: Tuple) -> SplitResult:
         """Verarbeitet einen Split im Inference-Only Modus."""
+        logger.debug(f"[Split {split_idx}] _process_inference_split gestartet")
         train_range, test_range = split_info
+        logger.debug(f"[Split {split_idx}] Train: {train_range}, Test: {test_range}")
 
         # Test-Daten extrahieren
+        logger.debug(f"[Split {split_idx}] Filtere Daten...")
         data = self._filter_date_range()
         test_data = data.iloc[test_range[0]:test_range[1]]
+        logger.debug(f"[Split {split_idx}] Test-Daten: {len(test_data)} Zeilen, Spalten: {list(test_data.columns)}")
 
         # Features berechnen
-        feature_df = self.processor.process(test_data)
+        logger.debug(f"[Split {split_idx}] Berechne Features...")
+        try:
+            feature_df = self.processor.process(test_data)
+            logger.debug(f"[Split {split_idx}] Features berechnet: {feature_df.shape}")
+        except Exception as e:
+            logger.error(f"[Split {split_idx}] Fehler bei Feature-Berechnung: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise
+
+        logger.debug(f"[Split {split_idx}] Extrahiere Feature-Matrix...")
         feature_matrix = self.processor.get_feature_matrix(feature_df)
+        logger.debug(f"[Split {split_idx}] Feature-Matrix: {feature_matrix.shape}")
 
         # Normalisierung
+        logger.debug(f"[Split {split_idx}] Normalisiere...")
         normalizer = ZScoreNormalizer()
         normalized = normalizer.fit_transform(feature_matrix)
+        logger.debug(f"[Split {split_idx}] Normalisiert: {normalized.shape}")
 
         # Sequenzen erstellen
+        logger.debug(f"[Split {split_idx}] Erstelle Sequenzen (Lookback: {self.lookback})...")
         sequences = []
         for i in range(self.lookback, len(normalized)):
             seq = normalized[i - self.lookback:i]
             sequences.append(seq)
 
         if len(sequences) == 0:
+            logger.warning(f"[Split {split_idx}] Keine Sequenzen - zu wenig Daten")
             return self._create_empty_split_result(split_idx, train_range, test_range)
 
         sequences = np.array(sequences, dtype=np.float32)
+        logger.debug(f"[Split {split_idx}] {len(sequences)} Sequenzen erstellt, Shape: {sequences.shape}")
 
         # Predictions
-        with torch.no_grad():
-            x = torch.FloatTensor(sequences).to(self.device)
-            logits = self.model(x)
-            probs = torch.softmax(logits, dim=1)
-            predictions = logits.argmax(dim=1).cpu().numpy()
-            confidences = probs.max(dim=1).values.cpu().numpy()
+        logger.debug(f"[Split {split_idx}] Starte Inference auf {self.device}...")
+        try:
+            with torch.no_grad():
+                x = torch.FloatTensor(sequences).to(self.device)
+                logger.debug(f"[Split {split_idx}] Tensor erstellt: {x.shape}, Device: {x.device}")
+                logits = self.model(x)
+                logger.debug(f"[Split {split_idx}] Logits: {logits.shape}")
+                probs = torch.softmax(logits, dim=1)
+                predictions = logits.argmax(dim=1).cpu().numpy()
+                confidences = probs.max(dim=1).values.cpu().numpy()
+                logger.debug(f"[Split {split_idx}] Predictions: {len(predictions)}, Unique: {np.unique(predictions)}")
+        except Exception as e:
+            logger.error(f"[Split {split_idx}] Fehler bei Inference: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            raise
 
         # Metriken berechnen
-        return self._calculate_split_metrics(
+        logger.debug(f"[Split {split_idx}] Berechne Metriken...")
+        result = self._calculate_split_metrics(
             split_idx, train_range, test_range,
             predictions, confidences, test_data
         )
+        logger.debug(f"[Split {split_idx}] Metriken berechnet: Return={result.total_return:.2%}, Trades={result.num_trades}")
+        return result
 
     # =========================================================================
     # Modus 2: INFERENCE_LIVE
@@ -1225,34 +1287,45 @@ class WalkForwardEngine:
         test_data: pd.DataFrame
     ) -> SplitResult:
         """Berechnet alle Metriken fuer einen Split."""
+        logger.debug(f"[Split {split_idx}] _calculate_split_metrics gestartet")
         from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
         # Labels aus Test-Daten generieren
+        logger.debug(f"[Split {split_idx}] Generiere Labels...")
         labeler = DailyExtremaLabeler(
             method=self.model_info.get('label_method', 'future_return')
         )
         true_labels = labeler.generate(test_data)
+        logger.debug(f"[Split {split_idx}] Labels generiert: {len(true_labels)}, Unique: {np.unique(true_labels)}")
 
         # Nur gueltige Predictions (nach Lookback)
         valid_start = self.lookback
         if valid_start >= len(true_labels):
+            logger.warning(f"[Split {split_idx}] Lookback ({valid_start}) >= Labels ({len(true_labels)})")
             return self._create_empty_split_result(split_idx, train_range, test_range)
 
         true_labels = true_labels[valid_start:valid_start + len(predictions)]
         if len(true_labels) != len(predictions):
             min_len = min(len(true_labels), len(predictions))
+            logger.debug(f"[Split {split_idx}] Anpassung: Labels {len(true_labels)} != Predictions {len(predictions)}, min={min_len}")
             true_labels = true_labels[:min_len]
             predictions = predictions[:min_len]
             confidences = confidences[:min_len]
 
+        logger.debug(f"[Split {split_idx}] Finale Groessen: Labels={len(true_labels)}, Predictions={len(predictions)}")
+
         # Klassifikations-Metriken
+        logger.debug(f"[Split {split_idx}] Berechne Klassifikations-Metriken...")
         accuracy = accuracy_score(true_labels, predictions)
         f1 = f1_score(true_labels, predictions, average='weighted', zero_division=0)
         precision = precision_score(true_labels, predictions, average='weighted', zero_division=0)
         recall = recall_score(true_labels, predictions, average='weighted', zero_division=0)
+        logger.debug(f"[Split {split_idx}] Accuracy={accuracy:.2%}, F1={f1:.3f}")
 
         # Trading-Simulation
+        logger.debug(f"[Split {split_idx}] Starte Trading-Simulation...")
         trading_result = self._simulate_trading(predictions, confidences, test_data, split_idx)
+        logger.debug(f"[Split {split_idx}] Trading-Simulation abgeschlossen: {trading_result['num_trades']} Trades")
 
         return SplitResult(
             split_index=split_idx,
@@ -1292,6 +1365,10 @@ class WalkForwardEngine:
         split_idx: int
     ) -> Dict:
         """Einfache Trading-Simulation ohne Backtrader."""
+        logger.debug(f"[Split {split_idx}] _simulate_simple gestartet")
+        logger.debug(f"[Split {split_idx}] Predictions: {len(predictions)}, Test-Daten: {len(test_data)}")
+        logger.debug(f"[Split {split_idx}] Num Classes: {self.num_classes}")
+
         # Signal-Mapping basierend auf num_classes:
         # 2 Klassen: 0=BUY, 1=SELL
         # 3 Klassen: 0=HOLD, 1=BUY, 2=SELL
@@ -1301,6 +1378,11 @@ class WalkForwardEngine:
         else:  # 3 Klassen
             BUY_SIGNAL = 1
             SELL_SIGNAL = 2
+        logger.debug(f"[Split {split_idx}] Signal-Mapping: BUY={BUY_SIGNAL}, SELL={SELL_SIGNAL}")
+
+        # Prediction-Verteilung loggen
+        unique, counts = np.unique(predictions, return_counts=True)
+        logger.debug(f"[Split {split_idx}] Prediction-Verteilung: {dict(zip(unique, counts))}")
 
         capital = self.config.initial_capital
         position = 0  # 0=flat, 1=long, -1=short
@@ -1314,8 +1396,10 @@ class WalkForwardEngine:
         # Offset fuer Lookback
         offset = self.lookback if len(predictions) < len(test_data) else 0
         prices = test_data['Close'].values[offset:offset + len(predictions)]
+        logger.debug(f"[Split {split_idx}] Offset: {offset}, Preise: {len(prices)}")
 
         if len(prices) != len(predictions):
+            logger.debug(f"[Split {split_idx}] Preis-Anpassung: {len(prices)} -> {len(predictions)}")
             prices = prices[:len(predictions)]
 
         trade_id = 0
@@ -1384,6 +1468,7 @@ class WalkForwardEngine:
         # Metriken berechnen
         total_return = (capital - self.config.initial_capital) / self.config.initial_capital
         num_trades = len(trades)
+        logger.debug(f"[Split {split_idx}] Simulation beendet: {num_trades} Trades")
 
         if len(returns) > 0:
             avg_return = np.mean(returns)
@@ -1393,10 +1478,12 @@ class WalkForwardEngine:
             wins = sum(r for r in returns if r > 0)
             losses = abs(sum(r for r in returns if r < 0))
             profit_factor = wins / losses if losses > 0 else float('inf')
+            logger.debug(f"[Split {split_idx}] Returns: {len(returns)}, Avg={avg_return:.4f}, Sharpe={sharpe_ratio:.3f}")
         else:
             sharpe_ratio = 0.0
             win_rate = 0.0
             profit_factor = 0.0
+            logger.debug(f"[Split {split_idx}] Keine Returns (keine abgeschlossenen Trades)")
 
         # Max Drawdown
         peak = equity_history[0]
@@ -1406,6 +1493,8 @@ class WalkForwardEngine:
                 peak = eq
             dd = (peak - eq) / peak if peak > 0 else 0
             max_dd = max(max_dd, dd)
+
+        logger.debug(f"[Split {split_idx}] Ergebnis: Return={total_return:.2%}, DD={max_dd:.2%}, Trades={num_trades}")
 
         return {
             'total_return': total_return,
@@ -1485,7 +1574,10 @@ class WalkForwardEngine:
         duration: float
     ) -> WalkForwardResult:
         """Aggregiert alle Split-Ergebnisse."""
+        logger.debug(f"[WalkForward] _aggregate_results: {len(results)} Splits, Dauer: {duration:.1f}s")
+
         if len(results) == 0:
+            logger.warning("[WalkForward] Keine Ergebnisse zum Aggregieren")
             return self._create_empty_result(time.time() - duration)
 
         # Metriken sammeln
@@ -1493,15 +1585,19 @@ class WalkForwardEngine:
         returns = [r.total_return for r in results]
         sharpes = [r.sharpe_ratio for r in results]
         drawdowns = [r.max_drawdown for r in results]
+        logger.debug(f"[WalkForward] Accuracies: {[f'{a:.2%}' for a in accuracies]}")
+        logger.debug(f"[WalkForward] Returns: {[f'{r:.2%}' for r in returns]}")
 
         # Alle Trades sammeln
         all_trades = []
         for r in results:
             all_trades.extend(r.trades)
+        logger.debug(f"[WalkForward] Gesamt-Trades: {len(all_trades)}")
 
         # Aggregierte Metriken
         total_return = np.prod([1 + r for r in returns]) - 1
         total_trades = sum(r.num_trades for r in results)
+        logger.debug(f"[WalkForward] Total Return: {total_return:.2%}, Total Trades: {total_trades}")
 
         # Win Rate gesamt
         winning_trades = sum(1 for t in all_trades if t.pnl > 0)
