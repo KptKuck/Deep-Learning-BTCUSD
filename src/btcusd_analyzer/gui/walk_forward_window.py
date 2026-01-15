@@ -633,11 +633,7 @@ class WalkForwardWindow(QMainWindow):
                 # Datum-Felder mit Daten-Zeitraum initialisieren
                 self.from_date.setDate(QDate(start.year, start.month, start.day))
                 self.to_date.setDate(QDate(end.year, end.month, end.day))
-                # Grenzen setzen
-                self.from_date.setMinimumDate(QDate(start.year, start.month, start.day))
-                self.from_date.setMaximumDate(QDate(end.year, end.month, end.day))
-                self.to_date.setMinimumDate(QDate(start.year, start.month, start.day))
-                self.to_date.setMaximumDate(QDate(end.year, end.month, end.day))
+                # Keine Grenzen setzen - Benutzer kann frei waehlen
             except:
                 pass
 
