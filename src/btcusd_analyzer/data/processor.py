@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from ..core.logger import get_logger
+from ..core.exceptions import DataValidationError, MissingDataError
 
 
 class FeatureProcessor:
@@ -37,6 +38,9 @@ class FeatureProcessor:
         'technical': ['SMA', 'EMA', 'RSI', 'MACD', 'BB_Upper', 'BB_Lower', 'BB_Width'],
     }
 
+    # Erforderliche Basis-Spalten fuer Feature-Berechnung
+    REQUIRED_COLUMNS = ['Open', 'High', 'Low', 'Close']
+
     def __init__(self, features: Optional[List[str]] = None):
         """
         Initialisiert den Feature Processor.
@@ -47,16 +51,89 @@ class FeatureProcessor:
         self.features = features or self.DEFAULT_FEATURES.copy()
         self.logger = get_logger()
 
-    def process(self, df: pd.DataFrame) -> pd.DataFrame:
+    def validate_input(self, df: pd.DataFrame, strict: bool = False) -> List[str]:
+        """
+        Validiert die Eingabedaten vor der Feature-Berechnung.
+
+        Args:
+            df: DataFrame mit OHLCV-Rohdaten
+            strict: Wenn True, wird bei Fehlern eine Exception geworfen
+
+        Returns:
+            Liste von Validierungsfehlern (leer wenn alles OK)
+
+        Raises:
+            DataValidationError: Bei kritischen Fehlern (wenn strict=True)
+            MissingDataError: Wenn DataFrame None oder leer ist
+        """
+        errors: List[str] = []
+
+        # Null-Check
+        if df is None:
+            if strict:
+                raise MissingDataError("DataFrame ist None")
+            return ["DataFrame ist None"]
+
+        if df.empty:
+            if strict:
+                raise MissingDataError("DataFrame ist leer")
+            return ["DataFrame ist leer"]
+
+        # Spalten-Validierung
+        missing_cols = [col for col in self.REQUIRED_COLUMNS if col not in df.columns]
+        if missing_cols:
+            msg = f"Fehlende Pflichtspalten: {', '.join(missing_cols)}"
+            errors.append(msg)
+            if strict:
+                raise DataValidationError(msg, invalid_fields=missing_cols)
+
+        # Datentyp-Validierung
+        for col in self.REQUIRED_COLUMNS:
+            if col in df.columns and not np.issubdtype(df[col].dtype, np.number):
+                errors.append(f"Spalte '{col}' ist nicht numerisch")
+
+        # NaN-Check in Pflichtspalten
+        for col in self.REQUIRED_COLUMNS:
+            if col in df.columns:
+                nan_count = df[col].isna().sum()
+                if nan_count > 0:
+                    errors.append(f"{nan_count} NaN-Werte in '{col}'")
+
+        # Mindestanzahl Datenpunkte
+        min_required = 20  # Fuer technische Indikatoren wie SMA20
+        if len(df) < min_required:
+            errors.append(f"Zu wenig Datenpunkte: {len(df)} < {min_required}")
+
+        if strict and errors:
+            raise DataValidationError(
+                f"Input-Validierung fehlgeschlagen: {len(errors)} Fehler",
+                invalid_fields=errors
+            )
+
+        return errors
+
+    def process(self, df: pd.DataFrame, validate: bool = True) -> pd.DataFrame:
         """
         Generiert alle konfigurierten Features.
 
         Args:
             df: DataFrame mit OHLCV-Rohdaten
+            validate: Wenn True, werden Eingabedaten validiert
 
         Returns:
             DataFrame mit generierten Features
+
+        Raises:
+            DataValidationError: Bei ungueltigen Eingabedaten (wenn validate=True)
         """
+        # Optionale Validierung
+        if validate:
+            errors = self.validate_input(df)
+            if errors:
+                self.logger.warning(f"Input-Validierung: {len(errors)} Probleme gefunden")
+                for err in errors:
+                    self.logger.warning(f"  - {err}")
+
         result = df.copy()
 
         for feature in self.features:

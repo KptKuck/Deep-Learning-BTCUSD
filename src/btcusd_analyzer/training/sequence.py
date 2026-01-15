@@ -3,7 +3,7 @@ Sequenz-Generator Modul - Erstellt Sequenzen fuer LSTM/Transformer Training
 Entspricht prepare_training_data.m aus dem MATLAB-Projekt
 """
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 
 import numpy as np
 import pandas as pd
@@ -12,6 +12,91 @@ from torch.utils.data import Dataset, DataLoader
 
 from ..core.logger import get_logger
 from .normalizer import ZScoreNormalizer
+
+
+def expand_labels_lookahead(
+    labels: np.ndarray,
+    lookahead: int = 5,
+    hold_label: int = 0,
+    buy_label: int = 1,
+    sell_label: int = 2
+) -> np.ndarray:
+    """
+    Erweitert Labels mit Lookahead - Bars vor einem Peak erhalten das Peak-Label.
+
+    Das Modell lernt so, einen Peak vorherzusagen BEVOR er eintritt.
+
+    Beispiel mit lookahead=3:
+        Original:  [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 2, 0, 0]
+        Erweitert: [0, 0, 1, 1, 1, 1, 0, 0, 2, 2, 2, 0, 0]
+                          ^--lookahead--^     ^--lookahead--^
+
+    Args:
+        labels: Original-Label-Array
+        lookahead: Anzahl Bars vor dem Peak die das Label erhalten
+        hold_label: Label-Wert fuer HOLD (wird nicht erweitert)
+        buy_label: Label-Wert fuer BUY
+        sell_label: Label-Wert fuer SELL
+
+    Returns:
+        Erweitertes Label-Array
+    """
+    expanded = labels.copy()
+    n = len(labels)
+
+    # BUY-Peaks erweitern
+    buy_indices = np.where(labels == buy_label)[0]
+    for idx in buy_indices:
+        start = max(0, idx - lookahead)
+        expanded[start:idx] = buy_label
+
+    # SELL-Peaks erweitern
+    sell_indices = np.where(labels == sell_label)[0]
+    for idx in sell_indices:
+        start = max(0, idx - lookahead)
+        expanded[start:idx] = sell_label
+
+    return expanded
+
+
+def compute_class_weights(
+    labels: np.ndarray,
+    num_classes: int = 3,
+    ignore_label: int = -1
+) -> torch.Tensor:
+    """
+    Berechnet Class Weights fuer unbalancierte Daten.
+
+    Verwendung: criterion = nn.CrossEntropyLoss(weight=class_weights)
+
+    Args:
+        labels: Label-Array
+        num_classes: Anzahl Klassen
+        ignore_label: Label das ignoriert werden soll
+
+    Returns:
+        Tensor mit Gewichten pro Klasse
+    """
+    # Nur gueltige Labels zaehlen
+    valid_labels = labels[labels != ignore_label]
+
+    if len(valid_labels) == 0:
+        return torch.ones(num_classes)
+
+    # Haeufigkeit pro Klasse
+    counts = np.zeros(num_classes)
+    for i in range(num_classes):
+        counts[i] = np.sum(valid_labels == i)
+
+    # Inverse Frequency als Gewicht
+    # Klassen mit weniger Samples bekommen hoeheres Gewicht
+    total = counts.sum()
+    weights = total / (num_classes * counts + 1e-6)
+
+    # Normalisieren damit Durchschnitt = 1
+    weights = weights / weights.mean()
+
+    return torch.tensor(weights, dtype=torch.float32)
 
 
 class SequenceGenerator:
@@ -56,7 +141,8 @@ class SequenceGenerator:
     def generate(
         self,
         features: np.ndarray,
-        labels: np.ndarray
+        labels: np.ndarray,
+        ignore_label: int = -1
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Generiert Sequenzen aus Feature-Matrix und Labels.
@@ -64,6 +150,7 @@ class SequenceGenerator:
         Args:
             features: Feature-Matrix [n_samples, n_features]
             labels: Label-Array [n_samples]
+            ignore_label: Label-Wert der ignoriert werden soll (default: -1)
 
         Returns:
             Tuple aus (X, y) Arrays
@@ -81,11 +168,22 @@ class SequenceGenerator:
         self.logger.debug(f'Generiere {n_sequences} Sequenzen '
                          f'(Lookback: {self.lookback}, Lookforward: {self.lookforward})')
 
-        # Arrays vorbereiten
-        X = np.zeros((n_sequences, self.lookback, n_features), dtype=np.float32)
-        y = np.zeros(n_sequences, dtype=np.int64)
+        # Temporaere Listen fuer Filterung
+        X_list = []
+        y_list = []
 
         for i in range(n_sequences):
+            # Label-Index berechnen
+            label_idx = i + self.lookback - 1
+            if label_idx >= len(labels):
+                label_idx = len(labels) - 1
+
+            current_label = labels[label_idx]
+
+            # Samples mit ignore_label ueberspringen
+            if current_label == ignore_label:
+                continue
+
             # Input-Sequenz (lookback Zeitschritte)
             seq = features[i:i + self.lookback].copy()
 
@@ -93,16 +191,18 @@ class SequenceGenerator:
             if self.normalize and self.normalizer:
                 seq = self.normalizer.fit_transform(seq)
 
-            X[i] = seq
+            X_list.append(seq)
+            y_list.append(current_label)
 
-            # Label (am Ende des lookforward-Fensters)
-            label_idx = i + self.lookback + self.lookforward - 1
-            if label_idx < len(labels):
-                y[i] = labels[i + self.lookback - 1]  # Label am letzten lookback Punkt
-            else:
-                y[i] = labels[-1]
+        if len(X_list) == 0:
+            self.logger.warning('Keine gueltigen Sequenzen generiert (alle Labels ignoriert)')
+            return np.array([]), np.array([])
 
-        self.logger.success(f'{n_sequences} Sequenzen generiert')
+        X = np.array(X_list, dtype=np.float32)
+        y = np.array(y_list, dtype=np.int64)
+
+        self.logger.success(f'{len(X)} Sequenzen generiert '
+                           f'({n_sequences - len(X)} ignoriert)')
         return X, y
 
     def generate_single(

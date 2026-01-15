@@ -250,7 +250,11 @@ class VectorBTAdapter(BacktesterInterface):
         # Diese Methode erfordert fortgeschrittene VectorBT-Nutzung
         # Hier nur als Platzhalter/Dokumentation
 
+        # Hinweis: VectorBT's eingebaute Optimierung ist fuer Signal-Parameter
+        # gedacht (z.B. MA-Perioden), nicht fuer Modell-Hyperparameter.
+        # Fuer Modell-Optimierung wird OptunaTuner empfohlen.
         raise NotImplementedError(
-            "Parameter-Optimierung erfordert modell-spezifische Implementierung. "
-            "Verwenden Sie stattdessen OptunaTuner fuer Hyperparameter-Suche."
+            "VectorBT-Parameter-Optimierung ist nicht implementiert. "
+            "Fuer Hyperparameter-Suche verwenden Sie OptunaTuner aus "
+            "btcusd_analyzer.optimization.optuna_tuner"
         )

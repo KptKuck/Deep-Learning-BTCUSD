@@ -193,6 +193,27 @@ class Logger:
         """Gibt den Pfad zur aktuellen Log-Datei zurueck."""
         return str(self.log_file) if self.log_file else None
 
+    def get_session_dir(self) -> Optional[Path]:
+        """
+        Gibt den Session-Ordner zurueck (erstellt ihn falls noetig).
+
+        Der Session-Ordner hat den gleichen Namen wie die Log-Datei (ohne .txt).
+        Beispiel: log/session-2026-01-14_20h18m11s/
+        """
+        if self.log_file is None:
+            return None
+
+        # Session-Ordner = Log-Datei ohne .txt Endung
+        session_dir = self.log_file.with_suffix('')
+        session_dir.mkdir(parents=True, exist_ok=True)
+        return session_dir
+
+    def get_session_name(self) -> Optional[str]:
+        """Gibt den Session-Namen zurueck (z.B. 'session-2026-01-14_20h18m11s')."""
+        if self.log_file is None:
+            return None
+        return self.log_file.stem
+
 
 # Globale Logger-Instanz
 _default_logger: Optional[Logger] = None

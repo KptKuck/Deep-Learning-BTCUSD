@@ -7,6 +7,7 @@ Layout: 3-Spalten (280px | flexible | 280px)
 - Rechts: Performance-Statistiken (P/L, Trade-Stats, Signal-Verteilung)
 """
 
+import time
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from datetime import datetime
@@ -14,10 +15,11 @@ from datetime import datetime
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QGroupBox, QLabel, QPushButton, QSlider, QProgressBar, QTextEdit,
-    QSplitter, QCheckBox, QScrollArea
+    QSplitter, QCheckBox, QScrollArea, QTabWidget, QDialog, QTableWidget,
+    QTableWidgetItem, QHeaderView, QFileDialog
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QColor
 
 import pandas as pd
 import numpy as np
@@ -42,7 +44,7 @@ class BacktestWindow(QMainWindow):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Backtester - BILSTM Trading Simulation")
+        self.setWindowTitle("4 - Backtest")
         self.setMinimumSize(1200, 800)
         self._parent = parent
 
@@ -81,8 +83,23 @@ class BacktestWindow(QMainWindow):
         self.steps_per_second = 10
         self.turbo_mode = False
 
+        # Geschwindigkeitsmessung
+        self._step_count = 0
+        self._last_speed_update = 0.0
+        self._speed_update_timer: Optional[QTimer] = None
+
+        # Vorbereitete Sequenzen fuer Modell-Vorhersage
+        self.prepared_sequences = None
+        self.sequence_offset = 0  # Index-Offset zwischen Daten und Sequenzen
+
         # Timer
         self.backtest_timer: Optional[QTimer] = None
+
+        # DEBUG-Modus
+        self.debug_mode = False
+
+        # Signal-Invertierung
+        self.invert_signals = False
 
         self._setup_ui()
         self.setStyleSheet(get_stylesheet())
@@ -97,6 +114,11 @@ class BacktestWindow(QMainWindow):
         # Auch lokal loggen falls vorhanden
         if hasattr(self, 'trade_log'):
             self.trade_log.append(f'[{level}] {message}')
+
+    def _debug(self, message: str):
+        """Loggt DEBUG-Nachricht nur wenn debug_mode aktiv ist."""
+        if self.debug_mode:
+            self._log(f'[DEBUG] {message}', 'DEBUG')
 
     def _setup_ui(self):
         """Erstellt die 3-Spalten Benutzeroberflaeche."""
@@ -181,6 +203,13 @@ class BacktestWindow(QMainWindow):
         self.reset_btn.clicked.connect(self._reset_backtest)
         control_layout.addWidget(self.reset_btn, 1, 1)
 
+        # Trade-Statistik Button
+        self.stats_btn = QPushButton("Trade-Statistik")
+        self.stats_btn.setStyleSheet(self._button_style((0.3, 0.6, 0.9)))
+        self.stats_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        self.stats_btn.clicked.connect(self._show_trade_statistics)
+        control_layout.addWidget(self.stats_btn, 2, 0, 1, 2)  # Volle Breite
+
         layout.addWidget(control_group)
 
         # === Geschwindigkeit ===
@@ -192,7 +221,7 @@ class BacktestWindow(QMainWindow):
         slider_row = QHBoxLayout()
         slider_row.addWidget(QLabel("Schritte/Sek:"))
         self.speed_slider = QSlider(Qt.Orientation.Horizontal)
-        self.speed_slider.setRange(1, 100)
+        self.speed_slider.setRange(1, 500)
         self.speed_slider.setValue(10)
         self.speed_slider.valueChanged.connect(self._update_speed)
         slider_row.addWidget(self.speed_slider)
@@ -206,6 +235,19 @@ class BacktestWindow(QMainWindow):
         self.turbo_check.setStyleSheet("color: rgb(128, 255, 128);")
         self.turbo_check.toggled.connect(self._toggle_turbo)
         speed_layout.addWidget(self.turbo_check)
+
+        # Debug-Modus
+        self.debug_check = QCheckBox("DEBUG-Modus (ausfuehrliches Log)")
+        self.debug_check.setStyleSheet("color: rgb(255, 200, 100);")
+        self.debug_check.toggled.connect(self._toggle_debug)
+        speed_layout.addWidget(self.debug_check)
+
+        # Signal-Invertierung
+        self.invert_check = QCheckBox("Signale invertieren (BUY<->SELL)")
+        self.invert_check.setStyleSheet("color: rgb(255, 128, 255);")
+        self.invert_check.setToolTip("Tauscht BUY und SELL Signale")
+        self.invert_check.toggled.connect(self._toggle_invert)
+        speed_layout.addWidget(self.invert_check)
 
         # Aktuelle Geschwindigkeit
         speed_info = QHBoxLayout()
@@ -294,35 +336,256 @@ class BacktestWindow(QMainWindow):
         return scroll
 
     def _create_chart_panel(self) -> QWidget:
-        """Erstellt das Chart-Panel (mittlere Spalte)."""
+        """Erstellt das Chart-Panel (mittlere Spalte) mit Tabs."""
         panel = QWidget()
         panel.setStyleSheet(f"background-color: rgb(46, 46, 46);")
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(10)
+        layout.setSpacing(5)
 
         try:
             from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+            from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
             from matplotlib.figure import Figure
 
-            # Preis-Chart (2/3 der Hoehe)
-            self.price_figure = Figure(figsize=(8, 4), facecolor='#262626')
+            # Toolbar und Zoom-Kontrollen oben (immer sichtbar)
+            controls_widget = QWidget()
+            controls_layout = QVBoxLayout(controls_widget)
+            controls_layout.setContentsMargins(0, 0, 0, 0)
+            controls_layout.setSpacing(2)
+
+            # Zoom-Kontrollen
+            zoom_controls = self._create_zoom_controls()
+            controls_layout.addWidget(zoom_controls)
+
+            layout.addWidget(controls_widget)
+
+            # Tab-Widget fuer Charts
+            self.chart_tabs = QTabWidget()
+            self.chart_tabs.setStyleSheet(self._tab_style())
+
+            # === Tab 1: Preis-Chart ===
+            price_widget = QWidget()
+            price_layout = QVBoxLayout(price_widget)
+            price_layout.setContentsMargins(0, 0, 0, 0)
+
+            self.price_figure = Figure(figsize=(8, 6), facecolor='#262626')
             self.price_canvas = FigureCanvas(self.price_figure)
             self.ax_price = self.price_figure.add_subplot(111)
             self._setup_price_chart()
-            layout.addWidget(self.price_canvas, stretch=2)
 
-            # Equity-Chart (1/3 der Hoehe)
-            self.equity_figure = Figure(figsize=(8, 2), facecolor='#262626')
+            # Toolbar fuer Preis-Chart
+            self.price_toolbar = NavigationToolbar(self.price_canvas, self)
+            self.price_toolbar.setStyleSheet(self._toolbar_style())
+            price_layout.addWidget(self.price_toolbar)
+            price_layout.addWidget(self.price_canvas)
+
+            self.chart_tabs.addTab(price_widget, "Preis + Signale")
+
+            # === Tab 2: Trade-Chart ===
+            trade_widget = QWidget()
+            trade_layout = QVBoxLayout(trade_widget)
+            trade_layout.setContentsMargins(0, 0, 0, 0)
+
+            self.trade_figure = Figure(figsize=(8, 6), facecolor='#262626')
+            self.trade_canvas = FigureCanvas(self.trade_figure)
+            self.ax_trade = self.trade_figure.add_subplot(111)
+            self._setup_trade_chart()
+
+            # Toolbar fuer Trade-Chart
+            self.trade_toolbar = NavigationToolbar(self.trade_canvas, self)
+            self.trade_toolbar.setStyleSheet(self._toolbar_style())
+            trade_layout.addWidget(self.trade_toolbar)
+            trade_layout.addWidget(self.trade_canvas)
+
+            self.chart_tabs.addTab(trade_widget, "Trades")
+
+            # === Tab 3: Equity-Chart ===
+            equity_widget = QWidget()
+            equity_layout = QVBoxLayout(equity_widget)
+            equity_layout.setContentsMargins(0, 0, 0, 0)
+
+            self.equity_figure = Figure(figsize=(8, 6), facecolor='#262626')
             self.equity_canvas = FigureCanvas(self.equity_figure)
             self.ax_equity = self.equity_figure.add_subplot(111)
             self._setup_equity_chart()
-            layout.addWidget(self.equity_canvas, stretch=1)
+
+            # Toolbar fuer Equity-Chart
+            self.equity_toolbar = NavigationToolbar(self.equity_canvas, self)
+            self.equity_toolbar.setStyleSheet(self._toolbar_style())
+            equity_layout.addWidget(self.equity_toolbar)
+            equity_layout.addWidget(self.equity_canvas)
+
+            self.chart_tabs.addTab(equity_widget, "Equity")
+
+            layout.addWidget(self.chart_tabs, stretch=1)
 
         except ImportError:
             layout.addWidget(QLabel("matplotlib nicht installiert"))
 
         return panel
+
+    def _tab_style(self) -> str:
+        """Gibt das Stylesheet fuer die Tab-Widgets zurueck."""
+        return '''
+            QTabWidget::pane {
+                border: 1px solid #4d4d4d;
+                background-color: #262626;
+            }
+            QTabBar::tab {
+                background-color: #333333;
+                color: #b3b3b3;
+                padding: 8px 20px;
+                margin-right: 2px;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }
+            QTabBar::tab:selected {
+                background-color: #4da8da;
+                color: white;
+            }
+            QTabBar::tab:hover:!selected {
+                background-color: #444444;
+            }
+        '''
+
+    def _toolbar_style(self) -> str:
+        """Gibt das Stylesheet fuer die Matplotlib-Toolbar zurueck."""
+        return '''
+            QToolBar {
+                background-color: #333333;
+                border: none;
+                spacing: 5px;
+            }
+            QToolButton {
+                background-color: #444444;
+                border: none;
+                border-radius: 3px;
+                padding: 5px;
+                color: white;
+            }
+            QToolButton:hover {
+                background-color: #555555;
+            }
+            QToolButton:checked {
+                background-color: #4da8da;
+            }
+        '''
+
+    def _create_zoom_controls(self) -> QWidget:
+        """Erstellt die Zoom-Kontroll-Buttons fuer den Preis-Chart."""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        # X-Zoom
+        layout.addWidget(QLabel('X:'))
+
+        zoom_x_in = QPushButton('+')
+        zoom_x_in.setFixedWidth(30)
+        zoom_x_in.setStyleSheet(StyleFactory.button_style_hex('#555555', padding='3px 8px'))
+        zoom_x_in.clicked.connect(lambda: self._zoom_price_axis('x', 0.8))
+        layout.addWidget(zoom_x_in)
+
+        zoom_x_out = QPushButton('-')
+        zoom_x_out.setFixedWidth(30)
+        zoom_x_out.setStyleSheet(StyleFactory.button_style_hex('#555555', padding='3px 8px'))
+        zoom_x_out.clicked.connect(lambda: self._zoom_price_axis('x', 1.25))
+        layout.addWidget(zoom_x_out)
+
+        # Y-Zoom
+        layout.addWidget(QLabel('Y:'))
+
+        zoom_y_in = QPushButton('+')
+        zoom_y_in.setFixedWidth(30)
+        zoom_y_in.setStyleSheet(StyleFactory.button_style_hex('#555555', padding='3px 8px'))
+        zoom_y_in.clicked.connect(lambda: self._zoom_price_axis('y', 0.8))
+        layout.addWidget(zoom_y_in)
+
+        zoom_y_out = QPushButton('-')
+        zoom_y_out.setFixedWidth(30)
+        zoom_y_out.setStyleSheet(StyleFactory.button_style_hex('#555555', padding='3px 8px'))
+        zoom_y_out.clicked.connect(lambda: self._zoom_price_axis('y', 1.25))
+        layout.addWidget(zoom_y_out)
+
+        # Reset
+        reset_btn = QPushButton('Reset')
+        reset_btn.setStyleSheet(StyleFactory.button_style_hex('#666666', padding='3px 10px'))
+        reset_btn.clicked.connect(self._reset_price_zoom)
+        layout.addWidget(reset_btn)
+
+        # Aktuellen Bereich anzeigen
+        follow_btn = QPushButton('Folgen')
+        follow_btn.setStyleSheet(StyleFactory.button_style_hex('#4da8da', padding='3px 10px'))
+        follow_btn.setToolTip('Zum aktuellen Datenpunkt springen')
+        follow_btn.clicked.connect(self._follow_current)
+        layout.addWidget(follow_btn)
+
+        layout.addStretch()
+
+        return widget
+
+    def _get_current_chart(self):
+        """Gibt den aktuell ausgewaehlten Chart (ax, canvas) zurueck."""
+        if not hasattr(self, 'chart_tabs'):
+            return self.ax_price, self.price_canvas
+
+        current_tab = self.chart_tabs.currentIndex()
+        if current_tab == 0:
+            return self.ax_price, self.price_canvas
+        elif current_tab == 1:
+            return self.ax_trade, self.trade_canvas
+        else:
+            return self.ax_equity, self.equity_canvas
+
+    def _zoom_price_axis(self, axis: str, factor: float):
+        """Zoomt eine einzelne Achse des aktuell sichtbaren Charts."""
+        ax, canvas = self._get_current_chart()
+
+        if axis == 'x':
+            xlim = ax.get_xlim()
+            center = (xlim[0] + xlim[1]) / 2
+            width = (xlim[1] - xlim[0]) * factor
+            ax.set_xlim(center - width/2, center + width/2)
+        else:
+            ylim = ax.get_ylim()
+            center = (ylim[0] + ylim[1]) / 2
+            height = (ylim[1] - ylim[0]) * factor
+            ax.set_ylim(center - height/2, center + height/2)
+        canvas.draw()
+
+    def _reset_price_zoom(self):
+        """Setzt den Zoom des aktuell sichtbaren Charts zurueck."""
+        ax, canvas = self._get_current_chart()
+        ax.autoscale()
+        canvas.draw()
+
+    def _follow_current(self):
+        """Springt zum aktuellen Datenpunkt im Chart."""
+        if self.data is None or self.current_index == 0:
+            return
+
+        ax, canvas = self._get_current_chart()
+
+        # Fenster um aktuellen Index (200 Punkte sichtbar)
+        window_size = 200
+        start_idx = max(0, self.current_index - window_size // 2)
+        end_idx = min(len(self.data), self.current_index + window_size // 2)
+
+        ax.set_xlim(start_idx, end_idx)
+
+        # Y-Limits an sichtbaren Bereich anpassen
+        visible_data = self.data.iloc[start_idx:end_idx]
+        if len(visible_data) > 0:
+            y_min = visible_data['Close'].min()
+            y_max = visible_data['Close'].max()
+            y_margin = (y_max - y_min) * 0.05
+            ax.set_ylim(y_min - y_margin, y_max + y_margin)
+
+        canvas.draw()
+
+        self.price_canvas.draw()
 
     def _setup_price_chart(self):
         """Konfiguriert den Preis-Chart."""
@@ -332,6 +595,17 @@ class BacktestWindow(QMainWindow):
         for spine in ax.spines.values():
             spine.set_color('#4d4d4d')
         ax.set_title('Preis und Signale', color='white', fontsize=12)
+        ax.set_ylabel('Preis (USD)', color='white')
+        ax.grid(True, alpha=0.3, color='#4d4d4d')
+
+    def _setup_trade_chart(self):
+        """Konfiguriert den Trade-Chart."""
+        ax = self.ax_trade
+        ax.set_facecolor('#1a1a1a')
+        ax.tick_params(colors='white')
+        for spine in ax.spines.values():
+            spine.set_color('#4d4d4d')
+        ax.set_title('Trades', color='white', fontsize=12)
         ax.set_ylabel('Preis (USD)', color='white')
         ax.grid(True, alpha=0.3, color='#4d4d4d')
 
@@ -445,6 +719,32 @@ class BacktestWindow(QMainWindow):
 
         layout.addWidget(signal_group)
 
+        # === Modell-Info (aufklappbar) ===
+        self.model_info_group = QGroupBox("Modell-Info")
+        self.model_info_group.setStyleSheet(self._group_style((0.6, 0.8, 1.0)))
+        self.model_info_group.setCheckable(True)
+        self.model_info_group.setChecked(False)  # Standardmaessig eingeklappt
+        model_info_layout = QVBoxLayout(self.model_info_group)
+
+        # TextEdit fuer formatierte Modell-Informationen
+        self.model_info_text = QTextEdit()
+        self.model_info_text.setReadOnly(True)
+        self.model_info_text.setMaximumHeight(250)
+        self.model_info_text.setStyleSheet('''
+            QTextEdit {
+                background-color: #1a1a2e;
+                border: 1px solid #333;
+                border-radius: 3px;
+                color: #ccc;
+                font-family: Consolas, monospace;
+                font-size: 9px;
+            }
+        ''')
+        self.model_info_text.setPlainText("Kein Modell geladen")
+        model_info_layout.addWidget(self.model_info_text)
+
+        layout.addWidget(self.model_info_group)
+
         layout.addStretch()
 
         scroll.setWidget(panel)
@@ -461,6 +761,12 @@ class BacktestWindow(QMainWindow):
     def set_data(self, data: pd.DataFrame, signals: pd.Series = None,
                  model=None, model_info: Dict = None):
         """Setzt die Backtest-Daten."""
+        self._debug(f"set_data() aufgerufen")
+        self._debug(f"  data: {type(data).__name__}, {len(data) if data is not None else 'None'} Zeilen")
+        self._debug(f"  signals: {type(signals).__name__ if signals is not None else 'None'}")
+        self._debug(f"  model: {type(model).__name__ if model is not None else 'None'}")
+        self._debug(f"  model_info: {model_info}")
+
         self.data = data
         self.signals = signals
         self.model = model
@@ -471,17 +777,181 @@ class BacktestWindow(QMainWindow):
             lookforward = model_info.get('lookforward_size', 5)
             self.sequence_length = lookback + lookforward
             self.current_index = self.sequence_length + 1
+            self._debug(f"  lookback={lookback}, lookforward={lookforward}, sequence_length={self.sequence_length}")
+
+            # Sequenzen fuer Modell-Vorhersage vorbereiten
+            if model is not None and data is not None:
+                self._debug(f"  Bereite Sequenzen vor...")
+                self._prepare_sequences(lookback)
+            else:
+                self._debug(f"  WARNUNG: Keine Sequenz-Vorbereitung (model={model is not None}, data={data is not None})")
+
+            # Model-Info Anzeige aktualisieren
+            self._update_model_info_display()
+        else:
+            self._debug(f"  WARNUNG: Keine model_info vorhanden!")
 
         self._update_datapoint_label()
         self._initialize_charts()
+        self._debug(f"set_data() abgeschlossen")
+
+    def _prepare_sequences(self, lookback: int):
+        """Bereitet Sequenzen fuer Modell-Vorhersagen vor."""
+        self._debug(f"_prepare_sequences(lookback={lookback}) gestartet")
+        try:
+            import torch
+            from ..data.processor import FeatureProcessor
+            from ..training.normalizer import ZScoreNormalizer
+
+            # Features aus model_info holen (gleiche wie beim Training)
+            features = self.model_info.get('features', ['Open', 'High', 'Low', 'Close', 'PriceChange', 'PriceChangePct'])
+            self._log(f"Features aus Training: {features}")
+            self._debug(f"  Features: {features}")
+
+            # Features berechnen
+            processor = FeatureProcessor(features=features)
+            processed = processor.process(self.data)
+            self._debug(f"  Processed Shape: {processed.shape}")
+            self._debug(f"  Processed Columns: {list(processed.columns)}")
+
+            # Feature-Matrix (nur trainierte Features)
+            feature_cols = [f for f in features if f in processed.columns]
+            if not feature_cols:
+                # Fallback auf OHLC
+                feature_cols = ['Open', 'High', 'Low', 'Close']
+                self._log(f"Fallback auf OHLC-Features", 'WARNING')
+            self._debug(f"  Verwendete Features: {feature_cols}")
+
+            feature_data = processed[feature_cols].values.astype(np.float32)
+            self._debug(f"  Feature-Data Shape: {feature_data.shape}")
+
+            # NaN behandeln
+            nan_count = np.isnan(feature_data).sum()
+            self._debug(f"  NaN-Werte vor Behandlung: {nan_count}")
+            feature_data = np.nan_to_num(feature_data, nan=0.0)
+
+            # Normalisierung (wie beim Training)
+            normalizer = ZScoreNormalizer()
+            feature_data = normalizer.fit_transform(feature_data)
+            self._debug(f"  Normalisierte Daten - Min: {feature_data.min():.4f}, Max: {feature_data.max():.4f}")
+
+            # Sequenzen erstellen
+            sequences = []
+            for i in range(lookback, len(feature_data)):
+                seq = feature_data[i - lookback:i]
+                sequences.append(seq)
+
+            if sequences:
+                self.prepared_sequences = np.array(sequences)
+                self.sequence_offset = lookback
+                self._log(f"Sequenzen vorbereitet: {len(sequences)} ({len(feature_cols)} Features)")
+                self._debug(f"  Sequenzen Shape: {self.prepared_sequences.shape}")
+                self._debug(f"  Sequence Offset: {self.sequence_offset}")
+            else:
+                self._log("Keine Sequenzen generiert", 'WARNING')
+                self._debug(f"  FEHLER: Leere Sequenzliste!")
+
+        except Exception as e:
+            import traceback
+            self._log(f"Sequenz-Vorbereitung fehlgeschlagen: {e}", 'ERROR')
+            self._log(traceback.format_exc(), 'ERROR')
+            self._debug(f"  EXCEPTION: {e}")
+
+    def _update_model_info_display(self):
+        """Aktualisiert die Modell-Info Anzeige im Stats-Panel."""
+        if not self.model_info:
+            self.model_info_text.setPlainText("Kein Modell geladen")
+            return
+
+        info = self.model_info
+        lines = []
+
+        # Modell-Identifikation
+        lines.append("=== MODELL ===")
+        lines.append(f"Typ:        {info.get('model_type', '-')}")
+        lines.append(f"Trainiert:  {info.get('trained_at', '-')}")
+        if info.get('training_duration_sec'):
+            mins = info['training_duration_sec'] / 60
+            lines.append(f"Dauer:      {mins:.1f} min")
+
+        # Architektur
+        lines.append("")
+        lines.append("=== ARCHITEKTUR ===")
+        lines.append(f"Hidden:     {info.get('hidden_size', '-')}")
+        lines.append(f"Layers:     {info.get('num_layers', '-')}")
+        lines.append(f"Dropout:    {info.get('dropout', '-')}")
+        lines.append(f"Klassen:    {info.get('num_classes', '-')}")
+
+        # Daten-Parameter
+        lines.append("")
+        lines.append("=== DATEN ===")
+        lines.append(f"Lookback:   {info.get('lookback_size', '-')}")
+        lines.append(f"Lookfwd:    {info.get('lookforward_size', '-')}")
+        lines.append(f"Lookahead:  {info.get('lookahead_bars', '-')}")
+        lines.append(f"Split:      {info.get('train_test_split', '-')}%")
+
+        # Samples
+        if info.get('total_samples'):
+            lines.append(f"Samples:    {info.get('total_samples', 0):,}")
+            lines.append(f"  Train:    {info.get('train_samples', 0):,}")
+            lines.append(f"  Val:      {info.get('val_samples', 0):,}")
+
+        # Features
+        lines.append("")
+        lines.append("=== FEATURES ===")
+        features = info.get('features', [])
+        lines.append(f"Anzahl:     {len(features)}")
+        if features:
+            # Features in Kurzform
+            feat_str = ', '.join(features[:5])
+            if len(features) > 5:
+                feat_str += f", +{len(features)-5}"
+            lines.append(f"Liste:      {feat_str}")
+
+        # Training
+        lines.append("")
+        lines.append("=== TRAINING ===")
+        lines.append(f"Epochen:    {info.get('epochs_trained', '-')}/{info.get('epochs_configured', '-')}")
+        lines.append(f"Batch:      {info.get('batch_size', '-')}")
+        lines.append(f"LR:         {info.get('learning_rate', '-')}")
+        lines.append(f"Patience:   {info.get('patience', '-')}")
+        lines.append(f"Early Stop: {'Ja' if info.get('stopped_early') else 'Nein'}")
+
+        # Ergebnisse
+        lines.append("")
+        lines.append("=== ERGEBNISSE ===")
+        lines.append(f"Accuracy:   {info.get('best_accuracy', 0):.1f}%")
+        lines.append(f"Val Loss:   {info.get('final_val_loss', 0):.4f}")
+        lines.append(f"BUY Peaks:  {info.get('num_buy_peaks', '-')}")
+        lines.append(f"SELL Peaks: {info.get('num_sell_peaks', '-')}")
+
+        # Class Weights
+        if info.get('class_weights'):
+            cw = info['class_weights']
+            lines.append("")
+            lines.append("=== CLASS WEIGHTS ===")
+            labels = ['HOLD', 'BUY', 'SELL']
+            for i, w in enumerate(cw[:3]):
+                lines.append(f"{labels[i]:6}:     {w:.2f}")
+
+        self.model_info_text.setPlainText('\n'.join(lines))
 
     def _start_backtest(self):
         """Startet den Backtest."""
+        self._debug(f"_start_backtest() aufgerufen")
+
         if self.data is None:
+            self._debug(f"  ABBRUCH: data ist None")
             return
 
         if self.is_running:
+            self._debug(f"  ABBRUCH: bereits running")
             return
+
+        self._debug(f"  Start-Index: {self.current_index}")
+        self._debug(f"  Daten: {len(self.data)} Zeilen")
+        self._debug(f"  Modell: {type(self.model).__name__ if self.model else 'None'}")
+        self._debug(f"  Prepared Sequences: {self.prepared_sequences.shape if self.prepared_sequences is not None else 'None'}")
 
         self.is_running = True
         self.is_paused = False
@@ -497,6 +967,17 @@ class BacktestWindow(QMainWindow):
         self.backtest_timer = QTimer()
         self.backtest_timer.timeout.connect(self._timer_callback)
         self.backtest_timer.start(interval)
+        self._debug(f"  Timer gestartet: {interval}ms Intervall ({self.steps_per_second} steps/s)")
+
+        # Geschwindigkeitsmessung starten
+        self._step_count = 0
+        self._last_speed_update = time.perf_counter()
+        self._speed_update_timer = QTimer()
+        self._speed_update_timer.timeout.connect(self._update_actual_speed)
+        self._speed_update_timer.start(500)  # Alle 500ms aktualisieren
+
+        # Geschwindigkeit anzeigen (Ziel)
+        self.actual_speed_label.setText(f"0 / {self.steps_per_second} Schritte/Sek")
 
         self._add_tradelog("Backtest gestartet")
 
@@ -508,6 +989,11 @@ class BacktestWindow(QMainWindow):
         if self.backtest_timer:
             self.backtest_timer.stop()
             self.backtest_timer = None
+
+        # Geschwindigkeitsmess-Timer stoppen
+        if self._speed_update_timer:
+            self._speed_update_timer.stop()
+            self._speed_update_timer = None
 
         # Buttons aktualisieren
         self.start_btn.setEnabled(True)
@@ -527,6 +1013,11 @@ class BacktestWindow(QMainWindow):
         if self.backtest_timer:
             self.backtest_timer.stop()
             self.backtest_timer = None
+
+        # Geschwindigkeitsmess-Timer stoppen
+        if self._speed_update_timer:
+            self._speed_update_timer.stop()
+            self._speed_update_timer = None
 
         # Status zuruecksetzen
         self.is_running = False
@@ -578,6 +1069,7 @@ class BacktestWindow(QMainWindow):
             return
 
         self._process_step()
+        self._step_count += 1  # Schritt zaehlen fuer Geschwindigkeitsmessung
         self._update_ui()
 
         # Charts nur im Nicht-Turbo-Modus aktualisieren
@@ -621,20 +1113,83 @@ class BacktestWindow(QMainWindow):
         # Naechster Schritt
         self.current_index += 1
 
+    def _invert_signal(self, signal: int) -> int:
+        """Invertiert ein Signal (BUY<->SELL), HOLD bleibt unveraendert."""
+        if signal == 1:  # BUY -> SELL
+            return 2
+        elif signal == 2:  # SELL -> BUY
+            return 1
+        return signal  # HOLD bleibt 0
+
     def _get_signal(self, idx: int) -> int:
-        """Ermittelt das Signal fuer den aktuellen Index."""
+        """Ermittelt das Signal fuer den aktuellen Index.
+
+        Rueckgabe-Mapping (intern):
+            0 = HOLD (kein Trade)
+            1 = BUY (Long oeffnen)
+            2 = SELL (Short oeffnen)
+
+        Bei 2-Klassen-Modellen: Modell gibt 0=BUY, 1=SELL zurueck
+        Bei 3-Klassen-Modellen: Modell gibt 0=HOLD, 1=BUY, 2=SELL zurueck
+        """
+        signal = 0  # Default: HOLD
+
         # Wenn Signale vorhanden, diese verwenden
         if self.signals is not None and idx < len(self.signals):
             sig = self.signals.iloc[idx]
             if sig == 'BUY' or sig == 1:
-                return 1
+                signal = 1
             elif sig == 'SELL' or sig == 2:
-                return 2
+                signal = 2
             else:
-                return 0
+                signal = 0
 
-        # TODO: Modell-Vorhersage implementieren
-        return 0  # HOLD als Default
+        # Modell-Vorhersage wenn verfuegbar
+        elif self.model is not None and self.prepared_sequences is not None:
+            try:
+                import torch
+                # Pruefe ob Index im Bereich der vorbereiteten Sequenzen liegt
+                seq_idx = idx - self.sequence_offset
+                if 0 <= seq_idx < len(self.prepared_sequences):
+                    sequence = self.prepared_sequences[seq_idx]
+                    if not isinstance(sequence, torch.Tensor):
+                        sequence = torch.FloatTensor(sequence)
+                    sequence = sequence.unsqueeze(0)  # Batch-Dimension hinzufuegen
+
+                    self.model.eval()
+                    with torch.no_grad():
+                        prediction = self.model.predict(sequence)
+                        raw_signal = int(prediction[0])
+
+                        # Signal-Mapping basierend auf num_classes
+                        num_classes = 3
+                        if self.model_info:
+                            num_classes = self.model_info.get('num_classes', 3)
+
+                        if num_classes == 2:
+                            # 2-Klassen: 0=BUY, 1=SELL -> intern 1=BUY, 2=SELL
+                            signal = raw_signal + 1  # 0->1 (BUY), 1->2 (SELL)
+                        else:
+                            # 3-Klassen: 0=HOLD, 1=BUY, 2=SELL (passt bereits)
+                            signal = raw_signal
+                else:
+                    if self.debug_mode and idx % 100 == 0:
+                        self._debug(f"Idx {idx}: seq_idx={seq_idx} ausserhalb Bereich [0, {len(self.prepared_sequences)})")
+            except Exception as e:
+                if self.debug_mode:
+                    self._debug(f"Idx {idx}: Modell-Fehler: {e}")
+
+        # Signal-Invertierung wenn aktiviert
+        if self.invert_signals and signal != 0:
+            signal = self._invert_signal(signal)
+
+        # Debug-Logging
+        if self.debug_mode and idx % 100 == 0:
+            signal_names = {0: 'HOLD', 1: 'BUY', 2: 'SELL'}
+            invert_str = " (invertiert)" if self.invert_signals else ""
+            self._debug(f"Idx {idx}: signal={signal_names.get(signal, signal)}{invert_str}")
+
+        return signal
 
     def _process_signal(self, signal: int, price: float, idx: int):
         """Verarbeitet ein Trading-Signal."""
@@ -881,9 +1436,15 @@ class BacktestWindow(QMainWindow):
         self.equity_canvas.draw()
 
     def _update_charts(self):
-        """Aktualisiert die Charts."""
+        """Aktualisiert die Charts unter Beibehaltung der Zoom-Einstellungen."""
         if not hasattr(self, 'ax_price'):
             return
+
+        # Aktuelle Zoom-Limits speichern
+        price_xlim = self.ax_price.get_xlim()
+        price_ylim = self.ax_price.get_ylim()
+        equity_xlim = self.ax_equity.get_xlim() if hasattr(self, 'ax_equity') else None
+        equity_ylim = self.ax_equity.get_ylim() if hasattr(self, 'ax_equity') else None
 
         # Preis-Chart
         self.ax_price.clear()
@@ -915,8 +1476,17 @@ class BacktestWindow(QMainWindow):
 
         self.ax_price.set_title(f'Preis und Signale | BUY: {self.buy_count}, SELL: {self.sell_count}, HOLD: {self.hold_count}',
                                 color='white', fontsize=11)
+
+        # Zoom-Limits wiederherstellen (wenn gueltig)
+        if price_xlim[0] != 0.0 or price_xlim[1] != 1.0:
+            self.ax_price.set_xlim(price_xlim)
+            self.ax_price.set_ylim(price_ylim)
+
         self.price_figure.tight_layout()
         self.price_canvas.draw()
+
+        # Trade-Chart
+        self._update_trade_chart()
 
         # Equity-Chart
         self.ax_equity.clear()
@@ -935,11 +1505,132 @@ class BacktestWindow(QMainWindow):
         pnl_pct = ((self.current_equity - self.initial_capital) / self.initial_capital) * 100
         self.ax_equity.set_title(f'Equity-Kurve | P/L: ${self.total_pnl:,.2f} ({pnl_pct:.2f}%)',
                                  color='white', fontsize=11)
+
+        # Zoom-Limits wiederherstellen (wenn gueltig)
+        if equity_xlim is not None and (equity_xlim[0] != 0.0 or equity_xlim[1] != 1.0):
+            self.ax_equity.set_xlim(equity_xlim)
+            self.ax_equity.set_ylim(equity_ylim)
+
         self.equity_figure.tight_layout()
         self.equity_canvas.draw()
 
+    def _update_trade_chart(self):
+        """Aktualisiert den Trade-Chart mit Entry/Exit und P/L."""
+        if not hasattr(self, 'ax_trade'):
+            return
+
+        # Aktuelle Zoom-Limits speichern
+        trade_xlim = self.ax_trade.get_xlim()
+        trade_ylim = self.ax_trade.get_ylim()
+
+        self.ax_trade.clear()
+        self._setup_trade_chart()
+
+        if self.data is None:
+            self.trade_canvas.draw()
+            return
+
+        # Preis-Linie (heller fuer bessere Sichtbarkeit)
+        self.ax_trade.plot(self.data.index, self.data['Close'],
+                          color='#8899bb', linewidth=0.8, alpha=0.7)
+
+        # Abgeschlossene Trades visualisieren
+        wins = 0
+        losses = 0
+
+        for trade in self.trades:
+            entry_idx = trade.get('entry_index', 0) - 1
+            exit_idx = trade.get('exit_index', 0) - 1
+            pnl = trade.get('pnl', 0)
+
+            if entry_idx < 0 or exit_idx < 0:
+                continue
+            if entry_idx >= len(self.data) or exit_idx >= len(self.data):
+                continue
+
+            entry_date = self.data.index[entry_idx]
+            exit_date = self.data.index[exit_idx]
+            entry_price = trade.get('entry_price', 0)
+            exit_price = trade.get('exit_price', 0)
+            trade_type = trade.get('position', 'LONG')
+
+            # Farbe basierend auf P/L
+            if pnl > 0:
+                color = '#33cc33'  # Gruen
+                wins += 1
+            else:
+                color = '#cc3333'  # Rot
+                losses += 1
+
+            # Verbindungslinie zwischen Entry und Exit
+            self.ax_trade.plot([entry_date, exit_date], [entry_price, exit_price],
+                              color=color, linewidth=2, alpha=0.8)
+
+            # Entry-Marker
+            if trade_type == 'LONG':
+                self.ax_trade.scatter([entry_date], [entry_price],
+                                     marker='^', c='#33cc33', s=80, zorder=5,
+                                     edgecolors='white', linewidths=0.5)
+            else:  # SHORT
+                self.ax_trade.scatter([entry_date], [entry_price],
+                                     marker='v', c='#cc3333', s=80, zorder=5,
+                                     edgecolors='white', linewidths=0.5)
+
+            # Exit-Marker (X)
+            self.ax_trade.scatter([exit_date], [exit_price],
+                                 marker='x', c=color, s=60, zorder=5, linewidths=2)
+
+            # P/L Text am Exit (Gewinn oben, Verlust unten) mit Verbindungslinie
+            pnl_text = f'+${pnl:.0f}' if pnl > 0 else f'-${abs(pnl):.0f}'
+            y_offset = 35 if pnl > 0 else -40  # Weiter weg vom Exit
+            self.ax_trade.annotate(pnl_text, (exit_date, exit_price),
+                                  textcoords='offset points', xytext=(8, y_offset),
+                                  fontsize=9, color=color, fontweight='bold',
+                                  bbox=dict(boxstyle='round,pad=0.3', facecolor='#1a1a1a',
+                                           edgecolor=color, alpha=0.9),
+                                  arrowprops=dict(arrowstyle='-', color='#e6b333',
+                                                 linewidth=1.5, alpha=0.8))
+
+        # Aktuelle offene Position
+        if self.position != 'NONE' and self.entry_index > 0:
+            entry_idx = self.entry_index - 1
+            if entry_idx < len(self.data):
+                entry_date = self.data.index[entry_idx]
+                current_idx = min(self.current_index - 1, len(self.data) - 1)
+                current_date = self.data.index[current_idx]
+                current_price = self.data['Close'].iloc[current_idx]
+
+                # Gestrichelte Linie fuer offene Position
+                self.ax_trade.plot([entry_date, current_date],
+                                  [self.entry_price, current_price],
+                                  color='#e6b333', linewidth=2, linestyle='--', alpha=0.8)
+
+                # Entry-Marker
+                marker = '^' if self.position == 'LONG' else 'v'
+                color = '#33cc33' if self.position == 'LONG' else '#cc3333'
+                self.ax_trade.scatter([entry_date], [self.entry_price],
+                                     marker=marker, c=color, s=80, zorder=5,
+                                     edgecolors='white', linewidths=0.5)
+
+        # Titel mit Trade-Statistik
+        total_trades = len(self.trades)
+        win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+        self.ax_trade.set_title(
+            f'Trades | {total_trades} Trades | {wins}W / {losses}L | Win-Rate: {win_rate:.1f}%',
+            color='white', fontsize=11
+        )
+
+        # Zoom-Limits wiederherstellen (wenn gueltig)
+        if trade_xlim[0] != 0.0 or trade_xlim[1] != 1.0:
+            self.ax_trade.set_xlim(trade_xlim)
+            self.ax_trade.set_ylim(trade_ylim)
+
+        self.trade_figure.tight_layout()
+        self.trade_canvas.draw()
+
     def _finalize_backtest(self):
         """Finalisiert den Backtest."""
+        self._debug(f"_finalize_backtest() aufgerufen")
         self._stop_backtest()
 
         # Offene Position schliessen
@@ -952,8 +1643,21 @@ class BacktestWindow(QMainWindow):
         self._add_tradelog(f"Gesamt P/L: ${self.total_pnl:,.2f}")
         self._add_tradelog(f"Trades: {len(self.trades)}")
 
+        # DEBUG-Zusammenfassung
+        self._debug(f"=== Backtest Zusammenfassung ===")
+        self._debug(f"  Datenpunkte verarbeitet: {self.current_index}")
+        self._debug(f"  Signale: BUY={self.buy_count}, SELL={self.sell_count}, HOLD={self.hold_count}")
+        self._debug(f"  Trades: {len(self.trades)}")
+        self._debug(f"  Gesamt P/L: ${self.total_pnl:,.2f}")
+        self._debug(f"  End-Equity: ${self.current_equity:,.2f}")
+        if self.trades:
+            wins = sum(1 for t in self.trades if t.get('pnl', 0) > 0)
+            losses = len(self.trades) - wins
+            self._debug(f"  Gewinn-Trades: {wins}, Verlust-Trades: {losses}")
+        self._debug(f"=== Ende Zusammenfassung ===")
+
     def _update_speed(self, value: int):
-        """Aktualisiert die Geschwindigkeit."""
+        """Aktualisiert die eingestellte Geschwindigkeit."""
         self.steps_per_second = value
         self.speed_label.setText(str(value))
 
@@ -961,11 +1665,58 @@ class BacktestWindow(QMainWindow):
         if self.is_running and self.backtest_timer:
             self.backtest_timer.setInterval(int(1000 / value))
 
+    def _update_actual_speed(self):
+        """Berechnet und zeigt die tatsaechliche Geschwindigkeit an."""
+        now = time.perf_counter()
+        elapsed = now - self._last_speed_update
+
+        if elapsed > 0:
+            actual_speed = self._step_count / elapsed
+            self.actual_speed_label.setText(
+                f"{actual_speed:.1f} / {self.steps_per_second} Schritte/Sek"
+            )
+
+        # Zaehler zuruecksetzen
+        self._step_count = 0
+        self._last_speed_update = now
+
     def _toggle_turbo(self, checked: bool):
         """Schaltet den Turbo-Modus um."""
         self.turbo_mode = checked
         if not checked:
             self._update_charts()
+
+    def _toggle_debug(self, checked: bool):
+        """Schaltet den DEBUG-Modus um."""
+        self.debug_mode = checked
+        if checked:
+            self._log("DEBUG-Modus aktiviert", 'INFO')
+            self._debug_dump_state()
+        else:
+            self._log("DEBUG-Modus deaktiviert", 'INFO')
+
+    def _toggle_invert(self, checked: bool):
+        """Schaltet die Signal-Invertierung um."""
+        self.invert_signals = checked
+        if checked:
+            self._log("Signal-Invertierung aktiviert (BUY<->SELL)", 'INFO')
+        else:
+            self._log("Signal-Invertierung deaktiviert", 'INFO')
+
+    def _debug_dump_state(self):
+        """Gibt den aktuellen Zustand im DEBUG-Modus aus."""
+        self._debug(f"=== Backtester State Dump ===")
+        self._debug(f"Daten: {len(self.data) if self.data is not None else 'None'} Zeilen")
+        self._debug(f"Modell: {type(self.model).__name__ if self.model else 'None'}")
+        self._debug(f"Model-Info: {self.model_info}")
+        self._debug(f"Sequenz-Laenge: {self.sequence_length}")
+        self._debug(f"Prepared Sequences: {self.prepared_sequences.shape if self.prepared_sequences is not None else 'None'}")
+        self._debug(f"Aktueller Index: {self.current_index}")
+        self._debug(f"Position: {self.position}")
+        self._debug(f"Equity: ${self.current_equity:,.2f}")
+        self._debug(f"Total P/L: ${self.total_pnl:,.2f}")
+        self._debug(f"Trades: {len(self.trades)}")
+        self._debug(f"=== Ende State Dump ===")
 
     def _add_tradelog(self, message: str):
         """Fuegt eine Nachricht zum Trade-Log hinzu."""
@@ -988,4 +1739,679 @@ class BacktestWindow(QMainWindow):
         """Behandelt das Schliessen des Fensters."""
         if self.backtest_timer:
             self.backtest_timer.stop()
+        if self._speed_update_timer:
+            self._speed_update_timer.stop()
         event.accept()
+
+    def _show_trade_statistics(self):
+        """Zeigt den Trade-Statistik Dialog."""
+        dialog = TradeStatisticsDialog(self, self.trades, self.data, self.equity_curve,
+                                       self.initial_capital, self.current_equity)
+        dialog.exec()
+
+
+class TradeStatisticsDialog(QDialog):
+    """Dialog fuer detaillierte Trade-Statistiken."""
+
+    def __init__(self, parent, trades: list, data, equity_curve: list,
+                 initial_capital: float, current_equity: float):
+        super().__init__(parent)
+        self.trades = trades
+        self.data = data
+        self.equity_curve = equity_curve
+        self.initial_capital = initial_capital
+        self.current_equity = current_equity
+
+        self.setWindowTitle("Trade-Statistik")
+        self.setMinimumSize(900, 700)
+        self.setStyleSheet(get_stylesheet())
+
+        self._setup_ui()
+
+    def _setup_ui(self):
+        """Erstellt die UI-Komponenten."""
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        # Tab-Widget fuer verschiedene Statistik-Bereiche
+        tabs = QTabWidget()
+        tabs.setStyleSheet(self._tab_style())
+
+        # Tab 1: Uebersicht
+        tabs.addTab(self._create_overview_tab(), "Uebersicht")
+
+        # Tab 2: Trade-Liste
+        tabs.addTab(self._create_trades_tab(), "Trade-Liste")
+
+        # Tab 3: Long/Short Analyse
+        tabs.addTab(self._create_long_short_tab(), "Long/Short")
+
+        # Tab 4: Zeit-Analyse
+        tabs.addTab(self._create_time_analysis_tab(), "Zeit-Analyse")
+
+        layout.addWidget(tabs)
+
+        # Export Button
+        export_btn = QPushButton("Export als CSV")
+        export_btn.setStyleSheet(StyleFactory.button_style_hex('#4da8da', padding='8px 20px'))
+        export_btn.clicked.connect(self._export_csv)
+        layout.addWidget(export_btn)
+
+    def _create_overview_tab(self) -> QWidget:
+        """Erstellt den Uebersicht-Tab."""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+
+        # Linke Spalte: Konto
+        left_group = QGroupBox("Konto-Uebersicht")
+        left_group.setStyleSheet(self._group_style('#33b34d'))
+        left_layout = QGridLayout(left_group)
+
+        stats = self._calculate_account_stats()
+        account_rows = [
+            ("Startkapital:", f"${stats['start_capital']:,.2f}"),
+            ("Aktuelles Kapital:", f"${stats['current_capital']:,.2f}"),
+            ("Gesamt P/L:", f"${stats['total_pnl']:,.2f}"),
+            ("Gesamt P/L %:", f"{stats['total_pnl_pct']:+.2f}%"),
+            ("Max. Equity:", f"${stats['max_equity']:,.2f}"),
+            ("Min. Equity:", f"${stats['min_equity']:,.2f}"),
+            ("Max. Drawdown:", f"${stats['max_drawdown']:,.2f} ({stats['max_drawdown_pct']:.2f}%)"),
+        ]
+
+        for row, (label, value) in enumerate(account_rows):
+            left_layout.addWidget(QLabel(label), row, 0)
+            val_label = QLabel(value)
+            val_label.setStyleSheet("color: white; font-weight: bold;")
+            if 'P/L' in label:
+                color = '#33cc33' if stats['total_pnl'] >= 0 else '#cc3333'
+                val_label.setStyleSheet(f"color: {color}; font-weight: bold;")
+            left_layout.addWidget(val_label, row, 1)
+
+        layout.addWidget(left_group)
+
+        # Rechte Spalte: Trade-Statistik
+        right_group = QGroupBox("Trade-Statistik")
+        right_group.setStyleSheet(self._group_style('#e6b333'))
+        right_layout = QGridLayout(right_group)
+
+        trade_stats = self._calculate_trade_stats()
+        trade_rows = [
+            ("Anzahl Trades:", str(trade_stats['total_trades'])),
+            ("Gewinner:", f"{trade_stats['winners']} ({trade_stats['win_rate']:.1f}%)"),
+            ("Verlierer:", f"{trade_stats['losers']} ({100-trade_stats['win_rate']:.1f}%)"),
+            ("Profit Factor:", f"{trade_stats['profit_factor']:.2f}"),
+            ("Avg. Trade:", f"${trade_stats['avg_trade']:,.2f}"),
+            ("Avg. Gewinn:", f"${trade_stats['avg_win']:,.2f}"),
+            ("Avg. Verlust:", f"${trade_stats['avg_loss']:,.2f}"),
+            ("Groesster Gewinn:", f"${trade_stats['max_win']:,.2f}"),
+            ("Groesster Verlust:", f"${trade_stats['max_loss']:,.2f}"),
+            ("Win Streak:", str(trade_stats['max_win_streak'])),
+            ("Loss Streak:", str(trade_stats['max_loss_streak'])),
+        ]
+
+        for row, (label, value) in enumerate(trade_rows):
+            right_layout.addWidget(QLabel(label), row, 0)
+            val_label = QLabel(value)
+            val_label.setStyleSheet("color: white; font-weight: bold;")
+            right_layout.addWidget(val_label, row, 1)
+
+        layout.addWidget(right_group)
+
+        return widget
+
+    def _create_trades_tab(self) -> QWidget:
+        """Erstellt den Trade-Liste Tab."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        # Tabelle
+        self.trades_table = QTableWidget()
+        self.trades_table.setColumnCount(9)
+        self.trades_table.setHorizontalHeaderLabels([
+            '#', 'Typ', 'Entry Zeit', 'Entry Preis', 'Exit Zeit', 'Exit Preis',
+            'P/L', 'P/L %', 'Dauer'
+        ])
+
+        # Header-Styling
+        header = self.trades_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header.setStyleSheet("QHeaderView::section { background-color: #333; color: white; padding: 5px; }")
+
+        self.trades_table.setStyleSheet("""
+            QTableWidget {
+                background-color: #1a1a1a;
+                color: white;
+                gridline-color: #333;
+            }
+            QTableWidget::item {
+                padding: 5px;
+            }
+            QTableWidget::item:selected {
+                background-color: #4da8da;
+            }
+        """)
+
+        # Daten einfuegen
+        self.trades_table.setRowCount(len(self.trades))
+        for row, trade in enumerate(self.trades):
+            self._add_trade_row(row, trade)
+
+        layout.addWidget(self.trades_table)
+
+        return widget
+
+    def _add_trade_row(self, row: int, trade: dict):
+        """Fuegt eine Trade-Zeile in die Tabelle ein."""
+        entry_idx = trade.get('entry_index', 0) - 1
+        exit_idx = trade.get('exit_index', 0) - 1
+        pnl = trade.get('pnl', 0)
+        entry_price = trade.get('entry_price', 0)
+        exit_price = trade.get('exit_price', 0)
+        trade_type = trade.get('position', 'LONG')
+
+        # Zeit-Informationen
+        entry_time = ""
+        exit_time = ""
+        duration = ""
+        if self.data is not None and entry_idx >= 0 and exit_idx >= 0:
+            if entry_idx < len(self.data):
+                entry_dt = self._get_datetime(entry_idx)
+                entry_time = entry_dt.strftime('%Y-%m-%d %H:%M') if entry_dt else ""
+            if exit_idx < len(self.data):
+                exit_dt = self._get_datetime(exit_idx)
+                exit_time = exit_dt.strftime('%Y-%m-%d %H:%M') if exit_dt else ""
+            # Echte Zeitdauer berechnen
+            if entry_dt and exit_dt:
+                time_diff = exit_dt - entry_dt
+                duration = self._format_duration(time_diff)
+            else:
+                duration_bars = exit_idx - entry_idx
+                duration = f"{duration_bars} Bars"
+
+        # P/L Prozent
+        pnl_pct = (pnl / entry_price * 100) if entry_price > 0 else 0
+
+        # Farbe basierend auf P/L
+        color = QColor('#33cc33') if pnl >= 0 else QColor('#cc3333')
+
+        items = [
+            str(row + 1),
+            trade_type,
+            entry_time,
+            f"${entry_price:,.2f}",
+            exit_time,
+            f"${exit_price:,.2f}",
+            f"${pnl:,.2f}",
+            f"{pnl_pct:+.2f}%",
+            duration
+        ]
+
+        for col, text in enumerate(items):
+            item = QTableWidgetItem(text)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if col in [6, 7]:  # P/L Spalten
+                item.setForeground(color)
+            self.trades_table.setItem(row, col, item)
+
+    def _create_long_short_tab(self) -> QWidget:
+        """Erstellt den Long/Short Analyse Tab."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        # Tabelle fuer Long/Short Vergleich
+        table = QTableWidget()
+        table.setColumnCount(4)
+        table.setRowCount(7)
+        table.setHorizontalHeaderLabels(['Metrik', 'Long', 'Short', 'Gesamt'])
+        table.setVerticalHeaderLabels([''] * 7)
+
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header.setStyleSheet("QHeaderView::section { background-color: #333; color: white; padding: 5px; }")
+
+        table.setStyleSheet("""
+            QTableWidget {
+                background-color: #1a1a1a;
+                color: white;
+                gridline-color: #333;
+            }
+        """)
+
+        # Statistiken berechnen
+        long_stats = self._calculate_type_stats('LONG')
+        short_stats = self._calculate_type_stats('SHORT')
+        total_stats = self._calculate_trade_stats()
+
+        rows = [
+            ('Trades', long_stats['count'], short_stats['count'], total_stats['total_trades']),
+            ('Gewinner', long_stats['winners'], short_stats['winners'], total_stats['winners']),
+            ('Win-Rate', f"{long_stats['win_rate']:.1f}%", f"{short_stats['win_rate']:.1f}%", f"{total_stats['win_rate']:.1f}%"),
+            ('P/L', f"${long_stats['pnl']:,.2f}", f"${short_stats['pnl']:,.2f}", f"${total_stats['total_pnl']:,.2f}"),
+            ('Avg. Trade', f"${long_stats['avg_trade']:,.2f}", f"${short_stats['avg_trade']:,.2f}", f"${total_stats['avg_trade']:,.2f}"),
+            ('Avg. Dauer', f"{long_stats['avg_duration']:.1f} Bars", f"{short_stats['avg_duration']:.1f} Bars", f"{total_stats['avg_duration']:.1f} Bars"),
+            ('Profit Factor', f"{long_stats['profit_factor']:.2f}", f"{short_stats['profit_factor']:.2f}", f"{total_stats['profit_factor']:.2f}"),
+        ]
+
+        for row, (metric, long_val, short_val, total_val) in enumerate(rows):
+            table.setItem(row, 0, QTableWidgetItem(metric))
+            table.setItem(row, 1, QTableWidgetItem(str(long_val)))
+            table.setItem(row, 2, QTableWidgetItem(str(short_val)))
+            table.setItem(row, 3, QTableWidgetItem(str(total_val)))
+
+        layout.addWidget(table)
+
+        return widget
+
+    def _create_time_analysis_tab(self) -> QWidget:
+        """Erstellt den Zeit-Analyse Tab."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        time_stats = self._calculate_time_stats()
+
+        # Zeit-Statistiken Gruppe
+        time_group = QGroupBox("Zeit-Statistiken")
+        time_group.setStyleSheet(self._group_style('#4da8da'))
+        time_layout = QGridLayout(time_group)
+
+        time_rows = [
+            ("Backtest-Zeitraum:", time_stats['period']),
+            ("Erster Trade:", time_stats['first_trade']),
+            ("Letzter Trade:", time_stats['last_trade']),
+            ("Trading-Tage:", str(time_stats['trading_days'])),
+            ("Trades pro Tag:", f"{time_stats['trades_per_day']:.2f}"),
+            ("Avg. Trade-Dauer:", time_stats['avg_duration']),
+            ("Min. Trade-Dauer:", time_stats['min_duration']),
+            ("Max. Trade-Dauer:", time_stats['max_duration']),
+            ("Laengster Gewinn-Trade:", time_stats['longest_win']),
+            ("Laengster Verlust-Trade:", time_stats['longest_loss']),
+            ("Zeit im Markt:", time_stats['total_time_in_market']),
+            ("Zeit im Markt (%):", time_stats['time_in_market_pct']),
+        ]
+
+        for row, (label, value) in enumerate(time_rows):
+            time_layout.addWidget(QLabel(label), row, 0)
+            val_label = QLabel(value)
+            val_label.setStyleSheet("color: white; font-weight: bold;")
+            time_layout.addWidget(val_label, row, 1)
+
+        layout.addWidget(time_group)
+
+        # Performance nach Tageszeit (wenn Daten vorhanden)
+        if self.data is not None and len(self.trades) > 0:
+            hourly_group = QGroupBox("Performance nach Stunde (Entry)")
+            hourly_group.setStyleSheet(self._group_style('#b19cd9'))
+            hourly_layout = QVBoxLayout(hourly_group)
+
+            hourly_table = QTableWidget()
+            hourly_stats = self._calculate_hourly_stats()
+
+            hourly_table.setColumnCount(4)
+            hourly_table.setRowCount(len(hourly_stats))
+            hourly_table.setHorizontalHeaderLabels(['Stunde', 'Trades', 'Win-Rate', 'P/L'])
+
+            header = hourly_table.horizontalHeader()
+            header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            header.setStyleSheet("QHeaderView::section { background-color: #333; color: white; }")
+
+            hourly_table.setStyleSheet("""
+                QTableWidget { background-color: #1a1a1a; color: white; gridline-color: #333; }
+            """)
+
+            for row, (hour, stats) in enumerate(sorted(hourly_stats.items())):
+                hourly_table.setItem(row, 0, QTableWidgetItem(f"{hour:02d}:00"))
+                hourly_table.setItem(row, 1, QTableWidgetItem(str(stats['count'])))
+                hourly_table.setItem(row, 2, QTableWidgetItem(f"{stats['win_rate']:.1f}%"))
+                pnl_item = QTableWidgetItem(f"${stats['pnl']:,.2f}")
+                pnl_item.setForeground(QColor('#33cc33' if stats['pnl'] >= 0 else '#cc3333'))
+                hourly_table.setItem(row, 3, pnl_item)
+
+            hourly_layout.addWidget(hourly_table)
+            layout.addWidget(hourly_group)
+
+        layout.addStretch()
+        return widget
+
+    def _get_datetime(self, idx: int):
+        """Holt DateTime aus dem DataFrame (Index oder Spalte)."""
+        if self.data is None or idx < 0 or idx >= len(self.data):
+            return None
+        try:
+            # Versuche Index (wenn DateTime als Index gesetzt)
+            dt = self.data.index[idx]
+            if hasattr(dt, 'strftime'):
+                return dt
+            # Versuche DateTime-Spalte
+            if 'DateTime' in self.data.columns:
+                dt_val = self.data['DateTime'].iloc[idx]
+                # Falls String, in Timestamp konvertieren
+                if isinstance(dt_val, str):
+                    return pd.to_datetime(dt_val)
+                if hasattr(dt_val, 'strftime'):
+                    return dt_val
+        except:
+            pass
+        return None
+
+    def _format_duration(self, td) -> str:
+        """Formatiert eine Zeitdauer lesbar."""
+        total_seconds = int(td.total_seconds())
+        if total_seconds < 0:
+            return "0m"
+
+        days = total_seconds // 86400
+        hours = (total_seconds % 86400) // 3600
+        minutes = (total_seconds % 3600) // 60
+
+        if days > 0:
+            return f"{days}d {hours}h"
+        elif hours > 0:
+            return f"{hours}h {minutes}m"
+        else:
+            return f"{minutes}m"
+
+    def _calculate_account_stats(self) -> dict:
+        """Berechnet Konto-Statistiken."""
+        max_equity = max(self.equity_curve) if self.equity_curve else self.initial_capital
+        min_equity = min(self.equity_curve) if self.equity_curve else self.initial_capital
+
+        # Max Drawdown berechnen
+        max_drawdown = 0
+        peak = self.initial_capital
+        for eq in self.equity_curve:
+            if eq > peak:
+                peak = eq
+            drawdown = peak - eq
+            if drawdown > max_drawdown:
+                max_drawdown = drawdown
+
+        total_pnl = self.current_equity - self.initial_capital
+        total_pnl_pct = (total_pnl / self.initial_capital * 100) if self.initial_capital > 0 else 0
+        max_drawdown_pct = (max_drawdown / peak * 100) if peak > 0 else 0
+
+        return {
+            'start_capital': self.initial_capital,
+            'current_capital': self.current_equity,
+            'total_pnl': total_pnl,
+            'total_pnl_pct': total_pnl_pct,
+            'max_equity': max_equity,
+            'min_equity': min_equity,
+            'max_drawdown': max_drawdown,
+            'max_drawdown_pct': max_drawdown_pct,
+        }
+
+    def _calculate_trade_stats(self) -> dict:
+        """Berechnet Trade-Statistiken."""
+        if not self.trades:
+            return {
+                'total_trades': 0, 'winners': 0, 'losers': 0, 'win_rate': 0,
+                'profit_factor': 0, 'avg_trade': 0, 'avg_win': 0, 'avg_loss': 0,
+                'max_win': 0, 'max_loss': 0, 'max_win_streak': 0, 'max_loss_streak': 0,
+                'total_pnl': 0, 'avg_duration': 0
+            }
+
+        pnls = [t.get('pnl', 0) for t in self.trades]
+        wins = [p for p in pnls if p > 0]
+        losses = [p for p in pnls if p <= 0]
+
+        # Streaks berechnen
+        win_streak = 0
+        loss_streak = 0
+        max_win_streak = 0
+        max_loss_streak = 0
+        for pnl in pnls:
+            if pnl > 0:
+                win_streak += 1
+                loss_streak = 0
+                max_win_streak = max(max_win_streak, win_streak)
+            else:
+                loss_streak += 1
+                win_streak = 0
+                max_loss_streak = max(max_loss_streak, loss_streak)
+
+        # Durchschnittliche Dauer
+        durations = []
+        for t in self.trades:
+            entry_idx = t.get('entry_index', 0)
+            exit_idx = t.get('exit_index', 0)
+            if entry_idx > 0 and exit_idx > 0:
+                durations.append(exit_idx - entry_idx)
+
+        total_wins = sum(wins) if wins else 0
+        total_losses = abs(sum(losses)) if losses else 0
+        profit_factor = (total_wins / total_losses) if total_losses > 0 else float('inf') if total_wins > 0 else 0
+
+        return {
+            'total_trades': len(self.trades),
+            'winners': len(wins),
+            'losers': len(losses),
+            'win_rate': (len(wins) / len(self.trades) * 100) if self.trades else 0,
+            'profit_factor': profit_factor if profit_factor != float('inf') else 999.99,
+            'avg_trade': sum(pnls) / len(pnls) if pnls else 0,
+            'avg_win': sum(wins) / len(wins) if wins else 0,
+            'avg_loss': sum(losses) / len(losses) if losses else 0,
+            'max_win': max(pnls) if pnls else 0,
+            'max_loss': min(pnls) if pnls else 0,
+            'max_win_streak': max_win_streak,
+            'max_loss_streak': max_loss_streak,
+            'total_pnl': sum(pnls),
+            'avg_duration': sum(durations) / len(durations) if durations else 0,
+        }
+
+    def _calculate_type_stats(self, trade_type: str) -> dict:
+        """Berechnet Statistiken fuer einen Trade-Typ (LONG/SHORT)."""
+        type_trades = [t for t in self.trades if t.get('position') == trade_type]
+
+        if not type_trades:
+            return {
+                'count': 0, 'winners': 0, 'win_rate': 0, 'pnl': 0,
+                'avg_trade': 0, 'avg_duration': 0, 'profit_factor': 0
+            }
+
+        pnls = [t.get('pnl', 0) for t in type_trades]
+        wins = [p for p in pnls if p > 0]
+        losses = [p for p in pnls if p <= 0]
+
+        durations = []
+        for t in type_trades:
+            entry_idx = t.get('entry_index', 0)
+            exit_idx = t.get('exit_index', 0)
+            if entry_idx > 0 and exit_idx > 0:
+                durations.append(exit_idx - entry_idx)
+
+        total_wins = sum(wins) if wins else 0
+        total_losses = abs(sum(losses)) if losses else 0
+        profit_factor = (total_wins / total_losses) if total_losses > 0 else float('inf') if total_wins > 0 else 0
+
+        return {
+            'count': len(type_trades),
+            'winners': len(wins),
+            'win_rate': (len(wins) / len(type_trades) * 100) if type_trades else 0,
+            'pnl': sum(pnls),
+            'avg_trade': sum(pnls) / len(pnls) if pnls else 0,
+            'avg_duration': sum(durations) / len(durations) if durations else 0,
+            'profit_factor': profit_factor if profit_factor != float('inf') else 999.99,
+        }
+
+    def _calculate_time_stats(self) -> dict:
+        """Berechnet Zeit-bezogene Statistiken mit echten Zeitdauern."""
+        if not self.trades or self.data is None:
+            return {
+                'period': '-', 'first_trade': '-', 'last_trade': '-',
+                'trading_days': 0, 'trades_per_day': 0,
+                'avg_duration': '-', 'min_duration': '-', 'max_duration': '-',
+                'longest_win': '-', 'longest_loss': '-',
+                'total_time_in_market': '-', 'time_in_market_pct': '-'
+            }
+
+        # Zeitraum
+        start_dt = self._get_datetime(0)
+        end_dt = self._get_datetime(len(self.data) - 1)
+        period_start = start_dt.strftime('%Y-%m-%d') if start_dt else '-'
+        period_end = end_dt.strftime('%Y-%m-%d') if end_dt else '-'
+        period = f"{period_start} bis {period_end}"
+
+        # Erster und letzter Trade
+        first_trade = '-'
+        last_trade = '-'
+        if self.trades:
+            first_idx = self.trades[0].get('entry_index', 0) - 1
+            last_idx = self.trades[-1].get('exit_index', 0) - 1
+            first_dt = self._get_datetime(first_idx)
+            last_dt = self._get_datetime(last_idx)
+            if first_dt:
+                first_trade = first_dt.strftime('%Y-%m-%d %H:%M')
+            if last_dt:
+                last_trade = last_dt.strftime('%Y-%m-%d %H:%M')
+
+        # Echte Zeitdauern berechnen
+        durations = []  # in Sekunden
+        win_durations = []
+        loss_durations = []
+        total_time_in_market = 0
+
+        for t in self.trades:
+            entry_idx = t.get('entry_index', 0) - 1
+            exit_idx = t.get('exit_index', 0) - 1
+            pnl = t.get('pnl', 0)
+
+            entry_dt = self._get_datetime(entry_idx)
+            exit_dt = self._get_datetime(exit_idx)
+
+            if entry_dt and exit_dt:
+                dur_seconds = (exit_dt - entry_dt).total_seconds()
+                durations.append(dur_seconds)
+                total_time_in_market += dur_seconds
+                if pnl > 0:
+                    win_durations.append(dur_seconds)
+                else:
+                    loss_durations.append(dur_seconds)
+
+        # Trading-Tage (einzigartige Tage)
+        trading_days = set()
+        for t in self.trades:
+            entry_idx = t.get('entry_index', 0) - 1
+            entry_dt = self._get_datetime(entry_idx)
+            if entry_dt:
+                trading_days.add(entry_dt.strftime('%Y-%m-%d'))
+
+        # Gesamtzeit des Backtests
+        total_backtest_time = 0
+        if start_dt and end_dt:
+            total_backtest_time = (end_dt - start_dt).total_seconds()
+
+        # Zeit im Markt als Prozent
+        time_in_market_pct = (total_time_in_market / total_backtest_time * 100) if total_backtest_time > 0 else 0
+
+        # Hilfsfunktion fuer Zeitformatierung
+        def format_seconds(secs):
+            if secs == 0:
+                return "0m"
+            td = pd.Timedelta(seconds=secs)
+            return self._format_duration(td)
+
+        return {
+            'period': period,
+            'first_trade': first_trade,
+            'last_trade': last_trade,
+            'trading_days': len(trading_days),
+            'trades_per_day': len(self.trades) / len(trading_days) if trading_days else 0,
+            'avg_duration': format_seconds(sum(durations) / len(durations)) if durations else '-',
+            'min_duration': format_seconds(min(durations)) if durations else '-',
+            'max_duration': format_seconds(max(durations)) if durations else '-',
+            'longest_win': format_seconds(max(win_durations)) if win_durations else '-',
+            'longest_loss': format_seconds(max(loss_durations)) if loss_durations else '-',
+            'total_time_in_market': format_seconds(total_time_in_market),
+            'time_in_market_pct': f"{time_in_market_pct:.1f}%",
+        }
+
+    def _calculate_hourly_stats(self) -> dict:
+        """Berechnet Statistiken nach Stunde."""
+        hourly = {}
+
+        for t in self.trades:
+            entry_idx = t.get('entry_index', 0) - 1
+            if entry_idx >= 0 and entry_idx < len(self.data):
+                try:
+                    hour = self.data.index[entry_idx].hour
+                except:
+                    continue
+
+                if hour not in hourly:
+                    hourly[hour] = {'count': 0, 'wins': 0, 'pnl': 0}
+
+                hourly[hour]['count'] += 1
+                hourly[hour]['pnl'] += t.get('pnl', 0)
+                if t.get('pnl', 0) > 0:
+                    hourly[hour]['wins'] += 1
+
+        # Win-Rate berechnen
+        for hour in hourly:
+            count = hourly[hour]['count']
+            hourly[hour]['win_rate'] = (hourly[hour]['wins'] / count * 100) if count > 0 else 0
+
+        return hourly
+
+    def _export_csv(self):
+        """Exportiert die Trades als CSV."""
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Trades exportieren", "trades_export.csv", "CSV Files (*.csv)"
+        )
+
+        if filename:
+            try:
+                import csv
+                with open(filename, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(['#', 'Typ', 'Entry Zeit', 'Entry Preis', 'Exit Zeit',
+                                    'Exit Preis', 'P/L', 'P/L %', 'Dauer (Bars)'])
+
+                    for i, trade in enumerate(self.trades):
+                        entry_idx = trade.get('entry_index', 0) - 1
+                        exit_idx = trade.get('exit_index', 0) - 1
+                        entry_time = str(self.data.index[entry_idx]) if entry_idx >= 0 and entry_idx < len(self.data) else ''
+                        exit_time = str(self.data.index[exit_idx]) if exit_idx >= 0 and exit_idx < len(self.data) else ''
+                        entry_price = trade.get('entry_price', 0)
+                        pnl = trade.get('pnl', 0)
+                        pnl_pct = (pnl / entry_price * 100) if entry_price > 0 else 0
+                        duration = exit_idx - entry_idx if entry_idx >= 0 and exit_idx >= 0 else 0
+
+                        writer.writerow([
+                            i + 1, trade.get('position', ''), entry_time,
+                            f"{trade.get('entry_price', 0):.2f}", exit_time,
+                            f"{trade.get('exit_price', 0):.2f}",
+                            f"{pnl:.2f}", f"{pnl_pct:.2f}", duration
+                        ])
+
+            except Exception as e:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Export Fehler", f"Fehler beim Export: {e}")
+
+    def _tab_style(self) -> str:
+        """Gibt das Tab-Stylesheet zurueck."""
+        return '''
+            QTabWidget::pane { border: 1px solid #4d4d4d; background-color: #262626; }
+            QTabBar::tab { background-color: #333; color: #b3b3b3; padding: 8px 20px;
+                          margin-right: 2px; border-top-left-radius: 4px; border-top-right-radius: 4px; }
+            QTabBar::tab:selected { background-color: #4da8da; color: white; }
+            QTabBar::tab:hover:!selected { background-color: #444; }
+        '''
+
+    def _group_style(self, color: str) -> str:
+        """Gibt das GroupBox-Stylesheet zurueck."""
+        return f'''
+            QGroupBox {{
+                font-weight: bold;
+                border: 2px solid {color};
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 10px;
+                color: {color};
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }}
+            QLabel {{ color: #b3b3b3; }}
+        '''

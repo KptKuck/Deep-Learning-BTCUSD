@@ -228,7 +228,7 @@ class TrainingWindow(QMainWindow):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("BTCUSD Analyzer - Training")
+        self.setWindowTitle("3 - Training")
         self.setMinimumSize(1200, 800)
         self._parent = parent
 
@@ -834,6 +834,7 @@ class TrainingWindow(QMainWindow):
         # Training-Config
         config = {
             'epochs': self.epochs_spin.value(),
+            'batch_size': self.batch_size_spin.value(),
             'learning_rate': self.lr_spin.value(),
             'early_stopping': self.early_stopping_check.isChecked(),
             'patience': self.patience_spin.value(),
@@ -878,8 +879,10 @@ class TrainingWindow(QMainWindow):
         """
         from PyQt6.QtWidgets import QApplication
         from pathlib import Path
+        from datetime import datetime
         import gc
 
+        training_start = datetime.now()
         self._log("=== Synchrones Training gestartet ===")
         self._stop_requested = False
 
@@ -890,8 +893,14 @@ class TrainingWindow(QMainWindow):
                 self.model = self.model.to(self.device)
                 self._log(f"Modell auf GPU verschoben: {self.device}")
 
-            # Loss und Optimizer
-            criterion = torch.nn.CrossEntropyLoss()
+            # Loss und Optimizer (mit Class Weights falls vorhanden)
+            class_weights = self.training_data.get('class_weights')
+            if class_weights is not None:
+                class_weights = class_weights.to(self.device)
+                self._log(f"Class Weights: {class_weights.cpu().numpy().round(2)}")
+                criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+            else:
+                criterion = torch.nn.CrossEntropyLoss()
             optimizer = torch.optim.Adam(
                 self.model.parameters(),
                 lr=config['learning_rate'],
@@ -974,35 +983,117 @@ class TrainingWindow(QMainWindow):
                 self._on_epoch_completed(epoch, avg_train_loss, train_acc, avg_val_loss, val_acc)
                 QApplication.processEvents()
 
+                # Beste Accuracy tracken (immer, nicht nur bei Early Stopping)
+                if val_acc > best_val_acc:
+                    best_val_acc = val_acc
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+
                 # Early Stopping Check
                 if config.get('early_stopping', True):
-                    if val_acc > best_val_acc:
-                        best_val_acc = val_acc
-                        patience_counter = 0
-                    else:
-                        patience_counter += 1
-                        if patience_counter >= patience:
-                            self._log(f"Early Stopping nach {epoch} Epochen")
-                            break
+                    if patience_counter >= patience:
+                        self._log(f"Early Stopping nach {epoch} Epochen")
+                        break
 
             # Modell speichern
             if config.get('save_best', True):
+                from datetime import datetime
+                import json
                 save_path = Path(config.get('save_path', 'models'))
                 save_path.mkdir(parents=True, exist_ok=True)
                 model_name = self.model.name.lower().replace(' ', '_')
-                final_path = save_path / f'{model_name}_final_acc{best_val_acc:.1f}.pt'
-                self.model.save(final_path, metrics={
-                    'best_accuracy': best_val_acc,
-                    'epochs_trained': epoch
-                })
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M')
+                final_path = save_path / f'{model_name}_{timestamp}_acc{best_val_acc:.1f}.pt'
+
+                # Trainingszeit berechnen
+                training_end = datetime.now()
+                training_duration = (training_end - training_start).total_seconds()
+
+                # Class Weights extrahieren
+                class_weights_list = None
+                if self.training_data and 'class_weights' in self.training_data:
+                    cw = self.training_data['class_weights']
+                    class_weights_list = cw.tolist() if hasattr(cw, 'tolist') else list(cw)
+
+                # Vollstaendige model_info (Trainings-Plakette)
+                model_info = {
+                    # === Modell-Identifikation ===
+                    'model_type': model_name,
+                    'trained_at': timestamp,
+                    'training_duration_sec': round(training_duration, 1),
+
+                    # === Architektur ===
+                    'input_size': self.model.input_size if hasattr(self.model, 'input_size') else None,
+                    'hidden_size': self.hidden_size_spin.value(),
+                    'num_layers': self.num_layers_spin.value(),
+                    'dropout': self.dropout_spin.value() if hasattr(self, 'dropout_spin') else 0.2,
+                    'bidirectional': True,
+
+                    # === Daten-Parameter ===
+                    'num_classes': self.training_info.get('num_classes', 3) if self.training_info else 3,
+                    'lookback_size': self.training_info.get('params', {}).get('lookback', 100) if self.training_info else 100,
+                    'lookforward_size': self.training_info.get('params', {}).get('lookforward', 10) if self.training_info else 10,
+                    'lookahead_bars': self.training_info.get('lookahead_bars', 0) if self.training_info else 0,
+                    'train_test_split': self.training_info.get('params', {}).get('train_test_split', 80) if self.training_info else 80,
+
+                    # === Samples ===
+                    'total_samples': self.training_info.get('actual_samples', 0) if self.training_info else 0,
+                    'train_samples': len(self.train_loader.dataset) if self.train_loader else 0,
+                    'val_samples': len(self.val_loader.dataset) if self.val_loader else 0,
+
+                    # === Features ===
+                    'features': self.training_info.get('features', []) if self.training_info else [],
+                    'num_features': len(self.training_info.get('features', [])) if self.training_info else 0,
+
+                    # === Training-Hyperparameter ===
+                    'epochs_trained': epoch,
+                    'epochs_configured': config['epochs'],
+                    'batch_size': config['batch_size'],
+                    'learning_rate': config['learning_rate'],
+                    'optimizer': 'Adam',
+                    'scheduler': 'ReduceLROnPlateau',
+                    'early_stopping': config.get('early_stopping', True),
+                    'patience': patience,
+
+                    # === Class Weights ===
+                    'class_weights': class_weights_list,
+
+                    # === Ergebnisse ===
+                    'best_accuracy': round(best_val_acc, 2),
+                    'final_val_loss': round(avg_val_loss, 4),
+                    'stopped_early': patience_counter >= patience,
+
+                    # === Peak-Detection (aus training_info) ===
+                    'num_buy_peaks': len(self.training_info.get('buy_indices', [])) if self.training_info else 0,
+                    'num_sell_peaks': len(self.training_info.get('sell_indices', [])) if self.training_info else 0,
+                }
+
+                # Modell speichern
+                self.model.save(final_path,
+                    metrics={'best_accuracy': best_val_acc, 'epochs_trained': epoch},
+                    model_info=model_info
+                )
                 self._log(f"Modell gespeichert: {final_path}")
 
-            # Training beendet
+                # JSON-Plakette separat speichern (fuer einfaches Lesen)
+                json_path = final_path.with_suffix('.json')
+                with open(json_path, 'w', encoding='utf-8') as f:
+                    json.dump(model_info, f, indent=2, ensure_ascii=False)
+                self._log(f"Trainings-Info: {json_path.name}")
+
+                # Modell in Session-Ordner kopieren
+                self._save_model_to_session(final_path)
+
+            # Training beendet - model_info an results anhaengen
             self._on_training_finished({
                 'best_accuracy': best_val_acc,
                 'final_loss': avg_val_loss,
                 'stopped_early': patience_counter >= patience,
-                'model_path': str(final_path) if config.get('save_best', True) else ''
+                'model_path': str(final_path) if config.get('save_best', True) else '',
+                'model_type': model_name,
+                'hidden_size': self.hidden_size_spin.value(),
+                'num_layers': self.num_layers_spin.value(),
             })
 
         except torch.cuda.OutOfMemoryError as e:
@@ -1094,6 +1185,26 @@ class TrainingWindow(QMainWindow):
             self, "Training abgeschlossen",
             f"Training erfolgreich!\n\nBeste Accuracy: {best_acc:.1f}%\n\nModell: {model_path}"
         )
+
+    def _save_model_to_session(self, model_path: Path):
+        """Kopiert das Modell in den Session-Ordner."""
+        try:
+            from ..core.logger import get_logger
+            from ..core.session_manager import SessionManager
+
+            logger = get_logger()
+            session_dir = logger.get_session_dir()
+
+            if session_dir is None:
+                self._log("Session-Ordner nicht verfuegbar", level='WARNING')
+                return
+
+            manager = SessionManager(session_dir)
+            dest_path = manager.save_model(model_path)
+            self._log(f"Modell in Session kopiert: {dest_path.name}")
+
+        except Exception as e:
+            self._log(f"Modell-Kopie in Session fehlgeschlagen: {e}", level='WARNING')
 
     def _on_training_error(self, error: str):
         """Callback bei Fehler."""
@@ -1251,8 +1362,13 @@ class TrainingWindow(QMainWindow):
             model = model.to(device)
             self._log(f"Modell auf GPU geladen")
 
-            # Loss und Optimizer
-            criterion = torch.nn.CrossEntropyLoss()
+            # Loss und Optimizer (mit Class Weights falls vorhanden)
+            class_weights = self.training_data.get('class_weights') if self.training_data else None
+            if class_weights is not None:
+                class_weights = class_weights.to(device)
+                criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+            else:
+                criterion = torch.nn.CrossEntropyLoss()
             optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
             # 5 Test-Epochen trainieren

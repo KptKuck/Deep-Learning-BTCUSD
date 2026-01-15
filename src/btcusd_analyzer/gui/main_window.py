@@ -20,6 +20,8 @@ from PyQt6.QtGui import QFont, QAction, QColor
 
 import logging
 
+import json
+import numpy as np
 import pandas as pd
 
 from ..core.config import Config
@@ -91,6 +93,7 @@ class MainWindow(QMainWindow):
         self.data_path: Optional[Path] = None
         self.training_data = None
         self.training_info = None
+        self.backtest_info = None  # Separates Backtest-Daten (nicht im Training verwendet)
         self.model = None
         self.model_path: Optional[Path] = None
         self.model_info = None
@@ -115,12 +118,13 @@ class MainWindow(QMainWindow):
         self.logger.info('BTCUSD Analyzer GUI gestartet')
         self.logger.info(f'Log-Datei: {self.logger.get_log_file_path()}')
 
-        # Auto-Load letzte Daten
+        # Auto-Load letzte Daten und Session
         QTimer.singleShot(100, self._auto_load_last_data)
+        QTimer.singleShot(200, self._auto_load_latest_session)
 
     def _init_ui(self):
         """Initialisiert die UI-Komponenten."""
-        self.setWindowTitle('BTCUSD Analyzer')
+        self.setWindowTitle('1 - Main')
         self.setMinimumSize(1400, 950)
 
         # Fenstergroesse als Prozent der Bildschirmgroesse (85%)
@@ -641,14 +645,26 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(btn_row)
 
-        # Backtester Button
+        # Button-Reihe: Backtester | Session laden
+        btn_row2 = QHBoxLayout()
+
         self.backtest_btn = QPushButton('Backtester')
         self.backtest_btn.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
         self.backtest_btn.setFixedHeight(26)
         self.backtest_btn.setStyleSheet(self._button_style((0.7, 0.4, 0.8)))
         self.backtest_btn.setEnabled(False)
         self.backtest_btn.clicked.connect(self._open_backtester)
-        layout.addWidget(self.backtest_btn)
+        btn_row2.addWidget(self.backtest_btn)
+
+        self.load_session_btn = QPushButton('Session')
+        self.load_session_btn.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
+        self.load_session_btn.setFixedHeight(26)
+        self.load_session_btn.setStyleSheet(self._button_style((0.3, 0.6, 0.8)))
+        self.load_session_btn.setToolTip('Session-Ordner laden (Daten + Modell)')
+        self.load_session_btn.clicked.connect(self._load_session)
+        btn_row2.addWidget(self.load_session_btn)
+
+        layout.addLayout(btn_row2)
 
         # Modell Info Labels
         self.model_name_label = QLabel('Modell: -')
@@ -1177,7 +1193,30 @@ class MainWindow(QMainWindow):
 
         self._log('Datenanalyse gestartet...', 'INFO')
 
-        # TODO: Implementierung
+        # Grundlegende Statistiken
+        df = self.data
+        self._log(f'Zeitraum: {df.index[0]} bis {df.index[-1]}', 'INFO')
+        self._log(f'Datenpunkte: {len(df):,}', 'INFO')
+
+        # Preis-Statistiken
+        if 'Close' in df.columns:
+            close = df['Close']
+            self._log(f'Preis Min: ${close.min():,.2f}', 'INFO')
+            self._log(f'Preis Max: ${close.max():,.2f}', 'INFO')
+            self._log(f'Preis Mean: ${close.mean():,.2f}', 'INFO')
+
+            # Volatilitaet
+            returns = close.pct_change().dropna()
+            volatility = returns.std() * np.sqrt(365 * 24)  # Annualisiert
+            self._log(f'Volatilitaet (ann.): {volatility:.1%}', 'INFO')
+
+        # Fehlende Werte
+        missing = df.isnull().sum().sum()
+        if missing > 0:
+            self._log(f'Fehlende Werte: {missing}', 'WARNING')
+        else:
+            self._log('Keine fehlenden Werte', 'SUCCESS')
+
         self._log('Analyse abgeschlossen', 'SUCCESS')
 
     def _prepare_training_data(self):
@@ -1197,12 +1236,18 @@ class MainWindow(QMainWindow):
             self._log('PrepareDataWindow noch nicht implementiert', 'WARNING')
             QMessageBox.information(self, 'Info', 'Trainingsdaten-Vorbereitung noch nicht implementiert')
 
-    def _on_training_data_prepared(self, training_data, training_info):
+    def _on_training_data_prepared(self, training_data, training_info, backtest_info):
         """Callback wenn Trainingsdaten vorbereitet wurden."""
         self.training_data = training_data
         self.training_info = training_info
+        self.backtest_info = backtest_info  # Separater Backtest-Datensatz
         self.training_data_ready.emit(training_data)
         self._log('Trainingsdaten bereit', 'SUCCESS')
+
+        # Backtest-Info loggen
+        if backtest_info:
+            backtest_points = backtest_info.get('num_points', 0)
+            self._log(f'Backtest-Daten reserviert: {backtest_points} Datenpunkte', 'INFO')
 
         # Status-Panel aktualisieren
         self._update_status_panel_from_training(training_data, training_info)
@@ -1235,8 +1280,28 @@ class MainWindow(QMainWindow):
 
         if filepath:
             self._log(f'Lade Trainingsdaten: {Path(filepath).name}', 'INFO')
-            # TODO: Implementierung
-            self._log('Trainingsdaten geladen', 'SUCCESS')
+            try:
+                if filepath.endswith('.npz'):
+                    data = np.load(filepath, allow_pickle=True)
+                    self.training_data = {
+                        'X_train': data.get('X_train'),
+                        'y_train': data.get('y_train'),
+                        'X_val': data.get('X_val'),
+                        'y_val': data.get('y_val'),
+                    }
+                    # Info extrahieren falls vorhanden
+                    if 'info' in data:
+                        self.training_info = data['info'].item()
+                    else:
+                        self.training_info = {'source': filepath}
+
+                    self._log(f'Training Samples: {len(self.training_data["X_train"]):,}', 'INFO')
+                    self._log('Trainingsdaten geladen', 'SUCCESS')
+                    self.training_data_ready.emit(self.training_data)
+                else:
+                    self._log(f'Unterstuetztes Format: .npz', 'WARNING')
+            except Exception as e:
+                self._log(f'Fehler beim Laden: {e}', 'ERROR')
 
     def _open_training_gui(self):
         """Oeffnet das Training-GUI Fenster."""
@@ -1263,6 +1328,25 @@ class MainWindow(QMainWindow):
         """Callback wenn Training abgeschlossen."""
         self.model = model
         self.model_loaded.emit(model)
+
+        # model_info aus results und training_info erstellen
+        training_info = self.training_info or {}
+        self.model_info = {
+            'model_type': results.get('model_type', 'bilstm'),
+            'input_size': training_info.get('num_features', len(training_info.get('features', []))),
+            'hidden_size': results.get('hidden_size', 100),
+            'num_layers': results.get('num_layers', 2),
+            'num_classes': training_info.get('num_classes', 2),
+            'sequence_length': training_info.get('params', {}).get('lookback', 100),
+            'features': training_info.get('features', []),
+            'accuracy': results.get('best_accuracy', 0),
+        }
+
+        # backtest_info sollte bereits durch _on_training_data_prepared gesetzt sein
+        if self.backtest_info and 'data' in self.backtest_info:
+            num_points = len(self.backtest_info['data'])
+            self._log(f"Backtest-Daten verfuegbar: {num_points} Punkte", 'INFO')
+
         self._log('Training abgeschlossen', 'SUCCESS')
 
     def _load_model(self):
@@ -1277,9 +1361,37 @@ class MainWindow(QMainWindow):
             self._log(f'Lade Modell: {Path(filepath).name}', 'INFO')
             try:
                 import torch
+                from ..models.factory import ModelFactory
+
                 checkpoint = torch.load(filepath, map_location='cpu')
-                # TODO: Model-Rekonstruktion
                 self.model_path = Path(filepath)
+
+                # Model-Info aus Checkpoint extrahieren
+                if 'model_info' in checkpoint:
+                    self.model_info = checkpoint['model_info']
+                    model_type = self.model_info.get('model_type', 'bilstm')
+                    input_size = self.model_info.get('input_size', 6)
+                    hidden_size = self.model_info.get('hidden_size', 100)
+                    num_layers = self.model_info.get('num_layers', 2)
+                    num_classes = self.model_info.get('num_classes', 3)
+
+                    # Modell erstellen und Gewichte laden
+                    self.model = ModelFactory.create(
+                        model_type,
+                        input_size=input_size,
+                        hidden_size=hidden_size,
+                        num_layers=num_layers,
+                        num_classes=num_classes
+                    )
+                    self.model.load_state_dict(checkpoint['model_state_dict'])
+                    self.model.eval()
+
+                    self._log(f'Modell: {model_type.upper()}', 'INFO')
+                    self._log(f'Parameter: {self.model.count_parameters():,}', 'INFO')
+                else:
+                    self._log('Checkpoint ohne model_info - manuelle Konfiguration erforderlich', 'WARNING')
+
+                self.model_loaded.emit(self.model)
                 self._log('Modell geladen', 'SUCCESS')
             except Exception as e:
                 self._log(f'Modell-Ladefehler: {e}', 'ERROR')
@@ -1287,8 +1399,135 @@ class MainWindow(QMainWindow):
     def _load_last_model(self):
         """Laedt das zuletzt verwendete Modell."""
         self._log('Suche letztes Modell...', 'INFO')
-        # TODO: Implementierung
-        self._log('Kein vorheriges Modell gefunden', 'WARNING')
+
+        # Suche in results und models Verzeichnissen
+        search_dirs = [self.config.paths.results_dir, self.config.paths.models_dir]
+        model_files = []
+
+        for search_dir in search_dirs:
+            if search_dir.exists():
+                model_files.extend(search_dir.rglob('*.pt'))
+                model_files.extend(search_dir.rglob('*.pth'))
+
+        if model_files:
+            # Nach Aenderungszeit sortieren (neueste zuerst)
+            model_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+            latest = model_files[0]
+            self._log(f'Gefunden: {latest.name}', 'INFO')
+
+            # Modell laden
+            import torch
+            try:
+                checkpoint = torch.load(latest, map_location='cpu')
+                self.model_path = latest
+                self._log('Letztes Modell geladen', 'SUCCESS')
+            except Exception as e:
+                self._log(f'Fehler: {e}', 'ERROR')
+        else:
+            self._log('Kein vorheriges Modell gefunden', 'WARNING')
+
+    def _load_session(self):
+        """Laedt eine komplette Session (Daten + Modell)."""
+        from PyQt6.QtWidgets import QFileDialog
+        from .session_loader_dialog import SessionLoaderDialog
+        from ..core.session_manager import SessionManager
+
+        # Debug: Sessions auflisten
+        log_dir = self.config.paths.log_dir
+        self._log(f"Suche Sessions in: {log_dir}", 'DEBUG')
+        sessions = SessionManager.list_sessions(log_dir)
+        self._log(f"Gefundene Sessions: {len(sessions)}", 'DEBUG')
+
+        dialog = SessionLoaderDialog(log_dir, parent=self)
+        if dialog.exec():
+            session_dir = dialog.get_selected_session()
+            if session_dir:
+                self._load_session_from_dir(session_dir)
+
+    def _load_session_from_dir(self, session_dir):
+        """Laedt Session-Daten aus einem Ordner."""
+        from pathlib import Path
+        from ..core.session_manager import SessionManager
+
+        try:
+            session_dir = Path(session_dir)
+            manager = SessionManager(session_dir)
+
+            self._log(f"Lade Session: {session_dir.name}", 'INFO')
+
+            # 1. Backtest-Daten laden
+            backtest_data = manager.load_backtest_data()
+            if backtest_data is not None:
+                self.backtest_info = {'data': backtest_data}
+                self._log(f"Backtest-Daten geladen: {len(backtest_data)} Punkte", 'SUCCESS')
+
+            # 2. Modell laden
+            model_path = manager.get_model_path()
+            if model_path:
+                import torch
+                from ..models import ModelFactory
+
+                checkpoint = torch.load(model_path, map_location='cpu', weights_only=False)
+
+                # Model-Info extrahieren
+                model_info = checkpoint.get('model_info', {})
+                self.model_info = model_info
+
+                # Modell rekonstruieren
+                model_name = model_info.get('model_type', 'bilstm')
+                self.model = ModelFactory.create(
+                    model_name,
+                    input_size=model_info.get('input_size', 6),
+                    hidden_size=model_info.get('hidden_size', 128),
+                    num_layers=model_info.get('num_layers', 2),
+                    num_classes=model_info.get('num_classes', 3),
+                    dropout=model_info.get('dropout', 0.2)
+                )
+                self.model.load_state_dict(checkpoint['model_state_dict'])
+                self.model_path = model_path
+
+                self._log(f"Modell geladen: {model_path.name}", 'SUCCESS')
+                self._log(f"  Accuracy: {model_info.get('best_accuracy', 0):.1f}%", 'INFO')
+
+                # UI aktualisieren
+                self.model_name_label.setText(f'Modell: {model_path.name}')
+                self.model_folder_label.setText(f'Session: {session_dir.name}')
+                self.backtest_btn.setEnabled(True)
+                self.predict_btn.setEnabled(True)
+
+            # 3. Config laden
+            config = manager.load_config()
+            if config:
+                self._log(f"Config: {len(config.get('features', []))} Features", 'DEBUG')
+
+            self._log(f"Session geladen: {session_dir.name}", 'SUCCESS')
+
+        except Exception as e:
+            import traceback
+            self._log(f"Session-Ladefehler: {e}", 'ERROR')
+            self._log(traceback.format_exc(), 'ERROR')
+
+    def _auto_load_latest_session(self):
+        """Laedt automatisch die neueste Session mit Modell."""
+        from ..core.session_manager import SessionManager
+
+        try:
+            sessions = SessionManager.list_sessions(self.config.paths.log_dir)
+            self._log(f"Suche Sessions in: {self.config.paths.log_dir}", 'DEBUG')
+            self._log(f"Gefundene Sessions: {len(sessions)}", 'DEBUG')
+
+            # Finde neueste Session mit Modell
+            for session in sessions:
+                if session.get('has_model'):
+                    session_dir = session['session_dir']
+                    self._log(f"Auto-Load Session: {session['session_name']}", 'INFO')
+                    self._load_session_from_dir(session_dir)
+                    return
+
+            self._log("Keine Session mit Modell gefunden", 'INFO')
+
+        except Exception as e:
+            self._log(f"Auto-Load Session fehlgeschlagen: {e}", 'WARNING')
 
     def _make_prediction(self):
         """Fuehrt eine Vorhersage durch."""
@@ -1296,22 +1535,77 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'Fehler', 'Bitte zuerst Modell laden')
             return
 
+        if self.training_data is None:
+            QMessageBox.warning(self, 'Fehler', 'Bitte zuerst Trainingsdaten vorbereiten')
+            return
+
         self._log('Vorhersage gestartet...', 'INFO')
-        # TODO: Implementierung
+
+        try:
+            import torch
+
+            self.model.eval()
+            X_val = self.training_data.get('X_val')
+
+            if X_val is None:
+                self._log('Keine Validierungsdaten vorhanden', 'WARNING')
+                return
+
+            # Tensor konvertieren falls noetig
+            if not isinstance(X_val, torch.Tensor):
+                X_val = torch.FloatTensor(X_val)
+
+            with torch.no_grad():
+                predictions = self.model.predict(X_val)
+                probabilities = self.model.predict_proba(X_val)
+
+            # Statistiken
+            unique, counts = np.unique(predictions, return_counts=True)
+            class_names = self.config.training.class_names
+
+            self._log('Vorhersage-Verteilung:', 'INFO')
+            for cls, count in zip(unique, counts):
+                pct = count / len(predictions) * 100
+                name = class_names[cls] if cls < len(class_names) else f'Klasse {cls}'
+                self._log(f'  {name}: {count:,} ({pct:.1f}%)', 'INFO')
+
+            self._log('Vorhersage abgeschlossen', 'SUCCESS')
+        except Exception as e:
+            self._log(f'Vorhersage-Fehler: {e}', 'ERROR')
 
     def _open_backtester(self):
         """Oeffnet das Backtester-Fenster."""
-        if self.model is None or self.data is None:
-            QMessageBox.warning(self, 'Fehler', 'Bitte zuerst Daten und Modell laden')
+        # Auto-Load: Neueste Session laden wenn kein Modell/Backtest-Daten vorhanden
+        if self.model is None or self.backtest_info is None:
+            self._auto_load_latest_session()
+
+        # Pruefen ob Daten vorhanden
+        if self.data is None:
+            QMessageBox.warning(self, 'Fehler', 'Bitte zuerst Daten laden')
             return
+
+        # Warnung wenn kein Modell, aber trotzdem fortfahren (fuer Chart-Ansicht)
+        if self.model is None:
+            self._log('Kein Modell geladen - Backtester ohne Vorhersagen', 'WARNING')
 
         self._log('Oeffne Backtester...', 'INFO')
 
         try:
             from .backtest_window import BacktestWindow
-            self.backtest_window = BacktestWindow(
-                self.data, self.model, self.model_info,
-                self.config.paths.results_dir, self
+            self.backtest_window = BacktestWindow(parent=self)
+
+            # Backtest-Daten verwenden falls verfuegbar (nicht im Training verwendet)
+            if self.backtest_info and 'data' in self.backtest_info:
+                backtest_data = self.backtest_info['data']
+                self._log(f'Verwende separate Backtest-Daten: {len(backtest_data)} Punkte', 'INFO')
+            else:
+                backtest_data = self.data
+                self._log('Keine separaten Backtest-Daten - verwende alle Daten', 'WARNING')
+
+            self.backtest_window.set_data(
+                data=backtest_data,
+                model=self.model,
+                model_info=self.model_info
             )
             self.backtest_window.show()
         except Exception as e:
@@ -1336,8 +1630,41 @@ class MainWindow(QMainWindow):
     def _save_parameters(self):
         """Speichert die aktuellen Parameter."""
         self._log('Parameter speichern...', 'INFO')
-        # TODO: Implementierung
-        self._log('Parameter gespeichert', 'SUCCESS')
+
+        filepath, _ = QFileDialog.getSaveFileName(
+            self, 'Parameter speichern',
+            str(self.config.paths.base_dir / 'parameters.json'),
+            'JSON Dateien (*.json)'
+        )
+
+        if filepath:
+            try:
+                params = {
+                    'training': {
+                        'lookback': self.config.training.lookback,
+                        'lookforward': self.config.training.lookforward,
+                        'epochs': self.config.training.epochs,
+                        'batch_size': self.config.training.batch_size,
+                        'learning_rate': self.config.training.learning_rate,
+                        'hidden_size': self.config.training.hidden_size,
+                        'num_layers': self.config.training.num_layers,
+                        'dropout': self.config.training.dropout,
+                        'features': self.config.training.features,
+                    },
+                    'backtest': {
+                        'initial_capital': self.config.backtest.initial_capital,
+                        'commission': self.config.backtest.commission,
+                        'slippage': self.config.backtest.slippage,
+                    },
+                    'saved_at': datetime.now().isoformat()
+                }
+
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    json.dump(params, f, indent=2, ensure_ascii=False)
+
+                self._log(f'Parameter gespeichert: {Path(filepath).name}', 'SUCCESS')
+            except Exception as e:
+                self._log(f'Speicherfehler: {e}', 'ERROR')
 
     def _load_parameters(self):
         """Laedt gespeicherte Parameter."""
@@ -1349,7 +1676,34 @@ class MainWindow(QMainWindow):
 
         if filepath:
             self._log(f'Lade Parameter: {Path(filepath).name}', 'INFO')
-            # TODO: Implementierung
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    params = json.load(f)
+
+                # Training-Parameter uebernehmen
+                if 'training' in params:
+                    t = params['training']
+                    self.config.training.lookback = t.get('lookback', self.config.training.lookback)
+                    self.config.training.lookforward = t.get('lookforward', self.config.training.lookforward)
+                    self.config.training.epochs = t.get('epochs', self.config.training.epochs)
+                    self.config.training.batch_size = t.get('batch_size', self.config.training.batch_size)
+                    self.config.training.learning_rate = t.get('learning_rate', self.config.training.learning_rate)
+                    self.config.training.hidden_size = t.get('hidden_size', self.config.training.hidden_size)
+                    self.config.training.num_layers = t.get('num_layers', self.config.training.num_layers)
+                    self.config.training.dropout = t.get('dropout', self.config.training.dropout)
+                    if 'features' in t:
+                        self.config.training.features = t['features']
+
+                # Backtest-Parameter uebernehmen
+                if 'backtest' in params:
+                    b = params['backtest']
+                    self.config.backtest.initial_capital = b.get('initial_capital', self.config.backtest.initial_capital)
+                    self.config.backtest.commission = b.get('commission', self.config.backtest.commission)
+                    self.config.backtest.slippage = b.get('slippage', self.config.backtest.slippage)
+
+                self._log('Parameter geladen', 'SUCCESS')
+            except Exception as e:
+                self._log(f'Ladefehler: {e}', 'ERROR')
 
     def _update_logger_mode(self, index):
         """Aktualisiert den Logger-Modus."""

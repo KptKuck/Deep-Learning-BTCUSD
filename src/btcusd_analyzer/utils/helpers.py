@@ -244,3 +244,91 @@ def validate_dataframe(df, required_columns: list) -> tuple:
 
     missing = [col for col in required_columns if col not in df.columns]
     return len(missing) == 0, missing
+
+
+def cleanup_gpu_memory(full: bool = False) -> dict:
+    """
+    Bereinigt GPU-Speicher mit optionaler vollstaendiger Garbage Collection.
+
+    Args:
+        full: Wenn True, fuehrt vollstaendige GC durch (alle Generationen)
+
+    Returns:
+        Dictionary mit Speicher-Info vor/nach Cleanup
+    """
+    import gc
+
+    info = {'success': False, 'before': {}, 'after': {}}
+
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            info['message'] = 'CUDA nicht verfuegbar'
+            return info
+
+        # Speicher vor Cleanup
+        info['before'] = {
+            'allocated_gb': torch.cuda.memory_allocated() / (1024 ** 3),
+            'reserved_gb': torch.cuda.memory_reserved() / (1024 ** 3),
+        }
+
+        # GPU-Cache leeren
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+        # Optional: vollstaendige Garbage Collection
+        if full:
+            gc.collect(0)
+            gc.collect(1)
+            gc.collect(2)
+            torch.cuda.empty_cache()
+
+        # Speicher nach Cleanup
+        info['after'] = {
+            'allocated_gb': torch.cuda.memory_allocated() / (1024 ** 3),
+            'reserved_gb': torch.cuda.memory_reserved() / (1024 ** 3),
+        }
+
+        info['freed_gb'] = info['before']['reserved_gb'] - info['after']['reserved_gb']
+        info['success'] = True
+
+    except ImportError:
+        info['message'] = 'PyTorch nicht installiert'
+    except Exception as e:
+        info['message'] = str(e)
+
+    return info
+
+
+def get_gpu_memory_status() -> dict:
+    """
+    Gibt aktuellen GPU-Speicherstatus zurueck.
+
+    Returns:
+        Dictionary mit Speicher-Informationen in GB
+    """
+    status = {
+        'available': False,
+        'allocated_gb': 0.0,
+        'reserved_gb': 0.0,
+        'total_gb': 0.0,
+        'free_gb': 0.0,
+    }
+
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            status['available'] = True
+            status['allocated_gb'] = torch.cuda.memory_allocated() / (1024 ** 3)
+            status['reserved_gb'] = torch.cuda.memory_reserved() / (1024 ** 3)
+
+            props = torch.cuda.get_device_properties(0)
+            status['total_gb'] = props.total_memory / (1024 ** 3)
+            status['free_gb'] = status['total_gb'] - status['reserved_gb']
+
+    except Exception:
+        pass
+
+    return status
