@@ -321,23 +321,45 @@ class FeatureProcessor:
 
     # === Zeit-Features (zyklisch kodiert) ===
 
+    def _get_datetime_column(self, df: pd.DataFrame) -> Optional[pd.Series]:
+        """
+        Ermittelt die DateTime-Spalte aus den Daten.
+        Unterstuetzt: DateTime, Date+Time Kombination, oder Index.
+        """
+        # 1. Direkte DateTime-Spalte
+        if 'DateTime' in df.columns:
+            return pd.to_datetime(df['DateTime'])
+
+        # 2. Date + Time Kombination
+        if 'Date' in df.columns and 'Time' in df.columns:
+            try:
+                # Kombiniere Date und Time zu DateTime
+                datetime_str = df['Date'].astype(str) + ' ' + df['Time'].astype(str)
+                return pd.to_datetime(datetime_str)
+            except Exception:
+                pass
+
+        # 3. Index ist datetime
+        if isinstance(df.index, pd.DatetimeIndex):
+            return df.index.to_series()
+
+        return None
+
     def _calc_hour_sin(self, df: pd.DataFrame) -> pd.Series:
         """Stunde als Sinus (zyklisch kodiert)."""
-        if 'DateTime' not in df.columns:
-            self.logger.warning('DateTime-Spalte fehlt fuer hour_sin')
+        dt_col = self._get_datetime_column(df)
+        if dt_col is None:
+            self.logger.warning('Keine DateTime-Information fuer hour_sin')
             return pd.Series(0, index=df.index)
-        # Sicherstellen dass DateTime ein datetime-Typ ist
-        dt_col = pd.to_datetime(df['DateTime'])
         hour = dt_col.dt.hour
         return np.sin(2 * np.pi * hour / 24)
 
     def _calc_hour_cos(self, df: pd.DataFrame) -> pd.Series:
         """Stunde als Cosinus (zyklisch kodiert)."""
-        if 'DateTime' not in df.columns:
-            self.logger.warning('DateTime-Spalte fehlt fuer hour_cos')
+        dt_col = self._get_datetime_column(df)
+        if dt_col is None:
+            self.logger.warning('Keine DateTime-Information fuer hour_cos')
             return pd.Series(0, index=df.index)
-        # Sicherstellen dass DateTime ein datetime-Typ ist
-        dt_col = pd.to_datetime(df['DateTime'])
         hour = dt_col.dt.hour
         return np.cos(2 * np.pi * hour / 24)
 
