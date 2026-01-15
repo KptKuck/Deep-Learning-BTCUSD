@@ -62,3 +62,31 @@ btc_analyzer_python/
 - Keine Emojis im Code oder Kommentaren
 - Kompakte Antworten bevorzugt
 - Nur relevante Dateien modifizieren
+
+## Threading/Logging - WICHTIG
+**NIEMALS direktes Logging in QThread Worker-Threads verwenden!**
+
+Python's `logging` Modul verwendet interne Locks die mit Qt's Event-Loop
+zu sporadischen Deadlocks fuehren. Getestet und bestaetigt am 15.01.2026.
+
+### Loesung fuer Worker-Threads:
+1. **Callback-basiertes Logging:** Worker bekommt `log_callback` Parameter
+2. **Qt Signal:** Worker sendet Log-Nachrichten via `pyqtSignal(str, str)`
+3. **Main-Thread loggt:** Slot empfaengt Signal und ruft Logger auf
+
+### Betroffene Module:
+- `backtester/walk_forward.py` - verwendet `_CallbackLogger`
+- `data/processor.py` - verwendet `_NullLogger` (nur DEBUG-Meldungen)
+- `training/labeler.py` - verwendet `_NullLogger` (nur DEBUG-Meldungen)
+- `gui/walk_forward_window.py` - `WalkForwardWorker.log_message` Signal
+
+### Pattern fuer neue Worker:
+```python
+class MyWorker(QThread):
+    log_message = pyqtSignal(str, str)  # level, message
+
+    def run(self):
+        # NICHT: logger.debug("...")
+        # STATTDESSEN:
+        self.log_message.emit("debug", "Nachricht")
+```
