@@ -972,6 +972,10 @@ class MainWindow(QMainWindow):
         backtest_action.triggered.connect(self._open_backtester)
         window_menu.addAction(backtest_action)
 
+        backtrader_action = QAction('Backtrader Pro...', self)
+        backtrader_action.triggered.connect(self._open_backtrader)
+        window_menu.addAction(backtrader_action)
+
         window_menu.addSeparator()
 
         trading_action = QAction('Live Trading...', self)
@@ -1610,6 +1614,41 @@ class MainWindow(QMainWindow):
             self.backtest_window.show()
         except Exception as e:
             self._log(f'Backtester Fehler: {e}', 'ERROR')
+
+    def _open_backtrader(self):
+        """Oeffnet das Backtrader Pro Fenster."""
+        # Auto-Load: Neueste Session laden wenn kein Modell vorhanden
+        if self.model is None:
+            self._auto_load_latest_session()
+
+        # Pruefen ob Daten vorhanden
+        if self.data is None:
+            QMessageBox.warning(self, 'Fehler', 'Bitte zuerst Daten laden')
+            return
+
+        self._log('Oeffne Backtrader Pro...', 'INFO')
+
+        try:
+            from .backtrader_window import BacktraderWindow
+            self.backtrader_window = BacktraderWindow(parent=self)
+
+            # Backtest-Daten verwenden falls verfuegbar
+            if self.backtest_info and 'data' in self.backtest_info:
+                backtest_data = self.backtest_info['data']
+                self._log(f'Verwende separate Backtest-Daten: {len(backtest_data)} Punkte', 'INFO')
+            else:
+                backtest_data = self.data
+
+            self.backtrader_window.set_data(
+                data=backtest_data,
+                model=self.model,
+                model_info=self.model_info
+            )
+            self.backtrader_window.show()
+        except Exception as e:
+            self._log(f'Backtrader Fehler: {e}', 'ERROR')
+            import traceback
+            traceback.print_exc()
 
     def _open_trading(self):
         """Oeffnet das Trading-Fenster."""
