@@ -1257,7 +1257,16 @@ class WalkForwardEngine:
         split_idx: int
     ) -> Dict:
         """Einfache Trading-Simulation ohne Backtrader."""
-        # Signal-Mapping: 0=BUY, 1=HOLD, 2=SELL (oder je nach num_classes)
+        # Signal-Mapping basierend auf num_classes:
+        # 2 Klassen: 0=BUY, 1=SELL
+        # 3 Klassen: 0=HOLD, 1=BUY, 2=SELL
+        if self.num_classes == 2:
+            BUY_SIGNAL = 0
+            SELL_SIGNAL = 1
+        else:  # 3 Klassen
+            BUY_SIGNAL = 1
+            SELL_SIGNAL = 2
+
         capital = self.config.initial_capital
         position = 0  # 0=flat, 1=long, -1=short
         entry_price = 0.0
@@ -1279,7 +1288,7 @@ class WalkForwardEngine:
         for i, (pred, conf, price) in enumerate(zip(predictions, confidences, prices)):
             dt = test_data.index[offset + i] if hasattr(test_data.index, '__getitem__') else None
 
-            if pred == 0 and position <= 0:  # BUY Signal
+            if pred == BUY_SIGNAL and position <= 0:  # BUY Signal
                 if position < 0:  # Close Short
                     pnl = entry_price - price
                     pnl_pct = pnl / entry_price if entry_price > 0 else 0
@@ -1307,7 +1316,7 @@ class WalkForwardEngine:
                 entry_price = price
                 entry_idx = offset + i
 
-            elif pred == 2 and position >= 0:  # SELL Signal
+            elif pred == SELL_SIGNAL and position >= 0:  # SELL Signal
                 if position > 0:  # Close Long
                     pnl = price - entry_price
                     pnl_pct = pnl / entry_price if entry_price > 0 else 0
