@@ -42,10 +42,10 @@ class Logger:
     TRACE = 5
     SUCCESS = 25
 
-    # Farben fuer Konsolen-Ausgabe (ANSI)
+    # Farben fuer Konsolen-Ausgabe (colorlog)
     COLORS = {
         'TRACE': 'cyan',
-        'DEBUG': 'white',
+        'DEBUG': 'light_black',  # Grau - sichtbar auf dunklem Hintergrund
         'INFO': 'blue',
         'SUCCESS': 'green',
         'WARNING': 'yellow',
@@ -130,15 +130,32 @@ class Logger:
         self._logger.addHandler(self._queue_handler)
 
         # === Handler fuer den Writer-Thread (werden dort verwendet) ===
+
+        # Konsolen-Handler mit Farben (wird im Writer-Thread verwendet)
+        self._console_handler = logging.StreamHandler()
+        self._console_handler.setLevel(self.TRACE)
+
+        if COLORLOG_AVAILABLE:
+            # Farbiger Formatter fuer Konsole
+            color_formatter = colorlog.ColoredFormatter(
+                '%(log_color)s[%(asctime)s] [%(levelname)s] %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S',
+                log_colors=self.COLORS
+            )
+            self._console_handler.setFormatter(color_formatter)
+        else:
+            # Fallback ohne Farben
+            console_formatter = logging.Formatter(
+                '[%(asctime)s] [%(levelname)s] %(message)s',
+                datefmt='%Y-%m-%d %H:%M:%S'
+            )
+            self._console_handler.setFormatter(console_formatter)
+
+        # Datei-Formatter (immer ohne Farben)
         log_formatter = logging.Formatter(
             '[%(asctime)s] [%(levelname)s] %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
-
-        # Konsolen-Handler (wird im Writer-Thread verwendet)
-        self._console_handler = logging.StreamHandler()
-        self._console_handler.setLevel(self.TRACE)
-        self._console_handler.setFormatter(log_formatter)
 
         # Datei-Handler (wird im Writer-Thread verwendet)
         self._file_handler = logging.FileHandler(
