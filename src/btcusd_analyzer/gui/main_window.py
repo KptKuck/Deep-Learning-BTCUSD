@@ -976,6 +976,10 @@ class MainWindow(QMainWindow):
         backtrader_action.triggered.connect(self._open_backtrader)
         window_menu.addAction(backtrader_action)
 
+        walk_forward_action = QAction('Walk-Forward Analyse...', self)
+        walk_forward_action.triggered.connect(self._open_walk_forward)
+        window_menu.addAction(walk_forward_action)
+
         window_menu.addSeparator()
 
         trading_action = QAction('Live Trading...', self)
@@ -1647,6 +1651,53 @@ class MainWindow(QMainWindow):
             self.backtrader_window.show()
         except Exception as e:
             self._log(f'Backtrader Fehler: {e}', 'ERROR')
+            import traceback
+            traceback.print_exc()
+
+    def _open_walk_forward(self):
+        """Oeffnet das Walk-Forward Analyse Fenster."""
+        # Auto-Load: Neueste Session laden wenn kein Modell vorhanden
+        if self.model is None:
+            self._auto_load_latest_session()
+
+        # Pruefen ob Daten vorhanden
+        if self.data is None:
+            QMessageBox.warning(self, 'Fehler', 'Bitte zuerst Daten laden')
+            return
+
+        self._log('Oeffne Walk-Forward Analyse...', 'INFO')
+
+        try:
+            from .walk_forward_window import WalkForwardWindow
+            self.walk_forward_window = WalkForwardWindow(parent=self)
+
+            # Backtest-Daten verwenden falls verfuegbar
+            if self.backtest_info and 'data' in self.backtest_info:
+                backtest_data = self.backtest_info['data']
+                self._log(f'Verwende separate Backtest-Daten: {len(backtest_data)} Punkte', 'INFO')
+            else:
+                backtest_data = self.data
+
+            # Training-Config aus training_info erstellen
+            training_config = {}
+            if self.training_info:
+                training_config = {
+                    'lookback': self.training_info.get('params', {}).get('lookback', 50),
+                    'lookforward': self.training_info.get('params', {}).get('lookforward', 100),
+                    'features': self.training_info.get('features', []),
+                    'hidden_size': self.model_info.get('hidden_size', 128) if self.model_info else 128,
+                    'num_layers': self.model_info.get('num_layers', 2) if self.model_info else 2,
+                }
+
+            self.walk_forward_window.set_data(
+                data=backtest_data,
+                model=self.model,
+                model_info=self.model_info,
+                training_config=training_config
+            )
+            self.walk_forward_window.show()
+        except Exception as e:
+            self._log(f'Walk-Forward Fehler: {e}', 'ERROR')
             import traceback
             traceback.print_exc()
 
