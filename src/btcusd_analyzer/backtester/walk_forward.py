@@ -742,17 +742,8 @@ class WalkForwardEngine:
                 logger.debug(f"[Split {split_idx}] Tensor erstellt: {x.shape}, Device: {x.device}")
 
                 # CUDA sync vor Model-Call
-                if torch.cuda.is_available() and self.device != 'cpu':
-                    logger.debug(f"[Split {split_idx}] CUDA sync vor Inference...")
-                    torch.cuda.synchronize()
-
                 logger.debug(f"[Split {split_idx}] Rufe model(x) auf...")
                 logits = self.model(x)
-
-                # CUDA sync nach Model-Call
-                if torch.cuda.is_available() and self.device != 'cpu':
-                    logger.debug(f"[Split {split_idx}] CUDA sync nach Inference...")
-                    torch.cuda.synchronize()
 
                 logger.debug(f"[Split {split_idx}] Logits: {logits.shape}")
                 probs = torch.softmax(logits, dim=1)
