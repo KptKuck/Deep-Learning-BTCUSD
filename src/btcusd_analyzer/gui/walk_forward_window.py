@@ -292,8 +292,9 @@ class WalkForwardWindow(QMainWindow):
         split_layout.addWidget(QLabel("Test-Size (Bars):"), 3, 0)
         self.min_test_spin = QSpinBox()
         self.min_test_spin.setRange(50, 10000)
-        self.min_test_spin.setValue(100)  # Reduziert von 500
+        self.min_test_spin.setValue(200)  # Muss > Lookback sein (z.B. 100)
         self.min_test_spin.setSingleStep(50)
+        self.min_test_spin.setToolTip("Muss groesser als Lookback sein!")
         split_layout.addWidget(self.min_test_spin, 3, 1)
 
         # Purged Gap
@@ -749,6 +750,17 @@ class WalkForwardWindow(QMainWindow):
                 QMessageBox.warning(self, "Fehler",
                                   "Fuer Inference-Modi wird ein Modell benoetigt!")
                 return
+
+        # Lookback-Validierung
+        lookback = self.model_info.get('lookback_size', 100) if self.model_info else 100
+        test_size = self.min_test_spin.value()
+        if test_size <= lookback:
+            QMessageBox.warning(
+                self, "Konfigurationsfehler",
+                f"Test-Size ({test_size}) muss groesser als Lookback ({lookback}) sein!\n\n"
+                f"Empfohlen: Test-Size >= {lookback + 100}"
+            )
+            return
 
         try:
             config = self._get_config()
