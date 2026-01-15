@@ -169,11 +169,14 @@ class WalkForwardWorker(QThread):
             logger.debug("[Worker] engine.run() abgeschlossen")
 
             if not self._cancelled:
+                logger.debug("[Worker] Emitiere finished Signal...")
                 self.finished.emit(result)
+                logger.debug("[Worker] finished Signal emittiert")
 
         except Exception as e:
             import traceback
             error_msg = f"{str(e)}\n{traceback.format_exc()}"
+            logger.error(f"[Worker] Fehler: {error_msg}")
             self.error.emit(error_msg)
 
     def _on_progress(self, current: int, total: int, message: str):
@@ -908,20 +911,31 @@ class WalkForwardWindow(QMainWindow):
 
     def _on_analysis_finished(self, result: WalkForwardResult):
         """Wird aufgerufen wenn Analyse fertig ist."""
-        self.result = result
-        self.run_btn.setEnabled(True)
-        self.cancel_btn.setEnabled(False)
-        self.export_btn.setEnabled(True)
-        self.progress_bar.setVisible(False)
-        self.status_label.setText("Analyse abgeschlossen!")
+        from ..core.logger import get_logger
+        logger = get_logger()
+        logger.debug("[GUI] _on_analysis_finished aufgerufen")
 
-        self._log("")
-        self._log(f"=== Analyse abgeschlossen ===")
-        self._log(f"Laufzeit: {result.duration_sec:.1f} Sekunden")
-        self._log(f"Total Return: {result.total_return:.2%}")
-        self._log(f"Sharpe Ratio: {result.avg_sharpe:.3f}")
+        try:
+            self.result = result
+            self.run_btn.setEnabled(True)
+            self.cancel_btn.setEnabled(False)
+            self.export_btn.setEnabled(True)
+            self.progress_bar.setVisible(False)
+            self.status_label.setText("Analyse abgeschlossen!")
 
-        self._update_results(result)
+            self._log("")
+            self._log(f"=== Analyse abgeschlossen ===")
+            self._log(f"Laufzeit: {result.duration_sec:.1f} Sekunden")
+            self._log(f"Total Return: {result.total_return:.2%}")
+            self._log(f"Sharpe Ratio: {result.avg_sharpe:.3f}")
+
+            logger.debug("[GUI] Rufe _update_results auf...")
+            self._update_results(result)
+            logger.debug("[GUI] _update_results abgeschlossen")
+
+        except Exception as e:
+            import traceback
+            logger.error(f"[GUI] Fehler in _on_analysis_finished: {e}\n{traceback.format_exc()}")
 
     def _on_error(self, error_msg: str):
         """Wird bei Fehlern aufgerufen."""
