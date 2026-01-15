@@ -326,7 +326,9 @@ class FeatureProcessor:
         if 'DateTime' not in df.columns:
             self.logger.warning('DateTime-Spalte fehlt fuer hour_sin')
             return pd.Series(0, index=df.index)
-        hour = df['DateTime'].dt.hour
+        # Sicherstellen dass DateTime ein datetime-Typ ist
+        dt_col = pd.to_datetime(df['DateTime'])
+        hour = dt_col.dt.hour
         return np.sin(2 * np.pi * hour / 24)
 
     def _calc_hour_cos(self, df: pd.DataFrame) -> pd.Series:
@@ -334,7 +336,9 @@ class FeatureProcessor:
         if 'DateTime' not in df.columns:
             self.logger.warning('DateTime-Spalte fehlt fuer hour_cos')
             return pd.Series(0, index=df.index)
-        hour = df['DateTime'].dt.hour
+        # Sicherstellen dass DateTime ein datetime-Typ ist
+        dt_col = pd.to_datetime(df['DateTime'])
+        hour = dt_col.dt.hour
         return np.cos(2 * np.pi * hour / 24)
 
     def add_feature(self, name: str):
