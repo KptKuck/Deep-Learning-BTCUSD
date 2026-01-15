@@ -238,6 +238,7 @@ class TradeRecord:
     confidence: float                      # Softmax-Confidence
     commission: float = 0.0
     slippage: float = 0.0
+    bars_held: int = 0                     # Anzahl Bars die Position gehalten wurde
 
 
 @dataclass
@@ -746,8 +747,11 @@ class WalkForwardEngine:
                 logits = self.model(x)
 
                 logger.debug(f"[Split {split_idx}] Logits: {logits.shape}")
+                logger.debug(f"[Split {split_idx}] Berechne softmax...")
                 probs = torch.softmax(logits, dim=1)
+                logger.debug(f"[Split {split_idx}] Berechne predictions...")
                 predictions = logits.argmax(dim=1).cpu().numpy()
+                logger.debug(f"[Split {split_idx}] Berechne confidences...")
                 confidences = probs.max(dim=1).values.cpu().numpy()
                 logger.debug(f"[Split {split_idx}] Predictions: {len(predictions)}, Unique: {np.unique(predictions)}")
         except Exception as e:

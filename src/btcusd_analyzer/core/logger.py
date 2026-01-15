@@ -1,10 +1,16 @@
 """
 Logger Modul - Einheitliches Logging-System
 Entspricht dem MATLAB Logger mit farbiger Konsolenausgabe und Datei-Logging
+
+Thread-Safe: Verwendet QueueHandler fuer multi-threaded Anwendungen (QThread + Main)
 """
 
 import logging
+import logging.handlers
+import atexit
 import os
+import queue
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -50,13 +56,15 @@ class Logger:
     }
 
     _instances: dict = {}
+    _lock = threading.Lock()  # Thread-safe Singleton
 
     def __new__(cls, name: str = 'btcusd_analyzer', log_dir: Optional[str] = None):
-        """Singleton-Pattern pro Logger-Name"""
-        if name not in cls._instances:
-            instance = super().__new__(cls)
-            cls._instances[name] = instance
-        return cls._instances[name]
+        """Singleton-Pattern pro Logger-Name (thread-safe)"""
+        with cls._lock:
+            if name not in cls._instances:
+                instance = super().__new__(cls)
+                cls._instances[name] = instance
+            return cls._instances[name]
 
     def __init__(self, name: str = 'btcusd_analyzer', log_dir: Optional[str] = None):
         """
@@ -91,60 +99,80 @@ class Logger:
         self._logger.setLevel(self.TRACE)
         self._logger.handlers = []  # Vorherige Handler entfernen
 
-        # Konsolen-Handler
-        self._setup_console_handler()
+        # Queue fuer thread-safe Logging
+        self._log_queue: queue.Queue = queue.Queue(-1)  # Unbegrenzt
+        self._queue_listener: Optional[logging.handlers.QueueListener] = None
 
-        # Datei-Handler
-        self._setup_file_handler()
+        # Handler Setup (mit Queue fuer Thread-Safety)
+        self._setup_handlers()
 
         self._initialized = True
 
-    def _setup_console_handler(self):
-        """Richtet den Konsolen-Handler mit Farbausgabe ein."""
+    def _setup_handlers(self):
+        """
+        Richtet alle Handler ein mit QueueHandler fuer Thread-Safety.
+
+        Architektur:
+        - Logger -> QueueHandler -> Queue -> QueueListener -> [ConsoleHandler, FileHandler]
+
+        Der QueueHandler ist non-blocking und kann von jedem Thread sicher verwendet werden.
+        Der QueueListener laeuft in einem separaten Thread und verarbeitet die Queue.
+        """
+        # Log-Verzeichnis erstellen
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+
+        # Log-Datei mit Zeitstempel
+        timestamp = datetime.now().strftime('%Y-%m-%d_%Hh%Mm%Ss')
+        self.log_file = self.log_dir / f'session-{timestamp}.txt'
+
+        # === Konsolen-Handler ===
         console_handler = logging.StreamHandler()
         console_handler.setLevel(self.TRACE)
 
         if COLORLOG_AVAILABLE:
-            formatter = colorlog.ColoredFormatter(
+            console_formatter = colorlog.ColoredFormatter(
                 '%(log_color)s[%(asctime)s] [%(levelname)s] %(message)s',
                 datefmt='%Y-%m-%d %H:%M:%S',
                 log_colors=self.COLORS
             )
         else:
-            formatter = logging.Formatter(
+            console_formatter = logging.Formatter(
                 '[%(asctime)s] [%(levelname)s] %(message)s',
                 datefmt='%Y-%m-%d %H:%M:%S'
             )
+        console_handler.setFormatter(console_formatter)
 
-        console_handler.setFormatter(formatter)
-        self._logger.addHandler(console_handler)
-
-    def _setup_file_handler(self):
-        """Richtet den Datei-Handler ein."""
-        # Log-Verzeichnis erstellen
-        self.log_dir.mkdir(parents=True, exist_ok=True)
-
-        # Log-Datei mit Zeitstempel
-        # Doppelpunkt (:) ist unter Windows nicht erlaubt in Dateinamen
-        timestamp = datetime.now().strftime('%Y-%m-%d_%Hh%Mm%Ss')
-        self.log_file = self.log_dir / f'session-{timestamp}.txt'
-
-        # Eigener FlushHandler mit sofortigem Flush (Thread-safe)
-        class FlushFileHandler(logging.FileHandler):
-            def emit(self, record):
-                super().emit(record)
-                self.flush()
-
-        file_handler = FlushFileHandler(self.log_file, encoding='utf-8', delay=False)
+        # === Datei-Handler ===
+        file_handler = logging.FileHandler(self.log_file, encoding='utf-8', delay=False)
         file_handler.setLevel(self.TRACE)
 
-        formatter = logging.Formatter(
+        file_formatter = logging.Formatter(
             '[%(asctime)s] [%(levelname)s] %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
-        file_handler.setFormatter(formatter)
+        file_handler.setFormatter(file_formatter)
 
-        self._logger.addHandler(file_handler)
+        # === QueueHandler fuer den Logger (non-blocking) ===
+        queue_handler = logging.handlers.QueueHandler(self._log_queue)
+        self._logger.addHandler(queue_handler)
+
+        # === QueueListener verarbeitet Queue in separatem Thread ===
+        self._queue_listener = logging.handlers.QueueListener(
+            self._log_queue,
+            console_handler,
+            file_handler,
+            respect_handler_level=True
+        )
+        self._queue_listener.start()
+
+        # Sicherstellen, dass Listener bei Programmende gestoppt wird
+        atexit.register(self._stop_listener)
+
+    def _stop_listener(self):
+        """Stoppt den QueueListener sauber."""
+        if self._queue_listener:
+            self._queue_listener.stop()
+            self._queue_listener = None
 
     def trace(self, message: str):
         """Sehr detaillierte Debug-Informationen."""
