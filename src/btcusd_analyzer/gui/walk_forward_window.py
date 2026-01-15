@@ -728,21 +728,15 @@ class WalkForwardWindow(QMainWindow):
         return WalkForwardConfig(
             mode=mode,
             walk_forward_type=wf_type,
-            engine=engine,
-            n_splits=self.n_splits_spin.value(),
-            train_ratio=self.train_ratio_spin.value(),
-            min_train_samples=self.min_train_spin.value(),
-            min_test_samples=self.min_test_spin.value(),
-            purged_gap=self.purged_gap_spin.value(),
+            backtest_engine=engine,
+            train_size=self.min_train_spin.value(),
+            test_size=self.min_test_spin.value(),
+            step_size=self.min_test_spin.value(),  # Schrittweite = Test-Groesse
+            purge_overlap=self.purged_gap_spin.value(),
             embargo_gap=self.embargo_gap_spin.value(),
             initial_capital=self.capital_spin.value(),
-            commission=self.commission_spin.value() / 100,
-            slippage=self.slippage_spin.value() / 100,
-            stake=self.stake_spin.value(),
-            allow_short=self.allow_short_check.isChecked(),
-            use_gpu=self.gpu_parallel_check.isChecked(),
-            save_models=self.save_models_check.isChecked(),
-            verbose=self.verbose_check.isChecked(),
+            bt_commission_perc=self.commission_spin.value() / 100,
+            bt_slippage_perc=self.slippage_spin.value() / 100,
         )
 
     def _run_analysis(self):
