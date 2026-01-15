@@ -484,14 +484,20 @@ class WalkForwardEngine:
         splits = self.generate_splits()
         logger.info(f"[WalkForward] {len(splits)} Splits generiert")
 
+        logger.debug(f"[WalkForward] Pruefe Splits: {len(splits)}")
         if len(splits) == 0:
             logger.error("[WalkForward] Keine Splits - zu wenig Daten")
             return self._create_empty_result(start_time)
 
         # Modus-spezifische Verarbeitung
+        logger.debug("[WalkForward] Ermittle Modus...")
         mode = self.config.mode
         logger.info(f"[WalkForward] Starte im Modus: {mode.value}")
-        logger.debug(f"[WalkForward] Model auf Device: {next(self.model.parameters()).device}")
+        try:
+            model_device = next(self.model.parameters()).device
+            logger.debug(f"[WalkForward] Model auf Device: {model_device}")
+        except Exception as e:
+            logger.warning(f"[WalkForward] Konnte Model-Device nicht ermitteln: {e}")
 
         if mode == BacktestMode.INFERENCE_ONLY:
             max_workers = self._calculate_max_parallel()
@@ -617,23 +623,22 @@ class WalkForwardEngine:
         logger.info(f"[WalkForward] Inference Only mit {max_workers} Workers")
         logger.debug(f"[WalkForward] Device: {self.device}, CUDA verfuegbar: {torch.cuda.is_available()}")
 
-        # CUDA synchronisieren falls GPU verwendet wird
-        if torch.cuda.is_available():
-            logger.debug("[WalkForward] CUDA sync vor Model-Transfer...")
-            torch.cuda.synchronize()
-            logger.debug("[WalkForward] CUDA sync abgeschlossen")
+        # CUDA-Kontext im Worker-Thread initialisieren (wie in TrainingWorker)
+        if self.device.type == 'cuda':
+            logger.debug("[WalkForward] Initialisiere CUDA-Kontext im Worker-Thread...")
+            torch.cuda.set_device(0)
+            torch.cuda.empty_cache()
+            logger.debug("[WalkForward] CUDA-Kontext initialisiert")
 
-        # Modell auf GPU laden
-        logger.debug(f"[WalkForward] Verschiebe Model auf {self.device}...")
-        self.model.to(self.device)
-        self.model.eval()
-        logger.debug("[WalkForward] Model auf Device verschoben und in eval() Modus")
-
-        # Nochmals synchronisieren nach Model-Transfer
-        if torch.cuda.is_available():
-            logger.debug("[WalkForward] CUDA sync nach Model-Transfer...")
-            torch.cuda.synchronize()
-            logger.debug("[WalkForward] CUDA sync abgeschlossen")
+            # Modell im Worker-Thread auf GPU verschieben
+            logger.debug(f"[WalkForward] Verschiebe Model auf {self.device}...")
+            self.model = self.model.to(self.device)
+            self.model.eval()
+            logger.debug("[WalkForward] Model auf GPU verschoben und in eval() Modus")
+        else:
+            # CPU-Modus
+            logger.debug("[WalkForward] CPU-Modus: Model bleibt auf CPU")
+            self.model.eval()
 
         results = []
         completed = 0
