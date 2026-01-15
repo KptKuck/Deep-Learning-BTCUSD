@@ -919,6 +919,9 @@ class WalkForwardWindow(QMainWindow):
             QMessageBox.warning(self, "Fehler", "Keine Daten im ausgewaehlten Zeitraum!")
             return
 
+        # Gefilterte Daten speichern fuer Tabellen-Anzeige
+        self.analysis_data = analysis_data
+
         # Log starten
         self._log(f"=== Walk-Forward Analyse gestartet ===")
         self._log(f"Modus: {config.mode.value}")
@@ -1066,12 +1069,13 @@ class WalkForwardWindow(QMainWindow):
         # Ausfuehrungs-Info
         self.metric_labels['execution_time'].setText(f"{result.duration_sec:.1f} s")
         # Start/End aus erstem/letztem Split-Range berechnen
-        if result.splits and self.data is not None:
+        data_for_display = getattr(self, 'analysis_data', None) or self.data
+        if result.splits and data_for_display is not None:
             try:
                 first_idx = result.splits[0].train_range[0]
                 last_idx = result.splits[-1].test_range[1]
-                start_date = self.data.index[first_idx]
-                end_date = self.data.index[min(last_idx, len(self.data) - 1)]
+                start_date = data_for_display.index[first_idx]
+                end_date = data_for_display.index[min(last_idx, len(data_for_display) - 1)]
                 self.metric_labels['start_date'].setText(pd.to_datetime(start_date).strftime("%Y-%m-%d"))
                 self.metric_labels['end_date'].setText(pd.to_datetime(end_date).strftime("%Y-%m-%d"))
             except:
@@ -1094,17 +1098,19 @@ class WalkForwardWindow(QMainWindow):
             self.splits_table.setItem(i, 0, QTableWidgetItem(str(split.split_index)))
 
             # Daten aus Index-Ranges berechnen (falls Daten verfuegbar)
+            # Verwende analysis_data (gefilterte Daten) falls vorhanden, sonst self.data
             train_start = "-"
             train_end = "-"
             test_start = "-"
             test_end = "-"
 
-            if self.data is not None:
+            data_for_display = getattr(self, 'analysis_data', None) or self.data
+            if data_for_display is not None:
                 try:
-                    train_start = pd.to_datetime(self.data.index[split.train_range[0]]).strftime("%Y-%m-%d")
-                    train_end = pd.to_datetime(self.data.index[split.train_range[1] - 1]).strftime("%Y-%m-%d")
-                    test_start = pd.to_datetime(self.data.index[split.test_range[0]]).strftime("%Y-%m-%d")
-                    test_end = pd.to_datetime(self.data.index[min(split.test_range[1] - 1, len(self.data) - 1)]).strftime("%Y-%m-%d")
+                    train_start = pd.to_datetime(data_for_display.index[split.train_range[0]]).strftime("%Y-%m-%d")
+                    train_end = pd.to_datetime(data_for_display.index[split.train_range[1] - 1]).strftime("%Y-%m-%d")
+                    test_start = pd.to_datetime(data_for_display.index[split.test_range[0]]).strftime("%Y-%m-%d")
+                    test_end = pd.to_datetime(data_for_display.index[min(split.test_range[1] - 1, len(data_for_display) - 1)]).strftime("%Y-%m-%d")
                 except:
                     pass
 
