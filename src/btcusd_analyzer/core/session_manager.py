@@ -146,6 +146,9 @@ class SessionManager:
         """
         Laedt die Backtest-Daten.
 
+        Unterstuetzt sowohl das alte Format (numerischer Index + DateTime-Spalte)
+        als auch das neue Format (DateTime als Index).
+
         Stellt DateTime sowohl als Index (DatetimeIndex) als auch als
         Spalte zur Verfuegung, damit nachfolgende Module flexibel darauf
         zugreifen koennen.
@@ -153,10 +156,27 @@ class SessionManager:
         if not self.backtest_data_file.exists():
             return None
 
-        df = pd.read_csv(self.backtest_data_file, index_col=0, parse_dates=True)
+        # Zuerst ohne index_col lesen um Format zu erkennen
+        df = pd.read_csv(self.backtest_data_file)
 
-        # Sicherstellen, dass der Index ein DatetimeIndex ist
-        if not isinstance(df.index, pd.DatetimeIndex):
+        # Erste Spalte pruefen: "Unnamed: 0" = numerischer Index (altes Format)
+        # "DateTime" = neues Format
+        first_col = df.columns[0]
+
+        if first_col == 'DateTime':
+            # Neues Format: DateTime ist bereits Index
+            df = df.set_index('DateTime')
+            df.index = pd.to_datetime(df.index)
+        elif 'DateTime' in df.columns:
+            # Altes Format: DateTime als separate Spalte
+            # Numerischen Index verwerfen (Unnamed: 0)
+            if first_col.startswith('Unnamed'):
+                df = df.drop(columns=[first_col])
+            df = df.set_index('DateTime')
+            df.index = pd.to_datetime(df.index)
+        else:
+            # Fallback: Erste Spalte als Index versuchen
+            df = df.set_index(df.columns[0])
             df.index = pd.to_datetime(df.index)
 
         df.index.name = 'DateTime'

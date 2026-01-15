@@ -571,9 +571,9 @@ class WalkForwardEngine:
         # Datetime-Index sicherstellen
         if not isinstance(data.index, pd.DatetimeIndex):
             if 'DateTime' in data.columns:
-                data.set_index('DateTime', inplace=True)
+                data = data.set_index('DateTime', drop=True)
             elif 'Date' in data.columns:
-                data.set_index('Date', inplace=True)
+                data = data.set_index('Date', drop=True)
 
         # Zeitraum filtern
         if self.config.start_date:
