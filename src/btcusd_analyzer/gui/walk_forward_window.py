@@ -18,10 +18,109 @@ from PyQt6.QtWidgets import (
     QCheckBox, QTableWidget, QTableWidgetItem, QHeaderView,
     QSplitter, QTextEdit, QProgressBar, QFileDialog, QMessageBox,
     QTabWidget, QComboBox, QRadioButton, QButtonGroup, QScrollArea,
-    QFrame, QDateEdit
+    QFrame, QDateEdit, QToolButton, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QDate
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QDate, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont
+
+
+# =============================================================================
+# Collapsible Section Widget
+# =============================================================================
+
+class CollapsibleSection(QWidget):
+    """
+    Aufklappbare Sektion mit Header und Content.
+    Klick auf Header klappt Content ein/aus.
+    """
+
+    def __init__(self, title: str, color: str = '#3498db', expanded: bool = True, parent=None):
+        super().__init__(parent)
+        self._expanded = expanded
+        self._color = color
+        self._title = title
+
+        self._init_ui()
+
+    def _init_ui(self):
+        """Initialisiert die UI."""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 5)
+        layout.setSpacing(0)
+
+        # Header Button
+        self._header = QToolButton()
+        self._header.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self._header.setText(f"  {self._title}")
+        self._header.setArrowType(Qt.ArrowType.DownArrow if self._expanded else Qt.ArrowType.RightArrow)
+        self._header.setCheckable(True)
+        self._header.setChecked(self._expanded)
+        self._header.clicked.connect(self._toggle)
+        self._header.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._header.setMinimumHeight(32)
+        self._header.setStyleSheet(f"""
+            QToolButton {{
+                background-color: {self._color};
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 12px;
+                text-align: left;
+                padding-left: 8px;
+            }}
+            QToolButton:hover {{
+                background-color: {self._lighten_color(self._color, 0.1)};
+            }}
+            QToolButton:checked {{
+                background-color: {self._color};
+            }}
+        """)
+        layout.addWidget(self._header)
+
+        # Content Container
+        self._content = QWidget()
+        self._content_layout = QVBoxLayout(self._content)
+        self._content_layout.setContentsMargins(0, 5, 0, 0)
+        self._content_layout.setSpacing(5)
+        self._content.setVisible(self._expanded)
+        layout.addWidget(self._content)
+
+    def _lighten_color(self, hex_color: str, factor: float) -> str:
+        """Hellt eine Hex-Farbe auf."""
+        hex_color = hex_color.lstrip('#')
+        r = int(hex_color[0:2], 16)
+        g = int(hex_color[2:4], 16)
+        b = int(hex_color[4:6], 16)
+        r = min(255, int(r + (255 - r) * factor))
+        g = min(255, int(g + (255 - g) * factor))
+        b = min(255, int(b + (255 - b) * factor))
+        return f'#{r:02x}{g:02x}{b:02x}'
+
+    def _toggle(self):
+        """Klappt Content ein/aus."""
+        self._expanded = self._header.isChecked()
+        self._header.setArrowType(Qt.ArrowType.DownArrow if self._expanded else Qt.ArrowType.RightArrow)
+        self._content.setVisible(self._expanded)
+
+    def add_widget(self, widget: QWidget):
+        """Fuegt Widget zum Content hinzu."""
+        self._content_layout.addWidget(widget)
+
+    def add_layout(self, layout):
+        """Fuegt Layout zum Content hinzu."""
+        self._content_layout.addLayout(layout)
+
+    def content_layout(self) -> QVBoxLayout:
+        """Gibt das Content-Layout zurueck."""
+        return self._content_layout
+
+    def set_expanded(self, expanded: bool):
+        """Setzt den Zustand."""
+        self._expanded = expanded
+        self._header.setChecked(expanded)
+        self._header.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+        self._content.setVisible(expanded)
 
 from .styles import get_stylesheet, COLORS, StyleFactory
 from .chart_widget import ChartWidget
@@ -159,15 +258,17 @@ class WalkForwardWindow(QMainWindow):
         splitter.setSizes([400, 1000])
 
     def _create_config_panel(self) -> QWidget:
-        """Erstellt das Konfigurations-Panel."""
+        """Erstellt das Konfigurations-Panel mit aufklappbaren Sektionen."""
         panel = QWidget()
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 0, 10, 0)
+        layout.setSpacing(8)
 
-        # === Daten-Info ===
-        data_group = QGroupBox("Daten & Modell")
-        data_group.setStyleSheet(StyleFactory.group_style(hex_color=COLORS['accent']))
-        data_layout = QGridLayout(data_group)
+        # === 1. Daten & Modell (immer offen) ===
+        data_section = CollapsibleSection("Daten & Modell", color=COLORS['accent'], expanded=True)
+        data_content = QWidget()
+        data_layout = QGridLayout(data_content)
+        data_layout.setContentsMargins(5, 0, 5, 0)
 
         self.data_rows_label = QLabel("Zeilen: -")
         self.data_range_label = QLabel("Zeitraum: -")
@@ -179,168 +280,138 @@ class WalkForwardWindow(QMainWindow):
         data_layout.addWidget(self.data_model_label, 2, 0)
         data_layout.addWidget(self.data_features_label, 3, 0)
 
-        layout.addWidget(data_group)
+        data_section.add_widget(data_content)
+        layout.addWidget(data_section)
 
-        # === Zeitraum-Auswahl ===
-        time_group = QGroupBox("Zeitraum")
-        time_group.setStyleSheet(StyleFactory.group_style(hex_color='#27ae60'))
-        time_layout = QGridLayout(time_group)
+        # === 2. Backtest-Modus (offen) ===
+        mode_section = CollapsibleSection("Backtest-Modus", color='#9b59b6', expanded=True)
+        mode_content = QWidget()
+        mode_layout = QVBoxLayout(mode_content)
+        mode_layout.setContentsMargins(5, 0, 5, 0)
 
-        # Checkbox fuer benutzerdefinierten Zeitraum (standardmaessig aktiviert)
+        self.mode_buttons = QButtonGroup()
+        mode_info = [
+            ("inference_only", "Inference Only", "Session-Modell, Batch (schnellster)"),
+            ("inference_live", "Inference + Live", "Session-Modell, Bar-by-Bar"),
+            ("retrain", "Retrain per Split", "Neues Training pro Split"),
+            ("live_sim", "Live Simulation", "Training + Bar-by-Bar (realistischster)"),
+        ]
+
+        for i, (mode_id, title, desc) in enumerate(mode_info):
+            radio = QRadioButton(f"{title} - {desc}")
+            radio.setToolTip(desc)
+            self.mode_buttons.addButton(radio, i)
+            mode_layout.addWidget(radio)
+
+        self.mode_buttons.button(0).setChecked(True)
+        mode_section.add_widget(mode_content)
+        layout.addWidget(mode_section)
+
+        # === 3. Zeitraum (zugeklappt) ===
+        time_section = CollapsibleSection("Zeitraum", color='#27ae60', expanded=False)
+        time_content = QWidget()
+        time_layout = QGridLayout(time_content)
+        time_layout.setContentsMargins(5, 0, 5, 0)
+
         self.custom_range_check = QCheckBox("Benutzerdefinierten Zeitraum verwenden")
-        self.custom_range_check.setChecked(True)  # Standardmaessig aktiviert
+        self.custom_range_check.setChecked(True)
         self.custom_range_check.stateChanged.connect(self._toggle_date_range)
         time_layout.addWidget(self.custom_range_check, 0, 0, 1, 2)
 
-        # Von-Datum (standardmaessig aktiviert)
         time_layout.addWidget(QLabel("Von:"), 1, 0)
         self.from_date = QDateEdit()
         self.from_date.setCalendarPopup(True)
         self.from_date.setDisplayFormat("dd.MM.yyyy")
-        self.from_date.setEnabled(True)  # Standardmaessig aktiviert
         time_layout.addWidget(self.from_date, 1, 1)
 
-        # Bis-Datum (standardmaessig aktiviert)
         time_layout.addWidget(QLabel("Bis:"), 2, 0)
         self.to_date = QDateEdit()
         self.to_date.setCalendarPopup(True)
         self.to_date.setDisplayFormat("dd.MM.yyyy")
-        self.to_date.setEnabled(True)  # Standardmaessig aktiviert
         time_layout.addWidget(self.to_date, 2, 1)
 
-        # Schnellauswahl-Buttons (standardmaessig aktiviert)
         quick_layout = QHBoxLayout()
-        self._quick_btns = []  # Initialisiere Liste vor der Schleife
-        quick_periods = [('1M', 30), ('3M', 90), ('6M', 180), ('1J', 365)]
-        for text, days in quick_periods:
+        self._quick_btns = []
+        for text, days in [('1M', 30), ('3M', 90), ('6M', 180), ('1J', 365)]:
             btn = QPushButton(text)
             btn.setFixedWidth(40)
-            btn.setEnabled(True)  # Standardmaessig aktiviert
             btn.clicked.connect(lambda checked, d=days: self._set_quick_period(d))
             quick_layout.addWidget(btn)
             self._quick_btns.append(btn)
         quick_layout.addStretch()
         time_layout.addLayout(quick_layout, 3, 0, 1, 2)
 
-        layout.addWidget(time_group)
+        time_section.add_widget(time_content)
+        layout.addWidget(time_section)
 
-        # === Backtest-Modus ===
-        mode_group = QGroupBox("Backtest-Modus")
-        mode_group.setStyleSheet(StyleFactory.group_style(hex_color='#9b59b6'))
-        mode_layout = QVBoxLayout(mode_group)
+        # === 4. Split-Konfiguration (zugeklappt) ===
+        split_section = CollapsibleSection("Split-Konfiguration", color='#3498db', expanded=False)
+        split_content = QWidget()
+        split_layout = QGridLayout(split_content)
+        split_layout.setContentsMargins(5, 0, 5, 0)
 
-        self.mode_buttons = QButtonGroup()
-
-        mode_info = [
-            ("inference_only", "Inference Only", "Session-Modell, Batch-Verarbeitung (schnellster)"),
-            ("inference_live", "Inference + Live", "Session-Modell, Bar-by-Bar (kein Look-Ahead)"),
-            ("retrain", "Retrain per Split", "Neues Training pro Split, Batch-Inferenz"),
-            ("live_sim", "Live Simulation", "Neues Training + Bar-by-Bar (realistischster)"),
-        ]
-
-        for i, (mode_id, title, desc) in enumerate(mode_info):
-            radio = QRadioButton(title)
-            radio.setToolTip(desc)
-            self.mode_buttons.addButton(radio, i)
-            mode_layout.addWidget(radio)
-
-            desc_label = QLabel(f"  {desc}")
-            desc_label.setStyleSheet("color: #888; font-size: 11px;")
-            mode_layout.addWidget(desc_label)
-
-        self.mode_buttons.button(0).setChecked(True)  # Default: Inference Only
-
-        layout.addWidget(mode_group)
-
-        # === Walk-Forward Typ ===
-        wf_group = QGroupBox("Walk-Forward Typ")
-        wf_group.setStyleSheet(StyleFactory.group_style(hex_color='#e67e22'))
-        wf_layout = QVBoxLayout(wf_group)
-
+        # Walk-Forward Typ inline
+        split_layout.addWidget(QLabel("Typ:"), 0, 0)
         self.wf_type_buttons = QButtonGroup()
-
-        self.rolling_radio = QRadioButton("Rolling Window")
-        self.rolling_radio.setToolTip("Fixe Trainings-Fenstergroesse, wandert durch Zeit")
+        wf_type_widget = QWidget()
+        wf_type_layout = QHBoxLayout(wf_type_widget)
+        wf_type_layout.setContentsMargins(0, 0, 0, 0)
+        self.rolling_radio = QRadioButton("Rolling")
+        self.anchored_radio = QRadioButton("Anchored")
         self.wf_type_buttons.addButton(self.rolling_radio, 0)
-        wf_layout.addWidget(self.rolling_radio)
-
-        self.anchored_radio = QRadioButton("Anchored (Expanding)")
-        self.anchored_radio.setToolTip("Training immer vom Anfang, wachsender Datensatz")
         self.wf_type_buttons.addButton(self.anchored_radio, 1)
-        wf_layout.addWidget(self.anchored_radio)
-
         self.rolling_radio.setChecked(True)
+        wf_type_layout.addWidget(self.rolling_radio)
+        wf_type_layout.addWidget(self.anchored_radio)
+        split_layout.addWidget(wf_type_widget, 0, 1)
 
-        layout.addWidget(wf_group)
-
-        # === Split-Konfiguration ===
-        split_group = QGroupBox("Split-Konfiguration")
-        split_group.setStyleSheet(StyleFactory.group_style(hex_color='#3498db'))
-        split_layout = QGridLayout(split_group)
-
-        # Anzahl Splits
-        split_layout.addWidget(QLabel("Anzahl Splits:"), 0, 0)
-        self.n_splits_spin = QSpinBox()
-        self.n_splits_spin.setRange(2, 50)
-        self.n_splits_spin.setValue(10)
-        split_layout.addWidget(self.n_splits_spin, 0, 1)
-
-        # Train-Anteil
-        split_layout.addWidget(QLabel("Train-Anteil:"), 1, 0)
-        self.train_ratio_spin = QDoubleSpinBox()
-        self.train_ratio_spin.setRange(0.5, 0.95)
-        self.train_ratio_spin.setValue(0.8)
-        self.train_ratio_spin.setSingleStep(0.05)
-        split_layout.addWidget(self.train_ratio_spin, 1, 1)
-
-        # Min Train-Samples (reduzierter Default fuer kleinere Datensaetze)
-        split_layout.addWidget(QLabel("Train-Size (Bars):"), 2, 0)
+        split_layout.addWidget(QLabel("Train-Size:"), 1, 0)
         self.min_train_spin = QSpinBox()
         self.min_train_spin.setRange(100, 50000)
-        self.min_train_spin.setValue(500)  # Reduziert von 5000
+        self.min_train_spin.setValue(500)
         self.min_train_spin.setSingleStep(100)
-        split_layout.addWidget(self.min_train_spin, 2, 1)
+        split_layout.addWidget(self.min_train_spin, 1, 1)
 
-        # Min Test-Samples
-        split_layout.addWidget(QLabel("Test-Size (Bars):"), 3, 0)
+        split_layout.addWidget(QLabel("Test-Size:"), 2, 0)
         self.min_test_spin = QSpinBox()
         self.min_test_spin.setRange(50, 10000)
-        self.min_test_spin.setValue(200)  # Muss > Lookback sein (z.B. 100)
-        self.min_test_spin.setSingleStep(50)
+        self.min_test_spin.setValue(200)
         self.min_test_spin.setToolTip("Muss groesser als Lookback sein!")
-        split_layout.addWidget(self.min_test_spin, 3, 1)
+        split_layout.addWidget(self.min_test_spin, 2, 1)
 
-        # Purged Gap
-        split_layout.addWidget(QLabel("Purged Gap (Bars):"), 4, 0)
+        split_layout.addWidget(QLabel("Purged Gap:"), 3, 0)
         self.purged_gap_spin = QSpinBox()
         self.purged_gap_spin.setRange(0, 500)
         self.purged_gap_spin.setValue(50)
-        self.purged_gap_spin.setToolTip("Gap zwischen Train und Test zur Vermeidung von Leakage")
-        split_layout.addWidget(self.purged_gap_spin, 4, 1)
+        split_layout.addWidget(self.purged_gap_spin, 3, 1)
 
-        # Embargo Gap
-        split_layout.addWidget(QLabel("Embargo Gap (Bars):"), 5, 0)
+        split_layout.addWidget(QLabel("Embargo Gap:"), 4, 0)
         self.embargo_gap_spin = QSpinBox()
         self.embargo_gap_spin.setRange(0, 200)
         self.embargo_gap_spin.setValue(0)
-        self.embargo_gap_spin.setToolTip("Zusaetzlicher Gap nach Test-Ende")
-        split_layout.addWidget(self.embargo_gap_spin, 5, 1)
+        split_layout.addWidget(self.embargo_gap_spin, 4, 1)
 
-        layout.addWidget(split_group)
+        # Nicht mehr verwendete Felder (behalten fuer Kompatibilitaet)
+        self.n_splits_spin = QSpinBox()
+        self.n_splits_spin.setValue(10)
+        self.train_ratio_spin = QDoubleSpinBox()
+        self.train_ratio_spin.setValue(0.8)
 
-        # === Trading-Konfiguration ===
-        trading_group = QGroupBox("Trading-Konfiguration")
-        trading_group.setStyleSheet(StyleFactory.group_style(hex_color=COLORS['success']))
-        trading_layout = QGridLayout(trading_group)
+        split_section.add_widget(split_content)
+        layout.addWidget(split_section)
 
-        # Engine
+        # === 5. Trading (zugeklappt) ===
+        trading_section = CollapsibleSection("Trading", color=COLORS['success'], expanded=False)
+        trading_content = QWidget()
+        trading_layout = QGridLayout(trading_content)
+        trading_layout.setContentsMargins(5, 0, 5, 0)
+
         trading_layout.addWidget(QLabel("Engine:"), 0, 0)
         self.engine_combo = QComboBox()
         self.engine_combo.addItems(["Simple", "Backtrader"])
         trading_layout.addWidget(self.engine_combo, 0, 1)
 
-        # Initial Capital
-        trading_layout.addWidget(QLabel("Startkapital:"), 1, 0)
+        trading_layout.addWidget(QLabel("Kapital:"), 1, 0)
         self.capital_spin = QDoubleSpinBox()
         self.capital_spin.setRange(100, 10000000)
         self.capital_spin.setValue(10000)
@@ -348,7 +419,6 @@ class WalkForwardWindow(QMainWindow):
         self.capital_spin.setDecimals(0)
         trading_layout.addWidget(self.capital_spin, 1, 1)
 
-        # Commission
         trading_layout.addWidget(QLabel("Kommission:"), 2, 0)
         self.commission_spin = QDoubleSpinBox()
         self.commission_spin.setRange(0, 1)
@@ -357,7 +427,6 @@ class WalkForwardWindow(QMainWindow):
         self.commission_spin.setDecimals(4)
         trading_layout.addWidget(self.commission_spin, 2, 1)
 
-        # Slippage
         trading_layout.addWidget(QLabel("Slippage:"), 3, 0)
         self.slippage_spin = QDoubleSpinBox()
         self.slippage_spin.setRange(0, 1)
@@ -366,63 +435,64 @@ class WalkForwardWindow(QMainWindow):
         self.slippage_spin.setDecimals(4)
         trading_layout.addWidget(self.slippage_spin, 3, 1)
 
-        # Position Size
-        trading_layout.addWidget(QLabel("Position Size:"), 4, 0)
+        trading_layout.addWidget(QLabel("Position:"), 4, 0)
         self.stake_spin = QDoubleSpinBox()
         self.stake_spin.setRange(0.001, 1000)
         self.stake_spin.setValue(1.0)
         self.stake_spin.setDecimals(3)
         trading_layout.addWidget(self.stake_spin, 4, 1)
 
-        # Short erlauben
-        self.allow_short_check = QCheckBox("Short-Positionen erlauben")
+        self.allow_short_check = QCheckBox("Short erlauben")
         self.allow_short_check.setChecked(True)
         trading_layout.addWidget(self.allow_short_check, 5, 0, 1, 2)
 
-        layout.addWidget(trading_group)
+        trading_section.add_widget(trading_content)
+        layout.addWidget(trading_section)
 
-        # === Optionen ===
-        options_group = QGroupBox("Optionen")
-        options_group.setStyleSheet(StyleFactory.group_style(hex_color='#808080'))
-        options_layout = QVBoxLayout(options_group)
+        # === 6. Optionen (zugeklappt) ===
+        options_section = CollapsibleSection("Optionen", color='#808080', expanded=False)
+        options_content = QWidget()
+        options_layout = QVBoxLayout(options_content)
+        options_layout.setContentsMargins(5, 0, 5, 0)
 
-        self.gpu_parallel_check = QCheckBox("GPU-Parallelisierung nutzen")
+        self.gpu_parallel_check = QCheckBox("GPU-Parallelisierung")
         self.gpu_parallel_check.setChecked(True)
         options_layout.addWidget(self.gpu_parallel_check)
 
         self.save_models_check = QCheckBox("Modelle speichern")
         self.save_models_check.setChecked(False)
-        self.save_models_check.setToolTip("Speichert trainierte Modelle pro Split")
         options_layout.addWidget(self.save_models_check)
 
         self.verbose_check = QCheckBox("Detailliertes Logging")
         self.verbose_check.setChecked(True)
         options_layout.addWidget(self.verbose_check)
 
-        layout.addWidget(options_group)
+        options_section.add_widget(options_content)
+        layout.addWidget(options_section)
 
         # === Buttons ===
-        button_layout = QVBoxLayout()
+        layout.addSpacing(10)
 
         self.run_btn = QPushButton("Analyse starten")
         self.run_btn.setStyleSheet(StyleFactory.button_style((0.2, 0.7, 0.3)))
         self.run_btn.setMinimumHeight(45)
         self.run_btn.clicked.connect(self._run_analysis)
-        button_layout.addWidget(self.run_btn)
+        layout.addWidget(self.run_btn)
 
+        btn_layout = QHBoxLayout()
         self.cancel_btn = QPushButton("Abbrechen")
         self.cancel_btn.setStyleSheet(StyleFactory.button_style((0.8, 0.3, 0.2)))
         self.cancel_btn.clicked.connect(self._cancel_analysis)
         self.cancel_btn.setEnabled(False)
-        button_layout.addWidget(self.cancel_btn)
+        btn_layout.addWidget(self.cancel_btn)
 
-        self.export_btn = QPushButton("Excel Export")
+        self.export_btn = QPushButton("Export")
         self.export_btn.setStyleSheet(StyleFactory.button_style((0.3, 0.5, 0.7)))
         self.export_btn.clicked.connect(self._export_results)
         self.export_btn.setEnabled(False)
-        button_layout.addWidget(self.export_btn)
+        btn_layout.addWidget(self.export_btn)
 
-        layout.addLayout(button_layout)
+        layout.addLayout(btn_layout)
 
         # === Progress ===
         self.progress_bar = QProgressBar()

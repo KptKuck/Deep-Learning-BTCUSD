@@ -129,8 +129,13 @@ class Logger:
         timestamp = datetime.now().strftime('%Y-%m-%d_%Hh%Mm%Ss')
         self.log_file = self.log_dir / f'session-{timestamp}.txt'
 
-        # delay=False fuer sofortiges Oeffnen
-        file_handler = logging.FileHandler(self.log_file, encoding='utf-8', delay=False)
+        # Eigener FlushHandler mit sofortigem Flush (Thread-safe)
+        class FlushFileHandler(logging.FileHandler):
+            def emit(self, record):
+                super().emit(record)
+                self.flush()
+
+        file_handler = FlushFileHandler(self.log_file, encoding='utf-8', delay=False)
         file_handler.setLevel(self.TRACE)
 
         formatter = logging.Formatter(
