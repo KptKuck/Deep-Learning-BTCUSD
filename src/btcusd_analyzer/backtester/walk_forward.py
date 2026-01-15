@@ -1293,7 +1293,8 @@ class WalkForwardEngine:
         # Labels aus Test-Daten generieren
         logger.debug(f"[Split {split_idx}] Generiere Labels...")
         labeler = DailyExtremaLabeler(
-            method=self.model_info.get('label_method', 'future_return')
+            lookforward=self.model_info.get('lookforward_size', 10),
+            num_classes=self.num_classes
         )
         true_labels = labeler.generate(test_data)
         logger.debug(f"[Split {split_idx}] Labels generiert: {len(true_labels)}, Unique: {np.unique(true_labels)}")
