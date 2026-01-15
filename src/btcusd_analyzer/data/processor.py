@@ -7,8 +7,20 @@ from typing import List, Optional
 import numpy as np
 import pandas as pd
 
-from ..core.logger import get_logger
 from ..core.exceptions import DataValidationError, MissingDataError
+
+
+# Null-Logger fuer Worker-Threads (verhindert Deadlocks mit Qt)
+class _NullLogger:
+    """Null-Logger - Logging in Worker-Threads verursacht Deadlocks mit Qt."""
+    def trace(self, msg): pass
+    def debug(self, msg): pass
+    def info(self, msg): pass
+    def success(self, msg): pass
+    def warning(self, msg): pass
+    def error(self, msg): pass
+    def critical(self, msg): pass
+_null_logger = _NullLogger()
 
 
 class FeatureProcessor:
@@ -49,7 +61,7 @@ class FeatureProcessor:
             features: Liste der gewuenschten Features (default: DEFAULT_FEATURES)
         """
         self.features = features or self.DEFAULT_FEATURES.copy()
-        self.logger = get_logger()
+        self.logger = _null_logger  # Null-Logger (Worker-Thread safe)
 
     def validate_input(self, df: pd.DataFrame, strict: bool = False) -> List[str]:
         """

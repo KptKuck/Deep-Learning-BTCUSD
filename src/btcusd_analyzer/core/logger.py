@@ -7,8 +7,6 @@ Thread-Safe: Verwendet QueueHandler fuer multi-threaded Anwendungen (QThread + M
 
 import logging
 import logging.handlers
-import atexit
-import os
 import queue
 import threading
 from datetime import datetime
@@ -101,22 +99,24 @@ class Logger:
 
         # Queue fuer thread-safe Logging
         self._log_queue: queue.Queue = queue.Queue(-1)  # Unbegrenzt
-        self._queue_listener: Optional[logging.handlers.QueueListener] = None
+        self._queue_handler = None
+        self._console_handler = None
+        self._file_handler = None
 
-        # Handler Setup (mit Queue fuer Thread-Safety)
+        # Handler Setup
         self._setup_handlers()
 
         self._initialized = True
 
     def _setup_handlers(self):
         """
-        Richtet alle Handler ein mit QueueHandler fuer Thread-Safety.
+        Richtet alle Handler ein.
 
-        Architektur:
-        - Logger -> QueueHandler -> Queue -> QueueListener -> [ConsoleHandler, FileHandler]
-
-        Der QueueHandler ist non-blocking und kann von jedem Thread sicher verwendet werden.
-        Der QueueListener laeuft in einem separaten Thread und verarbeitet die Queue.
+        Architektur (100% Queue-basiert zur Vermeidung von Deadlocks):
+        - Alle Log-Aufrufe gehen nur in eine Queue (lock-free im aufrufenden Thread)
+        - Ein separater Writer-Thread liest aus der Queue und schreibt zu:
+          * Konsole (stdout)
+          * Datei
         """
         # Log-Verzeichnis erstellen
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -125,54 +125,62 @@ class Logger:
         timestamp = datetime.now().strftime('%Y-%m-%d_%Hh%Mm%Ss')
         self.log_file = self.log_dir / f'session-{timestamp}.txt'
 
-        # === Konsolen-Handler ===
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(self.TRACE)
+        # === Nur QueueHandler am Logger (lock-free) ===
+        self._queue_handler = logging.handlers.QueueHandler(self._log_queue)
+        self._logger.addHandler(self._queue_handler)
 
-        if COLORLOG_AVAILABLE:
-            console_formatter = colorlog.ColoredFormatter(
-                '%(log_color)s[%(asctime)s] [%(levelname)s] %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S',
-                log_colors=self.COLORS
-            )
-        else:
-            console_formatter = logging.Formatter(
-                '[%(asctime)s] [%(levelname)s] %(message)s',
-                datefmt='%Y-%m-%d %H:%M:%S'
-            )
-        console_handler.setFormatter(console_formatter)
-
-        # === Datei-Handler ===
-        file_handler = logging.FileHandler(self.log_file, encoding='utf-8', delay=False)
-        file_handler.setLevel(self.TRACE)
-
-        file_formatter = logging.Formatter(
+        # === Handler fuer den Writer-Thread (werden dort verwendet) ===
+        log_formatter = logging.Formatter(
             '[%(asctime)s] [%(levelname)s] %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
-        file_handler.setFormatter(file_formatter)
 
-        # === QueueHandler fuer den Logger (non-blocking) ===
-        queue_handler = logging.handlers.QueueHandler(self._log_queue)
-        self._logger.addHandler(queue_handler)
+        # Konsolen-Handler (wird im Writer-Thread verwendet)
+        self._console_handler = logging.StreamHandler()
+        self._console_handler.setLevel(self.TRACE)
+        self._console_handler.setFormatter(log_formatter)
 
-        # === QueueListener verarbeitet Queue in separatem Thread ===
-        self._queue_listener = logging.handlers.QueueListener(
-            self._log_queue,
-            console_handler,
-            file_handler,
-            respect_handler_level=True
+        # Datei-Handler (wird im Writer-Thread verwendet)
+        self._file_handler = logging.FileHandler(
+            self.log_file, encoding='utf-8', delay=False
         )
-        self._queue_listener.start()
+        self._file_handler.setLevel(self.TRACE)
+        self._file_handler.setFormatter(log_formatter)
 
-        # Sicherstellen, dass Listener bei Programmende gestoppt wird
-        atexit.register(self._stop_listener)
+        # Writer-Thread fuer Queue -> Console + File
+        self._start_file_writer_thread()
 
-    def _stop_listener(self):
-        """Stoppt den QueueListener sauber."""
-        if self._queue_listener:
-            self._queue_listener.stop()
-            self._queue_listener = None
+    def _start_file_writer_thread(self):
+        """
+        Startet einen Daemon-Thread der die Queue liest und zu Console + Datei schreibt.
+
+        Dieser Ansatz vermeidet Deadlocks da:
+        - Log-Aufrufe nur in die Queue schreiben (praktisch lock-free)
+        - Nur dieser eine Thread tatsaechlich I/O macht
+        - Kein Lock zwischen GUI-Thread und Worker-Thread
+        """
+        def writer_loop():
+            while True:
+                try:
+                    record = self._log_queue.get(timeout=0.5)
+                    if record is None:
+                        break
+                    # Beide Handler bedienen
+                    try:
+                        self._console_handler.emit(record)
+                    except Exception:
+                        pass  # Konsolen-Fehler ignorieren
+                    try:
+                        self._file_handler.emit(record)
+                    except Exception:
+                        pass  # Datei-Fehler ignorieren
+                except queue.Empty:
+                    continue
+                except Exception:
+                    pass  # Alle anderen Fehler ignorieren
+
+        self._writer_thread = threading.Thread(target=writer_loop, daemon=True, name="LogWriter")
+        self._writer_thread.start()
 
     def trace(self, message: str):
         """Sehr detaillierte Debug-Informationen."""

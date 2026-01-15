@@ -24,14 +24,45 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from ..core.logger import get_logger
 from ..data.processor import FeatureProcessor
 from ..training.normalizer import ZScoreNormalizer
 from ..training.sequence import SequenceGenerator, compute_class_weights
 from ..training.labeler import DailyExtremaLabeler
 
 
-logger = get_logger()
+# =============================================================================
+# Thread-Safe Logger via Callback
+# =============================================================================
+# WICHTIG: Kein direktes Logging hier! Das verursacht Deadlocks mit Qt.
+# Stattdessen wird ein log_callback verwendet, der Nachrichten an den
+# Main-Thread sendet (via Qt Signal), wo dann geloggt wird.
+
+class _CallbackLogger:
+    """
+    Logger der Nachrichten via Callback weiterleitet.
+    Wird verwendet um Deadlocks mit Qt zu vermeiden.
+    """
+    def __init__(self, callback: Optional[Callable[[str, str], None]] = None):
+        self._callback = callback
+
+    def set_callback(self, callback: Optional[Callable[[str, str], None]]):
+        """Setzt den Log-Callback."""
+        self._callback = callback
+
+    def _log(self, level: str, msg: str):
+        if self._callback:
+            self._callback(level, msg)
+
+    def trace(self, msg): self._log('trace', msg)
+    def debug(self, msg): self._log('debug', msg)
+    def info(self, msg): self._log('info', msg)
+    def success(self, msg): self._log('success', msg)
+    def warning(self, msg): self._log('warning', msg)
+    def error(self, msg): self._log('error', msg)
+    def critical(self, msg): self._log('critical', msg)
+
+# Globale Logger-Instanz fuer dieses Modul
+logger = _CallbackLogger()
 
 
 # =============================================================================
@@ -460,16 +491,23 @@ class WalkForwardEngine:
         with self._lock:
             return self._cancel_requested
 
-    def run(self, progress_callback: Optional[Callable] = None) -> WalkForwardResult:
+    def run(
+        self,
+        progress_callback: Optional[Callable] = None,
+        log_callback: Optional[Callable[[str, str], None]] = None
+    ) -> WalkForwardResult:
         """
         Fuehrt die Walk-Forward Analyse aus.
 
         Args:
             progress_callback: Optional Callback(current, total, message)
+            log_callback: Optional Callback(level, message) fuer thread-sicheres Logging
 
         Returns:
             WalkForwardResult mit allen Ergebnissen
         """
+        # Log-Callback setzen (fuer thread-sicheres Logging via Qt Signal)
+        logger.set_callback(log_callback)
         logger.debug("[WalkForward] === run() gestartet ===")
         start_time = time.time()
         self._cancel_requested = False
@@ -733,19 +771,11 @@ class WalkForwardEngine:
         # Predictions
         logger.debug(f"[Split {split_idx}] Starte Inference auf {self.device}...")
         try:
-            # Flush Logger vor Inference
-            import sys
-            sys.stdout.flush()
-            sys.stderr.flush()
-
             with torch.no_grad():
                 x = torch.FloatTensor(sequences).to(self.device)
                 logger.debug(f"[Split {split_idx}] Tensor erstellt: {x.shape}, Device: {x.device}")
-
-                # CUDA sync vor Model-Call
                 logger.debug(f"[Split {split_idx}] Rufe model(x) auf...")
                 logits = self.model(x)
-
                 logger.debug(f"[Split {split_idx}] Logits: {logits.shape}")
                 logger.debug(f"[Split {split_idx}] Berechne softmax...")
                 probs = torch.softmax(logits, dim=1)
@@ -753,7 +783,7 @@ class WalkForwardEngine:
                 predictions = logits.argmax(dim=1).cpu().numpy()
                 logger.debug(f"[Split {split_idx}] Berechne confidences...")
                 confidences = probs.max(dim=1).values.cpu().numpy()
-                logger.debug(f"[Split {split_idx}] Predictions: {len(predictions)}, Unique: {np.unique(predictions)}")
+            logger.debug(f"[Split {split_idx}] Inference OK: {len(predictions)} Predictions")
         except Exception as e:
             logger.error(f"[Split {split_idx}] Fehler bei Inference: {e}")
             import traceback

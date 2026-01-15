@@ -137,47 +137,52 @@ from ..backtester import (
 
 class WalkForwardWorker(QThread):
     """Worker-Thread fuer asynchrone Walk-Forward Analyse."""
-    finished = pyqtSignal(object)       # WalkForwardResult
+    finished = pyqtSignal()             # Nur Signal ohne Daten (Result wird als Attribut gespeichert)
     progress = pyqtSignal(int, str)     # Progress %, Status
     split_completed = pyqtSignal(int, dict)  # Split-ID, Metriken
     error = pyqtSignal(str)             # Fehlermeldung
+    log_message = pyqtSignal(str, str)  # Level, Message - fuer thread-sicheres Logging
 
     def __init__(self, engine: WalkForwardEngine):
         super().__init__()
         self.engine = engine
         self._cancelled = False
+        self.result = None              # Ergebnis wird hier gespeichert
 
     def run(self):
         """Fuehrt Walk-Forward Analyse aus."""
         import torch
-        from ..core.logger import get_logger
-        logger = get_logger()
 
         try:
             self.progress.emit(0, "Starte Walk-Forward Analyse...")
 
-            # CUDA-Kontext im Worker-Thread initialisieren (wie in TrainingWorker)
+            # CUDA-Kontext im Worker-Thread initialisieren
             if torch.cuda.is_available():
-                logger.debug("[Worker] Initialisiere CUDA-Kontext im Worker-Thread...")
                 torch.cuda.set_device(0)
                 torch.cuda.empty_cache()
-                logger.debug(f"[Worker] CUDA initialisiert: Device 0, {torch.cuda.get_device_name(0)}")
+                self.log_message.emit("debug", f"[Worker] CUDA initialisiert: {torch.cuda.get_device_name(0)}")
 
-            # Progress-Callback als Parameter uebergeben
-            logger.debug("[Worker] Rufe engine.run() auf...")
-            result = self.engine.run(progress_callback=self._on_progress)
-            logger.debug("[Worker] engine.run() abgeschlossen")
+            # Progress-Callback und Log-Callback uebergeben
+            self.log_message.emit("debug", "[Worker] Starte engine.run()...")
+            self.result = self.engine.run(
+                progress_callback=self._on_progress,
+                log_callback=self._on_log
+            )
+            self.log_message.emit("debug", "[Worker] engine.run() abgeschlossen")
 
             if not self._cancelled:
-                logger.debug("[Worker] Emitiere finished Signal...")
-                self.finished.emit(result)
-                logger.debug("[Worker] finished Signal emittiert")
+                self.finished.emit()
 
         except Exception as e:
             import traceback
             error_msg = f"{str(e)}\n{traceback.format_exc()}"
-            logger.error(f"[Worker] Fehler: {error_msg}")
+            self.log_message.emit("error", f"[Worker] Fehler: {error_msg}")
             self.error.emit(error_msg)
+
+    def _on_log(self, level: str, message: str):
+        """Log-Callback - sendet Nachricht an Main-Thread."""
+        if not self._cancelled:
+            self.log_message.emit(level, message)
 
     def _on_progress(self, current: int, total: int, message: str):
         """Progress-Callback vom Engine."""
@@ -884,10 +889,12 @@ class WalkForwardWindow(QMainWindow):
         self.progress_bar.setValue(0)
 
         # Worker starten
+        # WICHTIG: Qt.ConnectionType.QueuedConnection erzwingt Thread-sichere Signal-Verarbeitung
         self.worker = WalkForwardWorker(self.engine)
-        self.worker.finished.connect(self._on_analysis_finished)
-        self.worker.progress.connect(self._on_progress)
-        self.worker.error.connect(self._on_error)
+        self.worker.finished.connect(self._on_analysis_finished, Qt.ConnectionType.QueuedConnection)
+        self.worker.progress.connect(self._on_progress, Qt.ConnectionType.QueuedConnection)
+        self.worker.error.connect(self._on_error, Qt.ConnectionType.QueuedConnection)
+        self.worker.log_message.connect(self._on_worker_log, Qt.ConnectionType.QueuedConnection)
         self.worker.start()
 
     def _cancel_analysis(self):
@@ -909,13 +916,34 @@ class WalkForwardWindow(QMainWindow):
         self.status_label.setText(message)
         self._log(message)
 
-    def _on_analysis_finished(self, result: WalkForwardResult):
+    def _on_worker_log(self, level: str, message: str):
+        """Empfaengt Log-Nachrichten vom Worker und loggt im Main-Thread."""
+        from ..core.logger import get_logger
+        logger = get_logger()
+
+        # Level-Mapping
+        level_methods = {
+            'trace': logger.trace,
+            'debug': logger.debug,
+            'info': logger.info,
+            'success': logger.success,
+            'warning': logger.warning,
+            'error': logger.error,
+            'critical': logger.critical,
+        }
+
+        log_func = level_methods.get(level.lower(), logger.debug)
+        log_func(message)
+
+    def _on_analysis_finished(self):
         """Wird aufgerufen wenn Analyse fertig ist."""
         from ..core.logger import get_logger
         logger = get_logger()
         logger.debug("[GUI] _on_analysis_finished aufgerufen")
 
         try:
+            # Result vom Worker holen (nicht mehr ueber Signal)
+            result = self.worker.result
             self.result = result
             self.run_btn.setEnabled(True)
             self.cancel_btn.setEnabled(False)
@@ -1151,3 +1179,12 @@ class WalkForwardWindow(QMainWindow):
         """Schreibt Nachricht ins Log."""
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.log_text.append(f"[{timestamp}] {message}")
+
+    def closeEvent(self, event):
+        """Sauberes Beenden - Worker stoppen falls aktiv."""
+        if self.worker is not None and self.worker.isRunning():
+            self.worker.cancel()
+            self.worker.wait(2000)  # Max 2 Sekunden warten
+            if self.worker.isRunning():
+                self.worker.terminate()  # Notfall-Beendigung
+        event.accept()
