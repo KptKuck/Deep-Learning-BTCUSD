@@ -134,7 +134,14 @@ class SessionManager:
         if not self.backtest_data_file.exists():
             return None
 
-        return pd.read_csv(self.backtest_data_file, index_col=0, parse_dates=True)
+        df = pd.read_csv(self.backtest_data_file, index_col=0, parse_dates=True)
+
+        # Falls DateTime-Spalte vorhanden ist, diese als Index verwenden
+        if 'DateTime' in df.columns:
+            df['DateTime'] = pd.to_datetime(df['DateTime'])
+            df = df.set_index('DateTime')
+
+        return df
 
     # =========================================================================
     # Modelle

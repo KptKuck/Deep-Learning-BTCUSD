@@ -115,7 +115,7 @@ class WalkForwardWindow(QMainWindow):
     def _init_ui(self):
         """Initialisiert die UI-Komponenten."""
         self.setWindowTitle('Walk-Forward Analyse')
-        self.setMinimumSize(1400, 900)
+        self.setMinimumSize(1400, 1260)  # 40% mehr Hoehe (900 * 1.4)
 
         # Central Widget
         central = QWidget()
@@ -171,39 +171,38 @@ class WalkForwardWindow(QMainWindow):
         time_group.setStyleSheet(StyleFactory.group_style(hex_color='#27ae60'))
         time_layout = QGridLayout(time_group)
 
-        # Checkbox fuer benutzerdefinierten Zeitraum
+        # Checkbox fuer benutzerdefinierten Zeitraum (standardmaessig aktiviert)
         self.custom_range_check = QCheckBox("Benutzerdefinierten Zeitraum verwenden")
+        self.custom_range_check.setChecked(True)  # Standardmaessig aktiviert
         self.custom_range_check.stateChanged.connect(self._toggle_date_range)
         time_layout.addWidget(self.custom_range_check, 0, 0, 1, 2)
 
-        # Von-Datum
+        # Von-Datum (standardmaessig aktiviert)
         time_layout.addWidget(QLabel("Von:"), 1, 0)
         self.from_date = QDateEdit()
         self.from_date.setCalendarPopup(True)
         self.from_date.setDisplayFormat("dd.MM.yyyy")
-        self.from_date.setEnabled(False)
+        self.from_date.setEnabled(True)  # Standardmaessig aktiviert
         time_layout.addWidget(self.from_date, 1, 1)
 
-        # Bis-Datum
+        # Bis-Datum (standardmaessig aktiviert)
         time_layout.addWidget(QLabel("Bis:"), 2, 0)
         self.to_date = QDateEdit()
         self.to_date.setCalendarPopup(True)
         self.to_date.setDisplayFormat("dd.MM.yyyy")
-        self.to_date.setEnabled(False)
+        self.to_date.setEnabled(True)  # Standardmaessig aktiviert
         time_layout.addWidget(self.to_date, 2, 1)
 
-        # Schnellauswahl-Buttons
+        # Schnellauswahl-Buttons (standardmaessig aktiviert)
         quick_layout = QHBoxLayout()
+        self._quick_btns = []  # Initialisiere Liste vor der Schleife
         quick_periods = [('1M', 30), ('3M', 90), ('6M', 180), ('1J', 365)]
         for text, days in quick_periods:
             btn = QPushButton(text)
             btn.setFixedWidth(40)
-            btn.setEnabled(False)
+            btn.setEnabled(True)  # Standardmaessig aktiviert
             btn.clicked.connect(lambda checked, d=days: self._set_quick_period(d))
             quick_layout.addWidget(btn)
-            # Speichere Button-Referenz fuer Enable/Disable
-            if not hasattr(self, '_quick_btns'):
-                self._quick_btns = []
             self._quick_btns.append(btn)
         quick_layout.addStretch()
         time_layout.addLayout(quick_layout, 3, 0, 1, 2)
