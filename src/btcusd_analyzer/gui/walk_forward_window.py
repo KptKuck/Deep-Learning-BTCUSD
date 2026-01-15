@@ -768,7 +768,7 @@ class WalkForwardWindow(QMainWindow):
         self._log(f"=== Walk-Forward Analyse gestartet ===")
         self._log(f"Modus: {config.mode.value}")
         self._log(f"Typ: {config.walk_forward_type.value}")
-        self._log(f"Splits: {config.n_splits}")
+        self._log(f"Train/Test/Step: {config.train_size}/{config.test_size}/{config.step_size}")
         self._log(f"Datenpunkte: {len(analysis_data):,}")
         self._log("")
 
