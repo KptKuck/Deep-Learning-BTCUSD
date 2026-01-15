@@ -198,10 +198,13 @@ class DailyExtremaLabeler:
             - 2 Klassen: 0=BUY, 1=SELL
             - 3 Klassen: 0=HOLD, 1=BUY, 2=SELL
         """
+        self.logger.debug(f"[Labeler] generate_labels aufgerufen: {len(df)} Zeilen, method={method}")
+
         # Config erstellen falls nur method angegeben
         if config is None:
             if method is None:
                 method = 'future_return'
+            self.logger.debug(f"[Labeler] Erstelle Config mit method={method}")
             config = LabelingConfig(
                 method=LabelingMethod(method) if method in [m.value for m in LabelingMethod] else LabelingMethod.FUTURE_RETURN,
                 lookforward=self.lookforward,
@@ -213,9 +216,14 @@ class DailyExtremaLabeler:
         self._set_label_mapping(config.num_classes)
         self.num_classes = config.num_classes
 
+        self.logger.debug(f"[Labeler] Methode: {config.method.value}, Klassen: {config.num_classes}")
+
         # Methode ausfuehren
         if config.method == LabelingMethod.FUTURE_RETURN:
-            return self._label_by_future_return(df, config)
+            self.logger.debug("[Labeler] Starte _label_by_future_return...")
+            result = self._label_by_future_return(df, config)
+            self.logger.debug(f"[Labeler] _label_by_future_return fertig: {len(result)} Labels")
+            return result
         elif config.method == LabelingMethod.ZIGZAG:
             return self._label_by_zigzag(df, config)
         elif config.method == LabelingMethod.PEAKS:
