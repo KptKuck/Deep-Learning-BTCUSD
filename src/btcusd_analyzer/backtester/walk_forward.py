@@ -727,10 +727,28 @@ class WalkForwardEngine:
         # Predictions
         logger.debug(f"[Split {split_idx}] Starte Inference auf {self.device}...")
         try:
+            # Flush Logger vor Inference
+            import sys
+            sys.stdout.flush()
+            sys.stderr.flush()
+
             with torch.no_grad():
                 x = torch.FloatTensor(sequences).to(self.device)
                 logger.debug(f"[Split {split_idx}] Tensor erstellt: {x.shape}, Device: {x.device}")
+
+                # CUDA sync vor Model-Call
+                if torch.cuda.is_available() and self.device != 'cpu':
+                    logger.debug(f"[Split {split_idx}] CUDA sync vor Inference...")
+                    torch.cuda.synchronize()
+
+                logger.debug(f"[Split {split_idx}] Rufe model(x) auf...")
                 logits = self.model(x)
+
+                # CUDA sync nach Model-Call
+                if torch.cuda.is_available() and self.device != 'cpu':
+                    logger.debug(f"[Split {split_idx}] CUDA sync nach Inference...")
+                    torch.cuda.synchronize()
+
                 logger.debug(f"[Split {split_idx}] Logits: {logits.shape}")
                 probs = torch.softmax(logits, dim=1)
                 predictions = logits.argmax(dim=1).cpu().numpy()
@@ -959,9 +977,10 @@ class WalkForwardEngine:
 
         # Labels generieren
         labeler = DailyExtremaLabeler(
-            method=self.model_info.get('label_method', 'future_return')
+            lookforward=self.model_info.get('lookforward_size', 10),
+            num_classes=self.num_classes
         )
-        labels = labeler.generate(train_data)
+        labels = labeler.generate_labels(train_data)
 
         # Features
         feature_df = self.processor.process(train_data)
@@ -1296,7 +1315,7 @@ class WalkForwardEngine:
             lookforward=self.model_info.get('lookforward_size', 10),
             num_classes=self.num_classes
         )
-        true_labels = labeler.generate(test_data)
+        true_labels = labeler.generate_labels(test_data)
         logger.debug(f"[Split {split_idx}] Labels generiert: {len(true_labels)}, Unique: {np.unique(true_labels)}")
 
         # Nur gueltige Predictions (nach Lookback)

@@ -50,8 +50,20 @@ class WalkForwardWorker(QThread):
 
     def run(self):
         """Fuehrt Walk-Forward Analyse aus."""
+        import torch
+        from ..core.logger import get_logger
+        logger = get_logger()
+
         try:
             self.progress.emit(0, "Starte Walk-Forward Analyse...")
+
+            # CUDA auf Worker-Thread initialisieren (wichtig fuer Thread-Safety)
+            if torch.cuda.is_available():
+                logger.debug("[Worker] Initialisiere CUDA auf Worker-Thread...")
+                # Leere CUDA-Operation um Kontext zu initialisieren
+                torch.cuda.current_device()
+                torch.cuda.empty_cache()
+                logger.debug(f"[Worker] CUDA initialisiert: {torch.cuda.get_device_name(0)}")
 
             # Progress-Callback als Parameter uebergeben
             result = self.engine.run(progress_callback=self._on_progress)

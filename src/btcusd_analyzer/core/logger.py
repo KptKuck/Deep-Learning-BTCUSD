@@ -129,7 +129,8 @@ class Logger:
         timestamp = datetime.now().strftime('%Y-%m-%d_%Hh%Mm%Ss')
         self.log_file = self.log_dir / f'session-{timestamp}.txt'
 
-        file_handler = logging.FileHandler(self.log_file, encoding='utf-8')
+        # delay=False und Flush-Modus fuer sofortiges Schreiben
+        file_handler = logging.FileHandler(self.log_file, encoding='utf-8', delay=False)
         file_handler.setLevel(self.TRACE)
 
         formatter = logging.Formatter(
@@ -137,6 +138,14 @@ class Logger:
             datefmt='%Y-%m-%d %H:%M:%S'
         )
         file_handler.setFormatter(formatter)
+
+        # Wrapper um nach jedem Log zu flushen
+        original_emit = file_handler.emit
+        def flush_emit(record):
+            original_emit(record)
+            file_handler.flush()
+        file_handler.emit = flush_emit
+
         self._logger.addHandler(file_handler)
 
     def trace(self, message: str):
