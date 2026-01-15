@@ -64,29 +64,34 @@ btc_analyzer_python/
 - Nur relevante Dateien modifizieren
 
 ## Threading/Logging - WICHTIG
-**NIEMALS direktes Logging in QThread Worker-Threads verwenden!**
+Der Logger (`core/logger.py`) ist jetzt **100% Queue-basiert** und Thread-safe:
+- Log-Aufrufe schreiben nur in eine Queue (lock-free)
+- Ein separater Daemon-Thread schreibt zu Console/Datei
+- Kein Deadlock-Risiko mehr mit Qt Event-Loop
 
-Python's `logging` Modul verwendet interne Locks die mit Qt's Event-Loop
-zu sporadischen Deadlocks fuehren. Getestet und bestaetigt am 15.01.2026.
+### Architektur:
+```
+[Main-Thread] --> logger.debug() --> Queue --> [LogWriter-Thread] --> Console/File
+[Worker-Thread] --> logger.debug() --> Queue --> [LogWriter-Thread] --> Console/File
+```
 
-### Loesung fuer Worker-Threads:
-1. **Callback-basiertes Logging:** Worker bekommt `log_callback` Parameter
-2. **Qt Signal:** Worker sendet Log-Nachrichten via `pyqtSignal(str, str)`
-3. **Main-Thread loggt:** Slot empfaengt Signal und ruft Logger auf
-
-### Betroffene Module:
-- `backtester/walk_forward.py` - verwendet `_CallbackLogger`
-- `data/processor.py` - verwendet `_NullLogger` (nur DEBUG-Meldungen)
-- `training/labeler.py` - verwendet `_NullLogger` (nur DEBUG-Meldungen)
+### Module die den Logger verwenden:
+- `core/logger.py` - Queue-basierter Logger mit colorlog
+- `backtester/walk_forward.py` - verwendet `_CallbackLogger` (fuer detaillierte Kontrolle)
+- `data/processor.py` - verwendet `get_logger()` direkt (Thread-safe)
+- `training/labeler.py` - verwendet `get_logger()` direkt (Thread-safe)
 - `gui/walk_forward_window.py` - `WalkForwardWorker.log_message` Signal
 
-### Pattern fuer neue Worker:
+### Pattern fuer neue Worker (optional, fuer feine Kontrolle):
 ```python
 class MyWorker(QThread):
     log_message = pyqtSignal(str, str)  # level, message
 
     def run(self):
-        # NICHT: logger.debug("...")
-        # STATTDESSEN:
+        # Option 1: Direkt loggen (Thread-safe dank Queue)
+        from ..core.logger import get_logger
+        get_logger().debug("Nachricht")
+
+        # Option 2: Via Signal (fuer GUI-Updates)
         self.log_message.emit("debug", "Nachricht")
 ```

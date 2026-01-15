@@ -1193,27 +1193,55 @@ class WalkForwardWindow(QMainWindow):
 
         # Daten aus EquityPoints extrahieren
         dates = [point.datetime for point in result.equity_curve]
-        equity_values = [point.equity for point in result.equity_curve]
+        raw_equity = [point.equity for point in result.equity_curve]
         split_indices = [point.split_index for point in result.equity_curve]
+
+        # Kumulierte Equity berechnen (jeder Split setzt beim vorherigen fort)
+        # Jeder Split startet bei initial_capital, wir muessen die Returns kumulieren
+        unique_splits = sorted(set(split_indices))
+        initial_capital = raw_equity[0] if raw_equity else 10000
+
+        # Equity-Werte pro Split normalisieren und kumulieren
+        cumulative_equity = []
+        cumulative_factor = 1.0  # Kumulierter Return-Faktor
+
+        for split_idx in unique_splits:
+            # Alle Punkte dieses Splits
+            split_points = [(i, raw_equity[i]) for i, s in enumerate(split_indices) if s == split_idx]
+            if not split_points:
+                continue
+
+            split_start_equity = split_points[0][1]
+
+            for idx, eq in split_points:
+                # Return relativ zum Split-Start
+                split_return = eq / split_start_equity if split_start_equity > 0 else 1.0
+                # Kumuliert auf vorherige Splits
+                cumulative_eq = initial_capital * cumulative_factor * split_return
+                cumulative_equity.append(cumulative_eq)
+
+            # Am Ende des Splits: kumulierten Faktor aktualisieren
+            split_end_equity = split_points[-1][1]
+            split_total_return = split_end_equity / split_start_equity if split_start_equity > 0 else 1.0
+            cumulative_factor *= split_total_return
 
         # Chart leeren und stylen
         self.equity_chart.ax.clear()
         self.equity_chart._style_axis()
 
-        # Verschiedene Splits mit unterschiedlichen Farben darstellen
-        unique_splits = sorted(set(split_indices))
         colors = ['#4da8da', '#33cc33', '#e6b333', '#cc3333', '#b19cd9',
                   '#80cbc4', '#ff9966', '#66ccff', '#ff66b2', '#99ff99']
 
-        # Equity-Linie pro Split zeichnen
+        # Equity-Linie pro Split zeichnen (mit kumulierten Werten)
+        x_offset = 0
         for i, split_idx in enumerate(unique_splits):
-            # Indizes fuer diesen Split
-            mask = [j for j, s in enumerate(split_indices) if s == split_idx]
-            if not mask:
+            # Alle Punkte dieses Splits
+            split_mask = [j for j, s in enumerate(split_indices) if s == split_idx]
+            if not split_mask:
                 continue
 
-            split_equity = [equity_values[j] for j in mask]
-            split_x = list(range(mask[0], mask[0] + len(mask)))
+            split_equity = cumulative_equity[x_offset:x_offset + len(split_mask)]
+            split_x = list(range(x_offset, x_offset + len(split_mask)))
             color = colors[i % len(colors)]
 
             self.equity_chart.ax.plot(
@@ -1222,25 +1250,23 @@ class WalkForwardWindow(QMainWindow):
                 label=f'Split {split_idx}'
             )
 
+            x_offset += len(split_mask)
+
         # Gesamte Equity als duenne Linie
-        equity_array = np.array(equity_values)
         self.equity_chart.ax.plot(
-            range(len(equity_values)), equity_values,
+            range(len(cumulative_equity)), cumulative_equity,
             color='white', linewidth=0.5, alpha=0.3
         )
 
         # Startkapital-Linie
-        initial_capital = equity_values[0] if equity_values else 10000
         self.equity_chart.ax.axhline(
             y=initial_capital, color='#666666', linestyle='--',
             linewidth=0.8, alpha=0.7, label=f'Start: ${initial_capital:,.0f}'
         )
 
         # Statistiken im Titel
-        final_equity = equity_values[-1] if equity_values else initial_capital
+        final_equity = cumulative_equity[-1] if cumulative_equity else initial_capital
         total_return = (final_equity / initial_capital - 1) * 100
-        max_equity = max(equity_values) if equity_values else initial_capital
-        min_equity = min(equity_values) if equity_values else initial_capital
 
         title_color = '#33cc33' if total_return >= 0 else '#cc3333'
         self.equity_chart.ax.set_title(

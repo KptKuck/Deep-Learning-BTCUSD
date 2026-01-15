@@ -10,18 +10,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-
-# Null-Logger fuer Worker-Threads (verhindert Deadlocks mit Qt)
-class _NullLogger:
-    """Null-Logger - Logging in Worker-Threads verursacht Deadlocks mit Qt."""
-    def trace(self, msg): pass
-    def debug(self, msg): pass
-    def info(self, msg): pass
-    def success(self, msg): pass
-    def warning(self, msg): pass
-    def error(self, msg): pass
-    def critical(self, msg): pass
-_null_logger = _NullLogger()
+from ..core.logger import get_logger
 
 
 # Optional: scipy fuer Peak-Detection
@@ -125,7 +114,7 @@ class DailyExtremaLabeler:
         self.lookforward = lookforward
         self.threshold_pct = threshold_pct
         self.num_classes = num_classes
-        self.logger = _null_logger  # Null-Logger (Worker-Thread safe)
+        self.logger = get_logger()  # Queue-basierter Logger (Thread-safe)
 
         # Signal-Indizes (echte Extrema/Peaks vor dem Fill)
         self.buy_signal_indices: List[int] = []
