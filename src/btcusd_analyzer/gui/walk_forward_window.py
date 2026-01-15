@@ -278,20 +278,20 @@ class WalkForwardWindow(QMainWindow):
         self.train_ratio_spin.setSingleStep(0.05)
         split_layout.addWidget(self.train_ratio_spin, 1, 1)
 
-        # Min Train-Samples
-        split_layout.addWidget(QLabel("Min Train-Samples:"), 2, 0)
+        # Min Train-Samples (reduzierter Default fuer kleinere Datensaetze)
+        split_layout.addWidget(QLabel("Train-Size (Bars):"), 2, 0)
         self.min_train_spin = QSpinBox()
         self.min_train_spin.setRange(100, 50000)
-        self.min_train_spin.setValue(5000)
-        self.min_train_spin.setSingleStep(500)
+        self.min_train_spin.setValue(500)  # Reduziert von 5000
+        self.min_train_spin.setSingleStep(100)
         split_layout.addWidget(self.min_train_spin, 2, 1)
 
         # Min Test-Samples
-        split_layout.addWidget(QLabel("Min Test-Samples:"), 3, 0)
+        split_layout.addWidget(QLabel("Test-Size (Bars):"), 3, 0)
         self.min_test_spin = QSpinBox()
         self.min_test_spin.setRange(50, 10000)
-        self.min_test_spin.setValue(500)
-        self.min_test_spin.setSingleStep(100)
+        self.min_test_spin.setValue(100)  # Reduziert von 500
+        self.min_test_spin.setSingleStep(50)
         split_layout.addWidget(self.min_test_spin, 3, 1)
 
         # Purged Gap
@@ -774,11 +774,10 @@ class WalkForwardWindow(QMainWindow):
 
         # Engine erstellen mit gefilterten Daten
         self.engine = WalkForwardEngine(
-            config=config,
             data=analysis_data,
             model=self.model,
             model_info=self.model_info,
-            training_config=self.training_config
+            config=config
         )
 
         # UI aktualisieren
@@ -825,9 +824,9 @@ class WalkForwardWindow(QMainWindow):
 
         self._log("")
         self._log(f"=== Analyse abgeschlossen ===")
-        self._log(f"Laufzeit: {result.execution_time:.1f} Sekunden")
+        self._log(f"Laufzeit: {result.duration_sec:.1f} Sekunden")
         self._log(f"Total Return: {result.total_return:.2%}")
-        self._log(f"Sharpe Ratio: {result.sharpe_ratio:.3f}")
+        self._log(f"Sharpe Ratio: {result.avg_sharpe:.3f}")
 
         self._update_results(result)
 

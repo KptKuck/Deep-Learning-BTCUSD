@@ -560,14 +560,9 @@ class WalkForwardEngine:
         if self.config.max_parallel > 0:
             return self.config.max_parallel
 
-        if not torch.cuda.is_available():
-            return 1
-
-        total_mem = torch.cuda.get_device_properties(0).total_memory
-        available = total_mem - (2 * 1024**3)  # 2GB Reserve
-        per_split = 200 * 1024**2  # 200MB pro Split (nur Inference)
-
-        return min(16, max(1, int(available / per_split)))
+        # PyTorch GPU-Inference ist nicht threadsicher - daher sequenziell
+        # Parallelisierung nur bei CPU oder expliziter Anforderung
+        return 1
 
     def _calculate_max_parallel_training(self) -> int:
         """Berechnet max parallele Workers fuer Training."""
