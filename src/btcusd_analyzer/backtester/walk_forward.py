@@ -483,6 +483,7 @@ class WalkForwardEngine:
         logger.debug("[WalkForward] Generiere Splits...")
         splits = self.generate_splits()
         logger.info(f"[WalkForward] {len(splits)} Splits generiert")
+        logger.debug("[WalkForward] === Splits generiert, weiter zu Modus-Auswahl ===")
 
         logger.debug(f"[WalkForward] Pruefe Splits: {len(splits)}")
         if len(splits) == 0:
