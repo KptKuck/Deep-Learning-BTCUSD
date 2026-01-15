@@ -406,7 +406,6 @@ class WalkForwardEngine:
             config: Walk-Forward Konfiguration
         """
         self.data = data.copy()
-        self.model = model
         self.model_info = model_info
         self.config = config
 
@@ -417,6 +416,11 @@ class WalkForwardEngine:
 
         # Device
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        # Modell auf CPU kopieren (vermeidet CUDA-Threading-Probleme)
+        # deepcopy erstellt eine unabhaengige Kopie des Modells
+        self.model = copy.deepcopy(model)
+        self.model.to('cpu')  # Sicherstellen dass Modell auf CPU ist
 
         # Abbruch-Flag
         self._cancel_requested = False
@@ -594,9 +598,17 @@ class WalkForwardEngine:
         """
         logger.info(f"[WalkForward] Inference Only mit {max_workers} Workers")
 
+        # CUDA synchronisieren falls GPU verwendet wird
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+
         # Modell auf GPU laden
         self.model.to(self.device)
         self.model.eval()
+
+        # Nochmals synchronisieren nach Model-Transfer
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
 
         results = []
         completed = 0
@@ -692,8 +704,16 @@ class WalkForwardEngine:
         """
         logger.info("[WalkForward] Inference + Live-Simulation")
 
+        # CUDA synchronisieren falls GPU verwendet wird
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+
         self.model.to(self.device)
         self.model.eval()
+
+        # Nochmals synchronisieren nach Model-Transfer
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
 
         results = []
         for i, split in enumerate(splits):
@@ -816,9 +836,16 @@ class WalkForwardEngine:
         # Neues Modell trainieren
         model, training_info = self._train_model_for_split(train_data, config)
 
+        # CUDA synchronisieren vor Model-Transfer
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+
         # Inference auf Test-Daten
         model.to(self.device)
         model.eval()
+
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
 
         # Features und Sequenzen
         feature_df = self.processor.process(test_data)
@@ -1119,8 +1146,16 @@ class WalkForwardEngine:
 
         # Modell trainieren
         model, training_info = self._train_model_for_split(train_data, config)
+
+        # CUDA synchronisieren vor Model-Transfer
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+
         model.to(self.device)
         model.eval()
+
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
 
         # Bar-by-Bar Simulation
         rolling_norm = RollingNormalizer(lookback=self.lookback)
