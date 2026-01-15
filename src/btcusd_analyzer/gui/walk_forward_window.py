@@ -1069,7 +1069,10 @@ class WalkForwardWindow(QMainWindow):
         # Ausfuehrungs-Info
         self.metric_labels['execution_time'].setText(f"{result.duration_sec:.1f} s")
         # Start/End aus erstem/letztem Split-Range berechnen
-        data_for_display = getattr(self, 'analysis_data', None) or self.data
+        # Hinweis: or funktioniert nicht mit DataFrames, daher explizite Pruefung
+        data_for_display = getattr(self, 'analysis_data', None)
+        if data_for_display is None:
+            data_for_display = self.data
         if result.splits and data_for_display is not None:
             try:
                 first_idx = result.splits[0].train_range[0]
@@ -1104,7 +1107,10 @@ class WalkForwardWindow(QMainWindow):
             test_start = "-"
             test_end = "-"
 
-            data_for_display = getattr(self, 'analysis_data', None) or self.data
+            # Hinweis: or funktioniert nicht mit DataFrames, daher explizite Pruefung
+            data_for_display = getattr(self, 'analysis_data', None)
+            if data_for_display is None:
+                data_for_display = self.data
             if data_for_display is not None:
                 try:
                     train_start = pd.to_datetime(data_for_display.index[split.train_range[0]]).strftime("%Y-%m-%d")
