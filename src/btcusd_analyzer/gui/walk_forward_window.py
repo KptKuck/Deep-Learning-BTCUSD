@@ -51,22 +51,24 @@ class WalkForwardWorker(QThread):
     def run(self):
         """Fuehrt Walk-Forward Analyse aus."""
         try:
-            # Progress-Callback registrieren
-            self.engine.progress_callback = self._on_progress
-
             self.progress.emit(0, "Starte Walk-Forward Analyse...")
-            result = self.engine.run()
+
+            # Progress-Callback als Parameter uebergeben
+            result = self.engine.run(progress_callback=self._on_progress)
 
             if not self._cancelled:
                 self.finished.emit(result)
 
         except Exception as e:
-            self.error.emit(str(e))
+            import traceback
+            error_msg = f"{str(e)}\n{traceback.format_exc()}"
+            self.error.emit(error_msg)
 
-    def _on_progress(self, progress: int, message: str):
+    def _on_progress(self, current: int, total: int, message: str):
         """Progress-Callback vom Engine."""
         if not self._cancelled:
-            self.progress.emit(progress, message)
+            progress_pct = int((current / total) * 100) if total > 0 else 0
+            self.progress.emit(progress_pct, message)
 
     def cancel(self):
         """Bricht die Analyse ab."""
@@ -846,20 +848,26 @@ class WalkForwardWindow(QMainWindow):
 
         self.metric_labels['total_return'].setText(f"{result.total_return:.2%}")
         self.metric_labels['total_return'].setStyleSheet(f"color: {color};")
-        self.metric_labels['sharpe_ratio'].setText(f"{result.sharpe_ratio:.3f}")
+        self.metric_labels['sharpe_ratio'].setText(f"{result.avg_sharpe:.3f}")
         self.metric_labels['max_drawdown'].setText(f"{result.max_drawdown:.2%}")
         self.metric_labels['profit_factor'].setText(f"{result.profit_factor:.2f}")
         self.metric_labels['win_rate'].setText(f"{result.win_rate:.1%}")
         self.metric_labels['total_trades'].setText(str(result.total_trades))
-        self.metric_labels['winning_trades'].setText(str(result.winning_trades))
-        self.metric_labels['losing_trades'].setText(str(result.losing_trades))
-        self.metric_labels['avg_trade'].setText(f"{result.avg_trade:.4f}")
+
+        # Winning/Losing Trades aus all_trades berechnen
+        winning = sum(1 for t in result.all_trades if t.pnl > 0)
+        losing = sum(1 for t in result.all_trades if t.pnl < 0)
+        avg_trade = np.mean([t.pnl_pct for t in result.all_trades]) if result.all_trades else 0.0
+
+        self.metric_labels['winning_trades'].setText(str(winning))
+        self.metric_labels['losing_trades'].setText(str(losing))
+        self.metric_labels['avg_trade'].setText(f"{avg_trade:.4f}")
 
         # Split-Statistiken
-        self.metric_labels['total_splits'].setText(str(result.total_splits))
+        self.metric_labels['total_splits'].setText(str(len(result.splits)))
 
-        if result.split_results:
-            returns = [s.total_return for s in result.split_results]
+        if result.splits:
+            returns = [s.total_return for s in result.splits]
             profitable = sum(1 for r in returns if r > 0)
 
             self.metric_labels['profitable_splits'].setText(f"{profitable}/{len(returns)}")
@@ -869,11 +877,18 @@ class WalkForwardWindow(QMainWindow):
             self.metric_labels['split_return_std'].setText(f"{np.std(returns):.2%}")
 
         # Ausfuehrungs-Info
-        self.metric_labels['execution_time'].setText(f"{result.execution_time:.1f} s")
-        if result.start_date:
-            self.metric_labels['start_date'].setText(result.start_date.strftime("%Y-%m-%d"))
-        if result.end_date:
-            self.metric_labels['end_date'].setText(result.end_date.strftime("%Y-%m-%d"))
+        self.metric_labels['execution_time'].setText(f"{result.duration_sec:.1f} s")
+        # Start/End aus erstem/letztem Split-Range berechnen
+        if result.splits and self.data is not None:
+            try:
+                first_idx = result.splits[0].train_range[0]
+                last_idx = result.splits[-1].test_range[1]
+                start_date = self.data.index[first_idx]
+                end_date = self.data.index[min(last_idx, len(self.data) - 1)]
+                self.metric_labels['start_date'].setText(pd.to_datetime(start_date).strftime("%Y-%m-%d"))
+                self.metric_labels['end_date'].setText(pd.to_datetime(end_date).strftime("%Y-%m-%d"))
+            except:
+                pass
 
         # Splits-Tabelle
         self._update_splits_table(result)
@@ -883,16 +898,25 @@ class WalkForwardWindow(QMainWindow):
 
     def _update_splits_table(self, result: WalkForwardResult):
         """Aktualisiert die Splits-Tabelle."""
-        self.splits_table.setRowCount(len(result.split_results))
+        self.splits_table.setRowCount(len(result.splits))
 
-        for i, split in enumerate(result.split_results):
-            self.splits_table.setItem(i, 0, QTableWidgetItem(str(split.split_id)))
+        for i, split in enumerate(result.splits):
+            self.splits_table.setItem(i, 0, QTableWidgetItem(str(split.split_index)))
 
-            # Daten formatieren
-            train_start = split.train_start.strftime("%Y-%m-%d") if split.train_start else "-"
-            train_end = split.train_end.strftime("%Y-%m-%d") if split.train_end else "-"
-            test_start = split.test_start.strftime("%Y-%m-%d") if split.test_start else "-"
-            test_end = split.test_end.strftime("%Y-%m-%d") if split.test_end else "-"
+            # Daten aus Index-Ranges berechnen (falls Daten verfuegbar)
+            train_start = "-"
+            train_end = "-"
+            test_start = "-"
+            test_end = "-"
+
+            if self.data is not None:
+                try:
+                    train_start = pd.to_datetime(self.data.index[split.train_range[0]]).strftime("%Y-%m-%d")
+                    train_end = pd.to_datetime(self.data.index[split.train_range[1] - 1]).strftime("%Y-%m-%d")
+                    test_start = pd.to_datetime(self.data.index[split.test_range[0]]).strftime("%Y-%m-%d")
+                    test_end = pd.to_datetime(self.data.index[min(split.test_range[1] - 1, len(self.data) - 1)]).strftime("%Y-%m-%d")
+                except:
+                    pass
 
             self.splits_table.setItem(i, 1, QTableWidgetItem(train_start))
             self.splits_table.setItem(i, 2, QTableWidgetItem(train_end))
@@ -909,26 +933,23 @@ class WalkForwardWindow(QMainWindow):
 
             self.splits_table.setItem(i, 6, QTableWidgetItem(f"{split.sharpe_ratio:.3f}"))
             self.splits_table.setItem(i, 7, QTableWidgetItem(f"{split.max_drawdown:.2%}"))
-            self.splits_table.setItem(i, 8, QTableWidgetItem(str(split.n_trades)))
+            self.splits_table.setItem(i, 8, QTableWidgetItem(str(split.num_trades)))
 
     def _update_trades_table(self, result: WalkForwardResult):
         """Aktualisiert die Trades-Tabelle."""
         # Filter aktualisieren
         self.trade_split_filter.clear()
         self.trade_split_filter.addItem("Alle")
-        for split in result.split_results:
-            self.trade_split_filter.addItem(f"Split {split.split_id}")
+        for split in result.splits:
+            self.trade_split_filter.addItem(f"Split {split.split_index}")
 
-        # Alle Trades sammeln
-        all_trades = []
-        for split in result.split_results:
-            for trade in split.trades:
-                all_trades.append((split.split_id, trade))
+        # Alle Trades aus all_trades verwenden
+        all_trades = result.all_trades
 
         self.trades_table.setRowCount(len(all_trades))
 
-        for i, (split_id, trade) in enumerate(all_trades):
-            self.trades_table.setItem(i, 0, QTableWidgetItem(str(split_id)))
+        for i, trade in enumerate(all_trades):
+            self.trades_table.setItem(i, 0, QTableWidgetItem(str(trade.split_index)))
             self.trades_table.setItem(i, 1, QTableWidgetItem(str(trade.trade_id)))
 
             entry_time = trade.entry_time.strftime("%Y-%m-%d %H:%M") if trade.entry_time else "-"
@@ -936,13 +957,13 @@ class WalkForwardWindow(QMainWindow):
 
             self.trades_table.setItem(i, 2, QTableWidgetItem(entry_time))
             self.trades_table.setItem(i, 3, QTableWidgetItem(exit_time))
-            self.trades_table.setItem(i, 4, QTableWidgetItem(trade.direction))
+            self.trades_table.setItem(i, 4, QTableWidgetItem(trade.signal))
             self.trades_table.setItem(i, 5, QTableWidgetItem(f"${trade.entry_price:.2f}"))
-            self.trades_table.setItem(i, 6, QTableWidgetItem(f"${trade.exit_price:.2f}"))
+            self.trades_table.setItem(i, 6, QTableWidgetItem(f"${trade.exit_price:.2f}" if trade.exit_price else "-"))
 
             # PnL mit Farbe
             pnl_item = QTableWidgetItem(f"${trade.pnl:.2f}")
-            pnl_pct_item = QTableWidgetItem(f"{trade.pnl_percent:.2%}")
+            pnl_pct_item = QTableWidgetItem(f"{trade.pnl_pct:.2%}")
 
             if trade.pnl >= 0:
                 pnl_item.setForeground(Qt.GlobalColor.green)
