@@ -124,22 +124,47 @@ class SessionManager:
         """
         Speichert die Backtest-Daten.
 
+        Stellt sicher, dass DateTime korrekt als benannter Index gespeichert wird,
+        damit sie beim Laden wiederhergestellt werden kann.
+
         Args:
             data: DataFrame mit OHLCV-Daten
         """
+        data = data.copy()
+
+        # Falls DateTime als Spalte vorhanden, als Index setzen
+        if 'DateTime' in data.columns:
+            data = data.set_index('DateTime')
+
+        # Index-Namen sicherstellen (wichtig fuer korrektes Laden)
+        if isinstance(data.index, pd.DatetimeIndex):
+            data.index.name = 'DateTime'
+
         data.to_csv(self.backtest_data_file, index=True)
 
     def load_backtest_data(self) -> Optional[pd.DataFrame]:
-        """Laedt die Backtest-Daten."""
+        """
+        Laedt die Backtest-Daten.
+
+        Stellt DateTime sowohl als Index (DatetimeIndex) als auch als
+        Spalte zur Verfuegung, damit nachfolgende Module flexibel darauf
+        zugreifen koennen.
+        """
         if not self.backtest_data_file.exists():
             return None
 
         df = pd.read_csv(self.backtest_data_file, index_col=0, parse_dates=True)
 
-        # Falls DateTime-Spalte vorhanden ist, diese als Index verwenden
-        if 'DateTime' in df.columns:
-            df['DateTime'] = pd.to_datetime(df['DateTime'])
-            df = df.set_index('DateTime')
+        # Sicherstellen, dass der Index ein DatetimeIndex ist
+        if not isinstance(df.index, pd.DatetimeIndex):
+            df.index = pd.to_datetime(df.index)
+
+        df.index.name = 'DateTime'
+
+        # DateTime auch als Spalte hinzufuegen fuer Module die sie erwarten
+        # (z.B. FeatureProcessor fuer hour_sin/hour_cos)
+        if 'DateTime' not in df.columns:
+            df['DateTime'] = df.index
 
         return df
 

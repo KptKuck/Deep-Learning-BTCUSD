@@ -349,7 +349,7 @@ class FeatureProcessor:
         """Stunde als Sinus (zyklisch kodiert)."""
         dt_col = self._get_datetime_column(df)
         if dt_col is None:
-            self.logger.warning('Keine DateTime-Information fuer hour_sin')
+            self.logger.warning('hour_sin: Keine DateTime-Information gefunden')
             return pd.Series(0, index=df.index)
         hour = dt_col.dt.hour
         return np.sin(2 * np.pi * hour / 24)
@@ -358,7 +358,7 @@ class FeatureProcessor:
         """Stunde als Cosinus (zyklisch kodiert)."""
         dt_col = self._get_datetime_column(df)
         if dt_col is None:
-            self.logger.warning('Keine DateTime-Information fuer hour_cos')
+            self.logger.warning('hour_cos: Keine DateTime-Information gefunden')
             return pd.Series(0, index=df.index)
         hour = dt_col.dt.hour
         return np.cos(2 * np.pi * hour / 24)
