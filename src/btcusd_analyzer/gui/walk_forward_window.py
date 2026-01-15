@@ -764,7 +764,12 @@ class WalkForwardWindow(QMainWindow):
             self._log(f"Fehler beim Setzen des Zeitraums: {e}")
 
     def _get_filtered_data(self) -> pd.DataFrame:
-        """Gibt die nach Zeitraum gefilterten Daten zurueck."""
+        """
+        Gibt die nach Zeitraum gefilterten Daten zurueck.
+
+        Falls der gewaehlte Zeitraum ausserhalb der Session-Daten liegt,
+        werden die Daten automatisch von Binance nachgeladen.
+        """
         if self.data is None:
             return None
 
@@ -779,7 +784,56 @@ class WalkForwardWindow(QMainWindow):
         from_dt = pd.Timestamp(from_date)
         to_dt = pd.Timestamp(to_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
 
-        # Filtern
+        # Pruefen ob Daten ausserhalb des Session-Zeitraums liegen
+        data_start = self.data.index.min()
+        data_end = self.data.index.max()
+
+        needs_download = False
+        if from_dt < data_start:
+            self._log(f"Start-Datum {from_date} liegt vor Session-Daten ({data_start.date()})")
+            needs_download = True
+        if to_dt > data_end:
+            self._log(f"End-Datum {to_date} liegt nach Session-Daten ({data_end.date()})")
+            needs_download = True
+
+        if needs_download:
+            self._log("Lade erweiterten Zeitraum von Binance...")
+            try:
+                from ..data.downloader import BinanceDownloader
+                downloader = BinanceDownloader()
+
+                # Daten laden (mit etwas Puffer)
+                start_str = from_date.strftime('%Y-%m-%d')
+                end_str = to_date.strftime('%Y-%m-%d')
+
+                new_data = downloader.download(
+                    interval='1h',
+                    start_date=start_str,
+                    end_date=end_str,
+                    save=False
+                )
+
+                if new_data is not None and len(new_data) > 0:
+                    # DateTime als Index setzen falls nicht schon
+                    if 'DateTime' in new_data.columns:
+                        new_data = new_data.set_index('DateTime', drop=True)
+
+                    self._log(f"Binance-Download erfolgreich: {len(new_data):,} Zeilen")
+                    self._log(f"Zeitraum: {new_data.index.min().date()} bis {new_data.index.max().date()}")
+
+                    # Gefilterte Daten zurueckgeben
+                    mask = (new_data.index >= from_dt) & (new_data.index <= to_dt)
+                    filtered = new_data.loc[mask]
+                    self._log(f"Nach Filter: {len(filtered):,} Zeilen")
+                    return filtered
+                else:
+                    self._log("Binance-Download fehlgeschlagen - verwende Session-Daten")
+
+            except Exception as e:
+                self._log(f"Fehler beim Nachladen: {e}")
+                self._log("Verwende Session-Daten (eingeschraenkter Zeitraum)")
+
+        # Standard: Filtern der vorhandenen Daten
         mask = (self.data.index >= from_dt) & (self.data.index <= to_dt)
         filtered = self.data.loc[mask]
 
