@@ -1083,6 +1083,9 @@ class WalkForwardWindow(QMainWindow):
         # Trades-Tabelle
         self._update_trades_table(result)
 
+        # Equity-Chart
+        self._update_equity_chart(result)
+
     def _update_splits_table(self, result: WalkForwardResult):
         """Aktualisiert die Splits-Tabelle."""
         self.splits_table.setRowCount(len(result.splits))
@@ -1181,6 +1184,86 @@ class WalkForwardWindow(QMainWindow):
                     self.trades_table.setRowHidden(row, False)
                 else:
                     self.trades_table.setRowHidden(row, True)
+
+    def _update_equity_chart(self, result: WalkForwardResult):
+        """Aktualisiert den Equity-Chart mit der Equity-Kurve."""
+        if not result.equity_curve:
+            self.equity_chart.clear()
+            return
+
+        # Daten aus EquityPoints extrahieren
+        dates = [point.datetime for point in result.equity_curve]
+        equity_values = [point.equity for point in result.equity_curve]
+        split_indices = [point.split_index for point in result.equity_curve]
+
+        # Chart leeren und stylen
+        self.equity_chart.ax.clear()
+        self.equity_chart._style_axis()
+
+        # Verschiedene Splits mit unterschiedlichen Farben darstellen
+        unique_splits = sorted(set(split_indices))
+        colors = ['#4da8da', '#33cc33', '#e6b333', '#cc3333', '#b19cd9',
+                  '#80cbc4', '#ff9966', '#66ccff', '#ff66b2', '#99ff99']
+
+        # Equity-Linie pro Split zeichnen
+        for i, split_idx in enumerate(unique_splits):
+            # Indizes fuer diesen Split
+            mask = [j for j, s in enumerate(split_indices) if s == split_idx]
+            if not mask:
+                continue
+
+            split_equity = [equity_values[j] for j in mask]
+            split_x = list(range(mask[0], mask[0] + len(mask)))
+            color = colors[i % len(colors)]
+
+            self.equity_chart.ax.plot(
+                split_x, split_equity,
+                color=color, linewidth=1.2, alpha=0.9,
+                label=f'Split {split_idx}'
+            )
+
+        # Gesamte Equity als duenne Linie
+        equity_array = np.array(equity_values)
+        self.equity_chart.ax.plot(
+            range(len(equity_values)), equity_values,
+            color='white', linewidth=0.5, alpha=0.3
+        )
+
+        # Startkapital-Linie
+        initial_capital = equity_values[0] if equity_values else 10000
+        self.equity_chart.ax.axhline(
+            y=initial_capital, color='#666666', linestyle='--',
+            linewidth=0.8, alpha=0.7, label=f'Start: ${initial_capital:,.0f}'
+        )
+
+        # Statistiken im Titel
+        final_equity = equity_values[-1] if equity_values else initial_capital
+        total_return = (final_equity / initial_capital - 1) * 100
+        max_equity = max(equity_values) if equity_values else initial_capital
+        min_equity = min(equity_values) if equity_values else initial_capital
+
+        title_color = '#33cc33' if total_return >= 0 else '#cc3333'
+        self.equity_chart.ax.set_title(
+            f'Equity Curve: ${final_equity:,.0f} ({total_return:+.2f}%)',
+            color=title_color, fontsize=12
+        )
+
+        self.equity_chart.ax.set_xlabel('Bars', color='white')
+        self.equity_chart.ax.set_ylabel('Equity ($)', color='white')
+
+        # Y-Achse formatieren
+        self.equity_chart.ax.yaxis.set_major_formatter(
+            lambda x, p: f'${x:,.0f}'
+        )
+
+        # Legende
+        self.equity_chart.ax.legend(
+            loc='upper left', facecolor='#333333',
+            edgecolor='#555555', labelcolor='white', fontsize=8
+        )
+
+        self.equity_chart.figure.tight_layout()
+        self.equity_chart.canvas.draw()
 
     def _export_results(self):
         """Exportiert Ergebnisse nach Excel."""

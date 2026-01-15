@@ -314,6 +314,9 @@ class SplitResult:
     # Trade-Liste
     trades: List[TradeRecord] = field(default_factory=list)
 
+    # Equity-Kurve fuer diesen Split
+    equity_points: List[EquityPoint] = field(default_factory=list)
+
 
 @dataclass
 class WalkForwardResult:
@@ -1391,7 +1394,8 @@ class WalkForwardEngine:
             num_trades=trading_result['num_trades'],
             win_rate=trading_result['win_rate'],
             profit_factor=trading_result['profit_factor'],
-            trades=trading_result['trades']
+            trades=trading_result['trades'],
+            equity_points=trading_result.get('equity_points', [])
         )
 
     def _simulate_trading(
@@ -1546,6 +1550,40 @@ class WalkForwardEngine:
 
         logger.debug(f"[Split {split_idx}] Ergebnis: Return={total_return:.2%}, DD={max_dd:.2%}, Trades={num_trades}")
 
+        # Equity-Kurve mit Zeitstempeln erstellen
+        equity_points = []
+        eq_peak = equity_history[0]
+        for i, eq in enumerate(equity_history):
+            if eq > eq_peak:
+                eq_peak = eq
+            dd = (eq_peak - eq) / eq_peak if eq_peak > 0 else 0
+            dd_pct = dd
+            cum_ret = (eq - self.config.initial_capital) / self.config.initial_capital
+
+            # Position Status bestimmen
+            pos_str = 'FLAT'
+            if i > 0 and i <= len(predictions):
+                # Position waehrend Simulation
+                pass  # Vereinfacht - genauer Tracking waere aufwendiger
+
+            # Zeitstempel aus Test-Daten
+            if i < len(test_data.index):
+                dt = test_data.index[offset + min(i, len(predictions) - 1)]
+            else:
+                dt = test_data.index[-1]
+
+            equity_points.append(EquityPoint(
+                datetime=dt,
+                equity=eq,
+                cash=eq if position == 0 else eq * 0.05,  # Vereinfacht
+                position_value=0 if position == 0 else eq * 0.95,
+                position=pos_str,
+                drawdown=dd,
+                drawdown_pct=dd_pct,
+                cumulative_return=cum_ret,
+                split_index=split_idx
+            ))
+
         return {
             'total_return': total_return,
             'sharpe_ratio': sharpe_ratio,
@@ -1553,7 +1591,8 @@ class WalkForwardEngine:
             'num_trades': num_trades,
             'win_rate': win_rate,
             'profit_factor': profit_factor,
-            'trades': trades
+            'trades': trades,
+            'equity_points': equity_points
         }
 
     def _simulate_with_backtrader(
@@ -1611,7 +1650,8 @@ class WalkForwardEngine:
             'num_trades': result.total_trades,
             'win_rate': result.win_rate / 100,
             'profit_factor': result.profit_factor,
-            'trades': trades
+            'trades': trades,
+            'equity_points': []  # TODO: Backtrader equity_curve extrahieren
         }
 
     # =========================================================================
@@ -1643,6 +1683,12 @@ class WalkForwardEngine:
         for r in results:
             all_trades.extend(r.trades)
         logger.debug(f"[WalkForward] Gesamt-Trades: {len(all_trades)}")
+
+        # Equity-Kurve aus allen Splits sammeln
+        all_equity_points = []
+        for r in results:
+            all_equity_points.extend(r.equity_points)
+        logger.debug(f"[WalkForward] Gesamt-Equity-Punkte: {len(all_equity_points)}")
 
         # Aggregierte Metriken
         total_return = np.prod([1 + r for r in returns]) - 1
@@ -1681,6 +1727,7 @@ class WalkForwardEngine:
             duration_sec=duration,
             parallel_workers=self._calculate_max_parallel(),
             all_trades=all_trades,
+            equity_curve=all_equity_points,
             robustness_score=robustness
         )
 
