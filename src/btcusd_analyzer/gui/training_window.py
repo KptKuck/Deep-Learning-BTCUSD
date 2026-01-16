@@ -549,9 +549,24 @@ class TrainingWindow(QMainWindow):
         self.complexity_slider.valueChanged.connect(self._on_complexity_changed)
         auto_layout.addWidget(self.complexity_slider, 1, 1)
 
-        self.complexity_label = QLabel("Standard (10 Configs)")
+        self.complexity_label = QLabel("Standard (12 Configs)")
         self.complexity_label.setStyleSheet("color: #aaaaaa; font-size: 9px;")
         auto_layout.addWidget(self.complexity_label, 2, 0, 1, 2)
+
+        # Batch-Size fuer Auto-Trainer
+        auto_layout.addWidget(QLabel("Batch-Size:"), 3, 0)
+        self.auto_batch_spin = QSpinBox()
+        self.auto_batch_spin.setRange(32, 512)
+        self.auto_batch_spin.setValue(128)  # Default: 128 fuer bessere GPU-Auslastung
+        self.auto_batch_spin.setSingleStep(32)
+        self.auto_batch_spin.setToolTip("Groessere Batches = bessere GPU-Auslastung (128-256 empfohlen)")
+        auto_layout.addWidget(self.auto_batch_spin, 3, 1)
+
+        # Mixed Precision (AMP)
+        self.amp_check = QCheckBox("Mixed Precision (FP16)")
+        self.amp_check.setChecked(True)
+        self.amp_check.setToolTip("Halbiert Speicherverbrauch, verdoppelt Durchsatz auf modernen GPUs")
+        auto_layout.addWidget(self.amp_check, 4, 0, 1, 2)
 
         layout.addWidget(auto_group)
 
@@ -1827,8 +1842,10 @@ class TrainingWindow(QMainWindow):
         self.nhead_spin.setEnabled(not is_auto)
         self.encoder_layers_spin.setEnabled(not is_auto)
 
-        # Komplexitaets-Slider aktivieren
+        # Auto-Trainer spezifische Controls aktivieren
         self.complexity_slider.setEnabled(is_auto)
+        self.auto_batch_spin.setEnabled(is_auto)
+        self.amp_check.setEnabled(is_auto)
 
         if is_auto:
             self.start_btn.setText("Auto-Training starten")
@@ -1868,11 +1885,19 @@ class TrainingWindow(QMainWindow):
         from PyQt6.QtWidgets import QApplication
         from ..training.auto_trainer import AutoTrainer
 
-        if self.train_loader is None or self.val_loader is None:
+        if self.training_data is None:
             QMessageBox.warning(self, "Fehler", "Keine Trainingsdaten geladen!")
             return
 
         self._cleanup_previous_training()
+
+        # Batch-Size und AMP aus GUI
+        batch_size = self.auto_batch_spin.value()
+        use_amp = self.amp_check.isChecked()
+
+        # DataLoader mit neuer Batch-Size erstellen
+        self._log(f"Erstelle DataLoader mit Batch-Size {batch_size}...")
+        self.prepare_data_loaders(self.training_data, batch_size=batch_size)
 
         # Input Size ermitteln
         sample = next(iter(self.train_loader))
@@ -1882,6 +1907,7 @@ class TrainingWindow(QMainWindow):
         complexity = self.complexity_slider.value()
 
         self._log(f"=== Auto-Training gestartet (Komplexitaet {complexity}) ===")
+        self._log(f"Batch-Size: {batch_size}, Mixed Precision: {'Ja' if use_amp else 'Nein'}")
         self.start_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self._start_time = datetime.now()
@@ -1898,7 +1924,8 @@ class TrainingWindow(QMainWindow):
                 val_loader=self.val_loader,
                 input_size=input_size,
                 num_classes=num_classes,
-                device=self.device
+                device=self.device,
+                use_amp=use_amp
             )
 
             # Progress Callback

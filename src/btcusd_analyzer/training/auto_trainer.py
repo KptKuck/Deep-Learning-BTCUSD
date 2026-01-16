@@ -102,84 +102,89 @@ AUTO_TRAINER_CONFIGS = {
             ('BiGRU', {'hidden_sizes': [192, 128], 'use_attention': True}),
         ]
     },
-    4: {  # Ausfuehrlich (~40 Min) - 20 Configs
+    4: {  # Ausfuehrlich (~40 Min) - 22 Configs
         'max_epochs': 60,
         'patience': 8,
         'configs': [
-            # BiLSTM Groessen-Varianten
-            ('BiLSTM', {'hidden_sizes': [96, 96]}),
+            # BiLSTM Groessen-Varianten (inkl. groessere Modelle)
             ('BiLSTM', {'hidden_sizes': [128, 128]}),
             ('BiLSTM', {'hidden_sizes': [192, 128]}),
             ('BiLSTM', {'hidden_sizes': [256, 128]}),
+            ('BiLSTM', {'hidden_sizes': [384, 192]}),      # Groesser
             ('BiLSTM', {'hidden_sizes': [256, 192, 128]}),
-            ('BiLSTM', {'hidden_sizes': [256, 128, 64]}),
+            ('BiLSTM', {'hidden_sizes': [384, 256, 128]}), # Groesser
             # BiLSTM mit Layer Norm
-            ('BiLSTM', {'hidden_sizes': [128, 128], 'use_layer_norm': True}),
             ('BiLSTM', {'hidden_sizes': [256, 128], 'use_layer_norm': True}),
+            ('BiLSTM', {'hidden_sizes': [384, 192], 'use_layer_norm': True}),
             # BiLSTM mit Attention
-            ('BiLSTM', {'hidden_sizes': [128, 128], 'use_attention': True}),
             ('BiLSTM', {'hidden_sizes': [256, 128], 'use_attention': True}),
+            ('BiLSTM', {'hidden_sizes': [384, 192], 'use_attention': True}),
             # BiLSTM kombiniert
-            ('BiLSTM', {'hidden_sizes': [192, 128], 'use_layer_norm': True, 'use_attention': True}),
+            ('BiLSTM', {'hidden_sizes': [256, 128], 'use_layer_norm': True, 'use_attention': True}),
             # BiGRU Groessen-Varianten
-            ('BiGRU', {'hidden_sizes': [96, 96]}),
             ('BiGRU', {'hidden_sizes': [128, 128]}),
             ('BiGRU', {'hidden_sizes': [192, 128]}),
             ('BiGRU', {'hidden_sizes': [256, 128]}),
-            ('BiGRU', {'hidden_sizes': [256, 128, 64]}),
+            ('BiGRU', {'hidden_sizes': [384, 192]}),       # Groesser
+            ('BiGRU', {'hidden_sizes': [256, 192, 128]}),
             # BiGRU mit Features
-            ('BiGRU', {'hidden_sizes': [128, 128], 'use_layer_norm': True}),
-            ('BiGRU', {'hidden_sizes': [256, 128], 'use_attention': True}),
-            ('BiGRU', {'hidden_sizes': [192, 128], 'use_layer_norm': True, 'use_attention': True}),
+            ('BiGRU', {'hidden_sizes': [256, 128], 'use_layer_norm': True}),
+            ('BiGRU', {'hidden_sizes': [384, 192], 'use_attention': True}),
+            ('BiGRU', {'hidden_sizes': [256, 128], 'use_layer_norm': True, 'use_attention': True}),
             # CNN-LSTM als Vergleich
-            ('CNN-LSTM', {'hidden_size': 128, 'bidirectional': True}),
+            ('CNN-LSTM', {'hidden_size': 256, 'bidirectional': True}),
+            ('Transformer', {'d_model': 128, 'nhead': 4, 'num_encoder_layers': 3}),
         ]
     },
-    5: {  # Gruendlich (~60 Min) - 30 Configs
+    5: {  # Gruendlich (~60 Min) - 35 Configs
         'max_epochs': 80,
         'patience': 10,
         'configs': [
-            # === BiLSTM Umfassend ===
-            # Groessen-Varianten
-            ('BiLSTM', {'hidden_sizes': [64, 64]}),
-            ('BiLSTM', {'hidden_sizes': [96, 96]}),
+            # === BiLSTM Umfassend (inkl. grosse Modelle) ===
+            # Standard Groessen
             ('BiLSTM', {'hidden_sizes': [128, 128]}),
             ('BiLSTM', {'hidden_sizes': [192, 128]}),
             ('BiLSTM', {'hidden_sizes': [256, 128]}),
             ('BiLSTM', {'hidden_sizes': [256, 192]}),
-            ('BiLSTM', {'hidden_sizes': [128, 128, 64]}),
-            ('BiLSTM', {'hidden_sizes': [256, 128, 64]}),
-            ('BiLSTM', {'hidden_sizes': [256, 192, 128]}),
+            # Grosse Modelle
+            ('BiLSTM', {'hidden_sizes': [384, 192]}),
+            ('BiLSTM', {'hidden_sizes': [512, 256]}),
+            ('BiLSTM', {'hidden_sizes': [384, 256, 128]}),
+            ('BiLSTM', {'hidden_sizes': [512, 256, 128]}),
             # Mit Layer Norm
-            ('BiLSTM', {'hidden_sizes': [128, 128], 'use_layer_norm': True}),
-            ('BiLSTM', {'hidden_sizes': [192, 128], 'use_layer_norm': True}),
             ('BiLSTM', {'hidden_sizes': [256, 128], 'use_layer_norm': True}),
+            ('BiLSTM', {'hidden_sizes': [384, 192], 'use_layer_norm': True}),
+            ('BiLSTM', {'hidden_sizes': [512, 256], 'use_layer_norm': True}),
             # Mit Attention
-            ('BiLSTM', {'hidden_sizes': [128, 128], 'use_attention': True}),
-            ('BiLSTM', {'hidden_sizes': [192, 128], 'use_attention': True}),
             ('BiLSTM', {'hidden_sizes': [256, 128], 'use_attention': True}),
+            ('BiLSTM', {'hidden_sizes': [384, 192], 'use_attention': True}),
+            ('BiLSTM', {'hidden_sizes': [512, 256], 'use_attention': True}),
             # Kombiniert (Layer Norm + Attention)
-            ('BiLSTM', {'hidden_sizes': [128, 128], 'use_layer_norm': True, 'use_attention': True}),
-            ('BiLSTM', {'hidden_sizes': [192, 128], 'use_layer_norm': True, 'use_attention': True}),
             ('BiLSTM', {'hidden_sizes': [256, 128], 'use_layer_norm': True, 'use_attention': True}),
+            ('BiLSTM', {'hidden_sizes': [384, 192], 'use_layer_norm': True, 'use_attention': True}),
+            ('BiLSTM', {'hidden_sizes': [512, 256], 'use_layer_norm': True, 'use_attention': True}),
             # Dropout-Varianten
-            ('BiLSTM', {'hidden_sizes': [192, 128], 'dropout': 0.2}),
-            ('BiLSTM', {'hidden_sizes': [192, 128], 'dropout': 0.4}),
+            ('BiLSTM', {'hidden_sizes': [384, 192], 'dropout': 0.2}),
+            ('BiLSTM', {'hidden_sizes': [384, 192], 'dropout': 0.4}),
 
             # === BiGRU Umfassend ===
-            ('BiGRU', {'hidden_sizes': [96, 96]}),
             ('BiGRU', {'hidden_sizes': [128, 128]}),
             ('BiGRU', {'hidden_sizes': [192, 128]}),
             ('BiGRU', {'hidden_sizes': [256, 128]}),
-            ('BiGRU', {'hidden_sizes': [256, 128, 64]}),
+            ('BiGRU', {'hidden_sizes': [384, 192]}),
+            ('BiGRU', {'hidden_sizes': [512, 256]}),
+            ('BiGRU', {'hidden_sizes': [384, 256, 128]}),
             # Mit Features
-            ('BiGRU', {'hidden_sizes': [128, 128], 'use_layer_norm': True}),
-            ('BiGRU', {'hidden_sizes': [192, 128], 'use_attention': True}),
-            ('BiGRU', {'hidden_sizes': [192, 128], 'use_layer_norm': True, 'use_attention': True}),
+            ('BiGRU', {'hidden_sizes': [256, 128], 'use_layer_norm': True}),
+            ('BiGRU', {'hidden_sizes': [384, 192], 'use_layer_norm': True}),
+            ('BiGRU', {'hidden_sizes': [384, 192], 'use_attention': True}),
+            ('BiGRU', {'hidden_sizes': [384, 192], 'use_layer_norm': True, 'use_attention': True}),
 
             # === Vergleich: Andere Architekturen ===
-            ('CNN-LSTM', {'hidden_size': 128, 'bidirectional': True}),
-            ('Transformer', {'d_model': 64, 'nhead': 4, 'num_encoder_layers': 2}),
+            ('CNN-LSTM', {'hidden_size': 256, 'bidirectional': True}),
+            ('CNN-LSTM', {'hidden_size': 384, 'bidirectional': True}),
+            ('Transformer', {'d_model': 128, 'nhead': 4, 'num_encoder_layers': 3}),
+            ('Transformer', {'d_model': 256, 'nhead': 8, 'num_encoder_layers': 4}),
         ]
     }
 }
@@ -197,10 +202,11 @@ class AutoTrainer:
     - Learning Rate Scheduler
     - Gradient Clipping
     - Class Weights fuer unbalancierte Daten
+    - Mixed Precision Training (AMP) fuer bessere GPU-Auslastung
     - Erweiterte Metriken
 
     Usage:
-        trainer = AutoTrainer(train_loader, val_loader, input_size=6)
+        trainer = AutoTrainer(train_loader, val_loader, input_size=6, use_amp=True)
         results = trainer.run(complexity=3, progress_callback=callback)
         best_model, config = trainer.get_best_model()
     """
@@ -212,7 +218,8 @@ class AutoTrainer:
         input_size: int,
         num_classes: int = 3,
         device: Optional[torch.device] = None,
-        class_names: Optional[List[str]] = None
+        class_names: Optional[List[str]] = None,
+        use_amp: bool = True
     ):
         """
         Initialisiert den AutoTrainer.
@@ -224,6 +231,7 @@ class AutoTrainer:
             num_classes: Anzahl Klassen
             device: PyTorch Device (auto-detect wenn None)
             class_names: Namen der Klassen fuer Reports
+            use_amp: Mixed Precision Training (AMP) verwenden fuer bessere GPU-Auslastung
         """
         self.logger = get_logger()
         self.train_loader = train_loader
@@ -233,13 +241,18 @@ class AutoTrainer:
         self.device = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.class_names = class_names or ['HOLD', 'BUY', 'SELL']
 
+        # Mixed Precision nur auf CUDA
+        self.use_amp = use_amp and self.device.type == 'cuda'
+        self.scaler = torch.amp.GradScaler('cuda') if self.use_amp else None
+
         self.results: List[AutoTrainResult] = []
         self._stop_requested = False
 
         # Class Weights aus Training-Daten berechnen
         self.class_weights = self._compute_class_weights()
 
-        self.logger.info(f'AutoTrainer initialisiert auf {self.device}')
+        amp_status = "aktiviert" if self.use_amp else "deaktiviert"
+        self.logger.info(f'AutoTrainer initialisiert auf {self.device} (AMP: {amp_status})')
 
     def _compute_class_weights(self) -> torch.Tensor:
         """Berechnet Class Weights aus den Training-Daten."""
@@ -429,18 +442,29 @@ class AutoTrainer:
             total = 0
 
             for inputs, labels in self.train_loader:
-                inputs = inputs.to(self.device)
-                labels = labels.to(self.device)
+                inputs = inputs.to(self.device, non_blocking=True)
+                labels = labels.to(self.device, non_blocking=True)
 
-                optimizer.zero_grad()
-                outputs = model(inputs)
-                loss = criterion(outputs, labels)
-                loss.backward()
+                optimizer.zero_grad(set_to_none=True)  # Effizienter als zero_grad()
 
-                # Gradient Clipping
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                # Mixed Precision Forward Pass
+                if self.use_amp:
+                    with torch.amp.autocast('cuda'):
+                        outputs = model(inputs)
+                        loss = criterion(outputs, labels)
 
-                optimizer.step()
+                    # Scaled Backward Pass
+                    self.scaler.scale(loss).backward()
+                    self.scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    self.scaler.step(optimizer)
+                    self.scaler.update()
+                else:
+                    outputs = model(inputs)
+                    loss = criterion(outputs, labels)
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    optimizer.step()
 
                 running_loss += loss.item()
                 _, predicted = outputs.max(1)
@@ -460,11 +484,17 @@ class AutoTrainer:
 
             with torch.no_grad():
                 for inputs, labels in self.val_loader:
-                    inputs = inputs.to(self.device)
-                    labels = labels.to(self.device)
+                    inputs = inputs.to(self.device, non_blocking=True)
+                    labels = labels.to(self.device, non_blocking=True)
 
-                    outputs = model(inputs)
-                    loss = criterion(outputs, labels)
+                    # Mixed Precision Inference
+                    if self.use_amp:
+                        with torch.amp.autocast('cuda'):
+                            outputs = model(inputs)
+                            loss = criterion(outputs, labels)
+                    else:
+                        outputs = model(inputs)
+                        loss = criterion(outputs, labels)
 
                     running_loss += loss.item()
                     _, predicted = outputs.max(1)
