@@ -1771,8 +1771,10 @@ class TrainingWindow(QMainWindow):
             # Progress Callback
             def progress_callback(current, total, model_name, metrics):
                 self.epoch_label.setText(f"Modell: {current+1}/{total} - {model_name}")
+                # Gesamtfortschritt: abgeschlossene Modelle + Fortschritt des aktuellen Modells
+                overall_progress = (current + metrics.get('progress', 0)) / total * 100
                 self.progress_bar.setMaximum(100)
-                self.progress_bar.setValue(int(((current + metrics.get('progress', 0)) / total) * 100))
+                self.progress_bar.setValue(int(overall_progress))
 
                 # Metriken anzeigen
                 if 'train_loss' in metrics:
@@ -1792,6 +1794,10 @@ class TrainingWindow(QMainWindow):
                 progress_callback=progress_callback,
                 learning_rate=self.lr_spin.value()
             )
+
+            # Progress auf 100% setzen
+            self.progress_bar.setValue(100)
+            self.epoch_label.setText("Auto-Training abgeschlossen")
 
             # Ergebnisse anzeigen
             self._display_auto_results(results)
