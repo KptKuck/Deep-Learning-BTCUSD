@@ -15,6 +15,7 @@ from btcusd_analyzer.models.cnn import CNNClassifier
 from btcusd_analyzer.models.cnn_lstm import CNNLSTMClassifier
 from btcusd_analyzer.models.transformer import TransformerClassifier
 from btcusd_analyzer.models.hf_transformer import HFTimeSeriesClassifier, is_hf_available
+from btcusd_analyzer.models.patchtst import PatchTSTClassifier, is_patchtst_available
 
 
 # Preset-Definitionen fuer LSTM/GRU Architekturen
@@ -43,6 +44,15 @@ CNN_PRESETS = {
     'Small (32 Filter)': {'num_filters': 32, 'num_conv_layers': 2},
     'Medium (64 Filter)': {'num_filters': 64, 'num_conv_layers': 3},
     'Large (128 Filter)': {'num_filters': 128, 'num_conv_layers': 4},
+    'Custom': None
+}
+
+# Preset-Definitionen fuer PatchTST
+PATCHTST_PRESETS = {
+    'Small (d=32, L=2)': {'d_model': 32, 'num_hidden_layers': 2, 'num_attention_heads': 2, 'ffn_dim': 64},
+    'Medium (d=64, L=3)': {'d_model': 64, 'num_hidden_layers': 3, 'num_attention_heads': 4, 'ffn_dim': 128},
+    'Large (d=128, L=4)': {'d_model': 128, 'num_hidden_layers': 4, 'num_attention_heads': 4, 'ffn_dim': 256},
+    'XL (d=256, L=6)': {'d_model': 256, 'num_hidden_layers': 6, 'num_attention_heads': 8, 'ffn_dim': 512},
     'Custom': None
 }
 
@@ -224,6 +234,30 @@ class ModelFactory:
                 bidirectional=bidirectional
             )
 
+        # PatchTST
+        elif model_name in ['patchtst', 'patch_tst', 'patch-tst']:
+            if not is_patchtst_available():
+                raise ImportError(
+                    "PatchTST nicht verfuegbar. "
+                    "Bitte installieren mit: pip install transformers>=4.36.0"
+                )
+            return PatchTSTClassifier(
+                input_size=input_size,
+                num_classes=num_classes,
+                context_length=kwargs.get('context_length', 100),
+                patch_length=kwargs.get('patch_length', 16),
+                stride=kwargs.get('stride', 8),
+                d_model=d_model if d_model != 128 else kwargs.get('d_model', 64),
+                num_attention_heads=kwargs.get('num_attention_heads', nhead),
+                num_hidden_layers=kwargs.get('num_hidden_layers', num_encoder_layers),
+                ffn_dim=kwargs.get('ffn_dim', dim_feedforward // 2),
+                dropout=dropout,
+                head_dropout=kwargs.get('head_dropout', dropout),
+                pooling_type=kwargs.get('pooling_type', 'mean'),
+                channel_attention=kwargs.get('channel_attention', False),
+                use_cls_token=kwargs.get('use_cls_token', False)
+            )
+
         else:
             raise ValueError(
                 f"Unbekanntes Modell: '{model_name}'. "
@@ -244,6 +278,10 @@ class ModelFactory:
         # HF-Transformer nur wenn verfuegbar
         if is_hf_available():
             models.append('HF-Transformer')
+
+        # PatchTST nur wenn verfuegbar
+        if is_patchtst_available():
+            models.append('PatchTST')
 
         return models
 
@@ -266,6 +304,8 @@ class ModelFactory:
             return TRANSFORMER_PRESETS
         elif model_name in ['cnn', '1dcnn']:
             return CNN_PRESETS
+        elif model_name in ['patchtst', 'patch_tst', 'patch-tst']:
+            return PATCHTST_PRESETS
         else:
             return {'Custom': None}
 
@@ -329,6 +369,19 @@ class ModelFactory:
                 'num_lstm_layers': 2,
                 'bidirectional': True
             }
+        elif model_name in ['patchtst', 'patch_tst', 'patch-tst']:
+            return {
+                **base_params,
+                'context_length': 100,
+                'patch_length': 16,
+                'stride': 8,
+                'd_model': 64,
+                'num_attention_heads': 4,
+                'num_hidden_layers': 2,
+                'ffn_dim': 128,
+                'dropout': 0.1,
+                'pooling_type': 'mean'
+            }
         else:
             return base_params
 
@@ -342,4 +395,4 @@ class ModelFactory:
     def model_is_transformer(model_name: str) -> bool:
         """Prueft ob ein Modell ein Transformer ist."""
         model_name = model_name.lower().strip()
-        return model_name in ['transformer', 'hf-transformer', 'hf_transformer', 'huggingface']
+        return model_name in ['transformer', 'hf-transformer', 'hf_transformer', 'huggingface', 'patchtst', 'patch_tst', 'patch-tst']

@@ -23,6 +23,7 @@ from sklearn.metrics import f1_score, precision_score, recall_score, confusion_m
 from btcusd_analyzer.core.logger import get_logger
 from btcusd_analyzer.models.factory import ModelFactory
 from btcusd_analyzer.models.hf_transformer import is_hf_available
+from btcusd_analyzer.models.patchtst import is_patchtst_available
 
 
 @dataclass
@@ -134,9 +135,12 @@ AUTO_TRAINER_CONFIGS = {
             # CNN-LSTM als Vergleich
             ('CNN-LSTM', {'hidden_size': 256, 'bidirectional': True}),
             ('Transformer', {'d_model': 128, 'nhead': 4, 'num_encoder_layers': 3}),
+            # PatchTST (falls verfuegbar)
+            ('PatchTST', {'d_model': 64, 'num_hidden_layers': 2, 'patch_length': 16}),
+            ('PatchTST', {'d_model': 64, 'num_hidden_layers': 3, 'patch_length': 8}),
         ]
     },
-    5: {  # Gruendlich (~60 Min) - 35 Configs
+    5: {  # Gruendlich (~60 Min) - 35+ Configs
         'max_epochs': 80,
         'patience': 10,
         'configs': [
@@ -185,6 +189,12 @@ AUTO_TRAINER_CONFIGS = {
             ('CNN-LSTM', {'hidden_size': 384, 'bidirectional': True}),
             ('Transformer', {'d_model': 128, 'nhead': 4, 'num_encoder_layers': 3}),
             ('Transformer', {'d_model': 256, 'nhead': 8, 'num_encoder_layers': 4}),
+
+            # === PatchTST (falls verfuegbar) ===
+            ('PatchTST', {'d_model': 64, 'num_hidden_layers': 2, 'patch_length': 16}),
+            ('PatchTST', {'d_model': 64, 'num_hidden_layers': 3, 'patch_length': 8}),
+            ('PatchTST', {'d_model': 128, 'num_hidden_layers': 3, 'patch_length': 16}),
+            ('PatchTST', {'d_model': 128, 'num_hidden_layers': 4, 'patch_length': 8, 'channel_attention': True}),
         ]
     }
 }
@@ -302,6 +312,10 @@ class AutoTrainer:
         # Filtere HF-Transformer wenn nicht verfuegbar
         if not is_hf_available():
             configs = [(m, p) for m, p in configs if not m.lower().startswith('hf')]
+
+        # Filtere PatchTST wenn nicht verfuegbar
+        if not is_patchtst_available():
+            configs = [(m, p) for m, p in configs if m.lower() != 'patchtst']
 
         total = len(configs)
         self.logger.info(f'Starte Auto-Training: Komplexitaet {complexity}, {total} Konfigurationen')
