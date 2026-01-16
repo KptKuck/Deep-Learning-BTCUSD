@@ -61,11 +61,11 @@ class CandlestickItem(pg.GraphicsObject):
             t, o, h, l, c = row[0], row[1], row[2], row[3], row[4]
 
             if c >= o:
-                # Gruene Kerze (Bullish)
-                color = QColor('#33b34d')
+                # Bullish Kerze - helles Grau
+                color = QColor('#a0a0a0')
             else:
-                # Rote Kerze (Bearish)
-                color = QColor('#cc4d33')
+                # Bearish Kerze - dunkles Grau
+                color = QColor('#505050')
 
             # Docht (Linie)
             p.setPen(pg.mkPen(color, width=1))
