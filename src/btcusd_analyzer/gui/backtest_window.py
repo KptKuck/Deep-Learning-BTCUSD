@@ -23,6 +23,7 @@ from PyQt6.QtGui import QFont, QColor
 
 import pandas as pd
 import numpy as np
+import pyqtgraph as pg
 
 from .styles import get_stylesheet, COLORS, StyleFactory
 
@@ -382,21 +383,70 @@ class BacktestWindow(QMainWindow):
 
             self.chart_tabs.addTab(price_widget, "Preis + Signale")
 
-            # === Tab 2: Trade-Chart ===
+            # === Tab 2: Trade-Chart (pyqtgraph - schneller) ===
             trade_widget = QWidget()
             trade_layout = QVBoxLayout(trade_widget)
             trade_layout.setContentsMargins(0, 0, 0, 0)
+            trade_layout.setSpacing(2)
 
-            self.trade_figure = Figure(figsize=(8, 6), facecolor='#262626')
-            self.trade_canvas = FigureCanvas(self.trade_figure)
-            self.ax_trade = self.trade_figure.add_subplot(111)
-            self._setup_trade_chart()
+            # pyqtgraph konfigurieren
+            pg.setConfigOptions(antialias=True)
 
-            # Toolbar fuer Trade-Chart
-            self.trade_toolbar = NavigationToolbar(self.trade_canvas, self)
-            self.trade_toolbar.setStyleSheet(self._toolbar_style())
-            trade_layout.addWidget(self.trade_toolbar)
-            trade_layout.addWidget(self.trade_canvas)
+            # PlotWidget erstellen
+            self.trade_plot = pg.PlotWidget()
+            self.trade_plot.setBackground('#262626')
+            self.trade_plot.setLabel('left', 'Preis ($)')
+            self.trade_plot.setLabel('bottom', 'Zeit')
+            self.trade_plot.showGrid(x=True, y=True, alpha=0.3)
+            self.trade_plot.getAxis('left').setPen(pg.mkPen(color='#808080'))
+            self.trade_plot.getAxis('bottom').setPen(pg.mkPen(color='#808080'))
+            self.trade_plot.getAxis('left').setTextPen(pg.mkPen(color='#aaaaaa'))
+            self.trade_plot.getAxis('bottom').setTextPen(pg.mkPen(color='#aaaaaa'))
+
+            # Plot-Items erstellen (werden wiederverwendet)
+            self.trade_price_line = self.trade_plot.plot([], [], pen=pg.mkPen(color='#8899bb', width=1))
+            self.trade_entry_scatter = pg.ScatterPlotItem(size=12, pen=pg.mkPen(color='white', width=1))
+            self.trade_exit_scatter = pg.ScatterPlotItem(size=10, pen=pg.mkPen(color='white', width=1))
+            self.trade_plot.addItem(self.trade_entry_scatter)
+            self.trade_plot.addItem(self.trade_exit_scatter)
+
+            # Click-Event fuer Scatter
+            self.trade_entry_scatter.sigClicked.connect(self._on_scatter_clicked)
+            self.trade_exit_scatter.sigClicked.connect(self._on_scatter_clicked)
+
+            # Titel-Label oben
+            self.trade_chart_title = QLabel("Trades | 0 Trades | 0W / 0L | Win-Rate: 0.0%")
+            self.trade_chart_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.trade_chart_title.setStyleSheet("color: white; font-size: 11px; padding: 3px;")
+
+            trade_layout.addWidget(self.trade_chart_title)
+            trade_layout.addWidget(self.trade_plot, stretch=1)
+
+            # Trade-Navigation
+            nav_widget = QWidget()
+            nav_layout = QHBoxLayout(nav_widget)
+            nav_layout.setContentsMargins(5, 2, 5, 2)
+            nav_layout.setSpacing(10)
+
+            self.btn_prev_trade = QPushButton("<< Vorheriger")
+            self.btn_prev_trade.setStyleSheet(self._nav_button_style())
+            self.btn_prev_trade.clicked.connect(self._prev_trade)
+
+            self.trade_nav_label = QLabel("Trade 0/0")
+            self.trade_nav_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.trade_nav_label.setStyleSheet("color: #aaa; font-size: 11px; min-width: 80px;")
+
+            self.btn_next_trade = QPushButton("Naechster >>")
+            self.btn_next_trade.setStyleSheet(self._nav_button_style())
+            self.btn_next_trade.clicked.connect(self._next_trade)
+
+            nav_layout.addStretch()
+            nav_layout.addWidget(self.btn_prev_trade)
+            nav_layout.addWidget(self.trade_nav_label)
+            nav_layout.addWidget(self.btn_next_trade)
+            nav_layout.addStretch()
+
+            trade_layout.addWidget(nav_widget)
 
             # Trade-Detail-Panel unter dem Chart
             self.trade_detail_label = QLabel("Klicke auf einen Trade-Marker im Chart fuer Details")
@@ -413,8 +463,10 @@ class BacktestWindow(QMainWindow):
             self.trade_detail_label.setMinimumHeight(35)
             trade_layout.addWidget(self.trade_detail_label)
 
-            # Pick-Event fuer Trade-Marker registrieren
-            self.trade_canvas.mpl_connect('pick_event', self._on_trade_picked)
+            # Trade-Linien Liste (fuer Verbindungslinien Entry->Exit)
+            self.trade_lines = []
+            self.trade_labels = []
+            self.current_trade_view = -1  # Aktuell angezeigter Trade-Index
 
             self.chart_tabs.addTab(trade_widget, "Trades")
 
@@ -490,6 +542,26 @@ class BacktestWindow(QMainWindow):
             }
         '''
 
+    def _nav_button_style(self) -> str:
+        """Gibt das Stylesheet fuer die Trade-Navigations-Buttons zurueck."""
+        return '''
+            QPushButton {
+                background-color: #3a3a3a;
+                color: #aaa;
+                border: 1px solid #555;
+                border-radius: 3px;
+                padding: 5px 15px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #4a4a4a;
+                color: white;
+            }
+            QPushButton:pressed {
+                background-color: #2a2a2a;
+            }
+        '''
+
     def _create_zoom_controls(self) -> QWidget:
         """Erstellt die Zoom-Kontroll-Buttons fuer den Preis-Chart."""
         widget = QWidget()
@@ -545,7 +617,8 @@ class BacktestWindow(QMainWindow):
         return widget
 
     def _get_current_chart(self):
-        """Gibt den aktuell ausgewaehlten Chart (ax, canvas) zurueck."""
+        """Gibt den aktuell ausgewaehlten Chart (ax, canvas) zurueck.
+        Fuer den Trade-Chart (Tab 1, pyqtgraph) wird (None, None) zurueckgegeben."""
         if not hasattr(self, 'chart_tabs'):
             return self.ax_price, self.price_canvas
 
@@ -553,13 +626,18 @@ class BacktestWindow(QMainWindow):
         if current_tab == 0:
             return self.ax_price, self.price_canvas
         elif current_tab == 1:
-            return self.ax_trade, self.trade_canvas
+            # Trade-Chart ist pyqtgraph, hat eigenes Zoom/Pan
+            return None, None
         else:
             return self.ax_equity, self.equity_canvas
 
     def _zoom_price_axis(self, axis: str, factor: float):
         """Zoomt eine einzelne Achse des aktuell sichtbaren Charts."""
         ax, canvas = self._get_current_chart()
+
+        if ax is None:
+            # pyqtgraph Chart - nutze Maus-Zoom stattdessen
+            return
 
         if axis == 'x':
             xlim = ax.get_xlim()
@@ -576,6 +654,13 @@ class BacktestWindow(QMainWindow):
     def _reset_price_zoom(self):
         """Setzt den Zoom des aktuell sichtbaren Charts zurueck."""
         ax, canvas = self._get_current_chart()
+
+        if ax is None:
+            # pyqtgraph Chart - Auto-Range aktivieren
+            if hasattr(self, 'trade_plot'):
+                self.trade_plot.autoRange()
+            return
+
         ax.autoscale()
         canvas.draw()
 
@@ -590,6 +675,12 @@ class BacktestWindow(QMainWindow):
         window_size = 200
         start_idx = max(0, self.current_index - window_size // 2)
         end_idx = min(len(self.data), self.current_index + window_size // 2)
+
+        if ax is None:
+            # pyqtgraph Chart
+            if hasattr(self, 'trade_plot'):
+                self.trade_plot.setXRange(start_idx, end_idx, padding=0.02)
+            return
 
         ax.set_xlim(start_idx, end_idx)
 
@@ -1533,26 +1624,31 @@ class BacktestWindow(QMainWindow):
         self.equity_canvas.draw()
 
     def _update_trade_chart(self):
-        """Aktualisiert den Trade-Chart mit Entry/Exit und P/L."""
-        if not hasattr(self, 'ax_trade'):
+        """Aktualisiert den Trade-Chart mit Entry/Exit und P/L (pyqtgraph)."""
+        if not hasattr(self, 'trade_plot'):
             return
-
-        # Aktuelle Zoom-Limits speichern
-        trade_xlim = self.ax_trade.get_xlim()
-        trade_ylim = self.ax_trade.get_ylim()
-
-        self.ax_trade.clear()
-        self._setup_trade_chart()
 
         if self.data is None:
-            self.trade_canvas.draw()
             return
 
-        # Preis-Linie (heller fuer bessere Sichtbarkeit)
-        self.ax_trade.plot(self.data.index, self.data['Close'],
-                          color='#8899bb', linewidth=0.8, alpha=0.7)
+        # Alte Linien und Labels entfernen
+        for line in self.trade_lines:
+            self.trade_plot.removeItem(line)
+        self.trade_lines.clear()
+        for label in self.trade_labels:
+            self.trade_plot.removeItem(label)
+        self.trade_labels.clear()
 
-        # Abgeschlossene Trades visualisieren
+        # X-Achse: Indizes verwenden (schneller als Timestamps)
+        x_data = np.arange(len(self.data))
+        y_data = self.data['Close'].values
+
+        # Preis-Linie aktualisieren
+        self.trade_price_line.setData(x_data, y_data)
+
+        # Trade-Marker sammeln
+        entry_spots = []
+        exit_spots = []
         wins = 0
         losses = 0
 
@@ -1566,95 +1662,160 @@ class BacktestWindow(QMainWindow):
             if entry_idx >= len(self.data) or exit_idx >= len(self.data):
                 continue
 
-            entry_date = self.data.index[entry_idx]
-            exit_date = self.data.index[exit_idx]
             entry_price = trade.get('entry_price', 0)
             exit_price = trade.get('exit_price', 0)
             trade_type = trade.get('position', 'LONG')
 
             # Farbe basierend auf P/L
             if pnl > 0:
-                color = '#33cc33'  # Gruen
+                line_color = '#33cc33'
                 wins += 1
             else:
-                color = '#cc3333'  # Rot
+                line_color = '#cc3333'
                 losses += 1
 
             # Verbindungslinie zwischen Entry und Exit
-            self.ax_trade.plot([entry_date, exit_date], [entry_price, exit_price],
-                              color=color, linewidth=2, alpha=0.8)
+            line = self.trade_plot.plot(
+                [entry_idx, exit_idx], [entry_price, exit_price],
+                pen=pg.mkPen(color=line_color, width=2)
+            )
+            self.trade_lines.append(line)
 
-            # Entry-Marker (anklickbar)
-            if trade_type == 'LONG':
-                entry_scatter = self.ax_trade.scatter([entry_date], [entry_price],
-                                     marker='^', c='#33cc33', s=80, zorder=5,
-                                     edgecolors='white', linewidths=0.5, picker=True)
-            else:  # SHORT
-                entry_scatter = self.ax_trade.scatter([entry_date], [entry_price],
-                                     marker='v', c='#cc3333', s=80, zorder=5,
-                                     edgecolors='white', linewidths=0.5, picker=True)
-            entry_scatter.trade_index = trade_index
+            # Entry-Marker
+            entry_color = '#33cc33' if trade_type == 'LONG' else '#cc3333'
+            entry_symbol = 't' if trade_type == 'LONG' else 't1'  # Dreieck hoch/runter
+            entry_spots.append({
+                'pos': (entry_idx, entry_price),
+                'brush': pg.mkBrush(entry_color),
+                'symbol': entry_symbol,
+                'size': 12,
+                'data': trade_index
+            })
 
-            # Exit-Marker (X, anklickbar)
-            exit_scatter = self.ax_trade.scatter([exit_date], [exit_price],
-                                 marker='x', c=color, s=60, zorder=5, linewidths=2, picker=True)
-            exit_scatter.trade_index = trade_index
+            # Exit-Marker
+            exit_spots.append({
+                'pos': (exit_idx, exit_price),
+                'brush': pg.mkBrush(line_color),
+                'symbol': 'x',
+                'size': 10,
+                'data': trade_index
+            })
 
-            # P/L Text am Exit (Gewinn oben, Verlust unten) mit Verbindungslinie
+            # P/L Label
             pnl_text = f'+${pnl:.0f}' if pnl > 0 else f'-${abs(pnl):.0f}'
-            y_offset = 35 if pnl > 0 else -40  # Weiter weg vom Exit
-            self.ax_trade.annotate(pnl_text, (exit_date, exit_price),
-                                  textcoords='offset points', xytext=(8, y_offset),
-                                  fontsize=9, color=color, fontweight='bold',
-                                  bbox=dict(boxstyle='round,pad=0.3', facecolor='#1a1a1a',
-                                           edgecolor=color, alpha=0.9),
-                                  arrowprops=dict(arrowstyle='-', color='#e6b333',
-                                                 linewidth=1.5, alpha=0.8))
+            label = pg.TextItem(text=pnl_text, color=line_color, anchor=(0, 0.5))
+            label.setPos(exit_idx + 1, exit_price)
+            self.trade_plot.addItem(label)
+            self.trade_labels.append(label)
 
         # Aktuelle offene Position
         if self.position != 'NONE' and self.entry_index > 0:
             entry_idx = self.entry_index - 1
             if entry_idx < len(self.data):
-                entry_date = self.data.index[entry_idx]
                 current_idx = min(self.current_index - 1, len(self.data) - 1)
-                current_date = self.data.index[current_idx]
                 current_price = self.data['Close'].iloc[current_idx]
 
                 # Gestrichelte Linie fuer offene Position
-                self.ax_trade.plot([entry_date, current_date],
-                                  [self.entry_price, current_price],
-                                  color='#e6b333', linewidth=2, linestyle='--', alpha=0.8)
+                line = self.trade_plot.plot(
+                    [entry_idx, current_idx], [self.entry_price, current_price],
+                    pen=pg.mkPen(color='#e6b333', width=2, style=Qt.PenStyle.DashLine)
+                )
+                self.trade_lines.append(line)
 
-                # Entry-Marker
-                marker = '^' if self.position == 'LONG' else 'v'
-                color = '#33cc33' if self.position == 'LONG' else '#cc3333'
-                self.ax_trade.scatter([entry_date], [self.entry_price],
-                                     marker=marker, c=color, s=80, zorder=5,
-                                     edgecolors='white', linewidths=0.5)
+                # Entry-Marker fuer offene Position
+                open_color = '#33cc33' if self.position == 'LONG' else '#cc3333'
+                open_symbol = 't' if self.position == 'LONG' else 't1'
+                entry_spots.append({
+                    'pos': (entry_idx, self.entry_price),
+                    'brush': pg.mkBrush(open_color),
+                    'symbol': open_symbol,
+                    'size': 12,
+                    'data': -1  # Offene Position, kein Trade-Index
+                })
 
-        # Titel mit Trade-Statistik
+        # Scatter-Daten setzen
+        self.trade_entry_scatter.setData(entry_spots)
+        self.trade_exit_scatter.setData(exit_spots)
+
+        # Titel aktualisieren
         total_trades = len(self.trades)
         win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
-        self.ax_trade.set_title(
-            f'Trades | {total_trades} Trades | {wins}W / {losses}L | Win-Rate: {win_rate:.1f}%',
-            color='white', fontsize=11
+        self.trade_chart_title.setText(
+            f"Trades | {total_trades} Trades | {wins}W / {losses}L | Win-Rate: {win_rate:.1f}%"
         )
 
-        # Zoom-Limits wiederherstellen (wenn gueltig)
-        if trade_xlim[0] != 0.0 or trade_xlim[1] != 1.0:
-            self.ax_trade.set_xlim(trade_xlim)
-            self.ax_trade.set_ylim(trade_ylim)
+        # Navigation Label aktualisieren
+        if total_trades > 0:
+            current = self.current_trade_view + 1 if self.current_trade_view >= 0 else 0
+            self.trade_nav_label.setText(f"Trade {current}/{total_trades}")
+        else:
+            self.trade_nav_label.setText("Trade 0/0")
 
-        self.trade_figure.tight_layout()
-        self.trade_canvas.draw()
+        # Standard-Zoom: Auf letzten Trade oder letzte 24h
+        if self.trades and self.current_trade_view < 0:
+            # Zeige letzten Trade mit 24h Kontext
+            self._goto_trade(len(self.trades) - 1)
+        elif not self.trades and len(self.data) > 0:
+            # Keine Trades: zeige letzte 24h
+            end_idx = len(self.data) - 1
+            start_idx = max(0, end_idx - 24)
+            self.trade_plot.setXRange(start_idx, end_idx, padding=0.02)
 
-    def _on_trade_picked(self, event):
-        """Wird aufgerufen wenn ein Trade-Marker angeklickt wird."""
-        artist = event.artist
-        if hasattr(artist, 'trade_index'):
-            idx = artist.trade_index
-            if 0 <= idx < len(self.trades):
-                self._update_trade_detail(self.trades[idx], idx)
+    def _on_scatter_clicked(self, scatter, points):
+        """pyqtgraph Scatter-Click Handler."""
+        if points:
+            point = points[0]
+            trade_idx = point.data()
+            if trade_idx is not None and 0 <= trade_idx < len(self.trades):
+                self.current_trade_view = trade_idx
+                self._update_trade_detail(self.trades[trade_idx], trade_idx)
+                self._update_nav_label()
+
+    def _goto_trade(self, trade_idx: int):
+        """Zoomt auf einen bestimmten Trade."""
+        if not self.trades or trade_idx < 0 or trade_idx >= len(self.trades):
+            return
+
+        self.current_trade_view = trade_idx
+        trade = self.trades[trade_idx]
+
+        # Trade-Bereich ermitteln
+        entry_idx = trade.get('entry_index', 0) - 1
+        exit_idx = trade.get('exit_index', 0) - 1
+
+        if entry_idx < 0 or exit_idx < 0:
+            return
+
+        # +/- 12 Stunden Kontext (24h gesamt)
+        start = max(0, entry_idx - 12)
+        end = min(len(self.data) - 1, exit_idx + 12)
+
+        self.trade_plot.setXRange(start, end, padding=0.02)
+
+        # Y-Range automatisch anpassen
+        if start < len(self.data) and end < len(self.data):
+            visible_data = self.data.iloc[start:end + 1]
+            y_min = visible_data['Close'].min() * 0.998
+            y_max = visible_data['Close'].max() * 1.002
+            self.trade_plot.setYRange(y_min, y_max, padding=0)
+
+        self._update_trade_detail(trade, trade_idx)
+        self._update_nav_label()
+
+    def _prev_trade(self):
+        """Zum vorherigen Trade navigieren."""
+        if self.trades and self.current_trade_view > 0:
+            self._goto_trade(self.current_trade_view - 1)
+
+    def _next_trade(self):
+        """Zum naechsten Trade navigieren."""
+        if self.trades and self.current_trade_view < len(self.trades) - 1:
+            self._goto_trade(self.current_trade_view + 1)
+
+    def _update_nav_label(self):
+        """Aktualisiert das Trade-Navigations-Label."""
+        if self.trades:
+            self.trade_nav_label.setText(f"Trade {self.current_trade_view + 1}/{len(self.trades)}")
 
     def _update_trade_detail(self, trade: dict, idx: int):
         """Aktualisiert das Trade-Detail-Panel mit den Trade-Daten."""
@@ -1822,6 +1983,43 @@ class BacktestWindow(QMainWindow):
         if self._speed_update_timer:
             self._speed_update_timer.stop()
         event.accept()
+
+    def _get_datetime(self, idx: int):
+        """Holt DateTime aus dem DataFrame (Index oder Spalte)."""
+        if self.data is None or idx < 0 or idx >= len(self.data):
+            return None
+        try:
+            # Versuche Index (wenn DateTime als Index gesetzt)
+            dt = self.data.index[idx]
+            if hasattr(dt, 'strftime'):
+                return dt
+            # Versuche DateTime-Spalte
+            if 'DateTime' in self.data.columns:
+                dt_val = self.data['DateTime'].iloc[idx]
+                if isinstance(dt_val, str):
+                    return pd.to_datetime(dt_val)
+                if hasattr(dt_val, 'strftime'):
+                    return dt_val
+        except:
+            pass
+        return None
+
+    def _format_duration(self, td) -> str:
+        """Formatiert eine Zeitdauer lesbar."""
+        total_seconds = int(td.total_seconds())
+        if total_seconds < 0:
+            return "0m"
+
+        days = total_seconds // 86400
+        hours = (total_seconds % 86400) // 3600
+        minutes = (total_seconds % 3600) // 60
+
+        if days > 0:
+            return f"{days}d {hours}h"
+        elif hours > 0:
+            return f"{hours}h {minutes}m"
+        else:
+            return f"{minutes}m"
 
     def _show_trade_statistics(self):
         """Zeigt den Trade-Statistik Dialog."""

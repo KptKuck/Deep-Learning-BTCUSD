@@ -135,6 +135,10 @@ class MainWindow(QMainWindow):
             width = int(available_geometry.width() * screen_percent)
             height = int(available_geometry.height() * screen_percent)
             self.resize(width, height)
+            # Fenster zentrieren
+            x = (available_geometry.width() - width) // 2 + available_geometry.x()
+            y = (available_geometry.height() - height) // 2 + available_geometry.y()
+            self.move(x, y)
         else:
             # Fallback falls kein Screen verfuegbar
             self.resize(1820, 1235)
