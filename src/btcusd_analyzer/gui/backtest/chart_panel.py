@@ -5,7 +5,8 @@ Chart Panel - Charts fuer den Backtest (mittlere Spalte).
 from typing import List, Dict, Optional, Callable
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTabWidget
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTabWidget,
+    QSlider, QSpinBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
@@ -122,6 +123,10 @@ class ChartPanel(QWidget):
 
         # Chart-Modus: 'candle' oder 'line'
         self.chart_mode = 'candle'
+
+        # Signal-Offsets (vertikal, in Dollar)
+        self.signal_entry_offset = 0.0  # Offset fuer Entry-Marker
+        self.signal_exit_offset = 0.0   # Offset fuer Exit-Marker
 
         self._setup_ui()
 
@@ -277,6 +282,10 @@ class ChartPanel(QWidget):
 
         layout.addWidget(nav_widget)
 
+        # Signal-Offset Kontrollen
+        offset_widget = self._create_signal_offset_controls()
+        layout.addWidget(offset_widget)
+
         # Trade-Detail-Panel unter dem Chart
         self.trade_detail_label = QLabel("Klicke auf einen Trade-Marker im Chart fuer Details")
         self.trade_detail_label.setStyleSheet("""
@@ -293,6 +302,235 @@ class ChartPanel(QWidget):
         layout.addWidget(self.trade_detail_label)
 
         return widget
+
+    def _create_signal_offset_controls(self) -> QWidget:
+        """Erstellt Kontrollen fuer vertikale Signal-Offsets."""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(5, 2, 5, 2)
+        layout.setSpacing(8)
+
+        # Style fuer Labels
+        label_style = "color: #aaa; font-size: 10px;"
+        spinbox_style = """
+            QSpinBox {
+                background-color: #333;
+                color: white;
+                border: 1px solid #555;
+                border-radius: 3px;
+                padding: 2px 5px;
+                min-width: 60px;
+            }
+            QSpinBox::up-button, QSpinBox::down-button {
+                background-color: #444;
+                border: none;
+                width: 15px;
+            }
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+                background-color: #555;
+            }
+        """
+
+        # Entry-Offset
+        entry_label = QLabel("Entry Y-Offset ($):")
+        entry_label.setStyleSheet(label_style)
+        layout.addWidget(entry_label)
+
+        self.entry_offset_spin = QSpinBox()
+        self.entry_offset_spin.setRange(-5000, 5000)
+        self.entry_offset_spin.setValue(0)
+        self.entry_offset_spin.setSingleStep(10)
+        self.entry_offset_spin.setStyleSheet(spinbox_style)
+        self.entry_offset_spin.setToolTip("Vertikaler Offset fuer Entry-Marker (positiv = hoeher)")
+        self.entry_offset_spin.valueChanged.connect(self._on_entry_offset_changed)
+        layout.addWidget(self.entry_offset_spin)
+
+        layout.addSpacing(20)
+
+        # Exit-Offset
+        exit_label = QLabel("Exit Y-Offset ($):")
+        exit_label.setStyleSheet(label_style)
+        layout.addWidget(exit_label)
+
+        self.exit_offset_spin = QSpinBox()
+        self.exit_offset_spin.setRange(-5000, 5000)
+        self.exit_offset_spin.setValue(0)
+        self.exit_offset_spin.setSingleStep(10)
+        self.exit_offset_spin.setStyleSheet(spinbox_style)
+        self.exit_offset_spin.setToolTip("Vertikaler Offset fuer Exit-Marker (positiv = hoeher)")
+        self.exit_offset_spin.valueChanged.connect(self._on_exit_offset_changed)
+        layout.addWidget(self.exit_offset_spin)
+
+        layout.addSpacing(20)
+
+        # Reset Button
+        reset_btn = QPushButton("Reset")
+        reset_btn.setFixedWidth(50)
+        reset_btn.setStyleSheet("""
+            QPushButton { background-color: #444; color: #aaa; border: 1px solid #555;
+                         border-radius: 3px; padding: 3px 8px; font-size: 10px; }
+            QPushButton:hover { background-color: #555; color: white; }
+        """)
+        reset_btn.setToolTip("Beide Offsets auf 0 zuruecksetzen")
+        reset_btn.clicked.connect(self._reset_signal_offsets)
+        layout.addWidget(reset_btn)
+
+        layout.addStretch()
+
+        return widget
+
+    def _on_entry_offset_changed(self, value: int):
+        """Handler fuer Entry-Offset Aenderung."""
+        self.signal_entry_offset = float(value)
+        self._refresh_trade_markers()
+
+    def _on_exit_offset_changed(self, value: int):
+        """Handler fuer Exit-Offset Aenderung."""
+        self.signal_exit_offset = float(value)
+        self._refresh_trade_markers()
+
+    def _reset_signal_offsets(self):
+        """Setzt beide Offsets auf 0 zurueck."""
+        self.entry_offset_spin.setValue(0)
+        self.exit_offset_spin.setValue(0)
+        self.signal_entry_offset = 0.0
+        self.signal_exit_offset = 0.0
+        self._refresh_trade_markers()
+
+    def _refresh_trade_markers(self):
+        """Aktualisiert nur die Trade-Marker mit den aktuellen Offsets."""
+        if not hasattr(self, 'trade_plot') or self.data is None:
+            return
+        if self.timestamps is None or len(self.timestamps) == 0:
+            return
+
+        # Aktuelle Trade-Daten holen
+        if not hasattr(self, '_last_trade_params'):
+            return
+
+        params = self._last_trade_params
+        self._update_trade_markers_only(
+            params['trades'],
+            params['position'],
+            params['entry_price'],
+            params['entry_index'],
+            params['current_index']
+        )
+
+    def _update_trade_markers_only(self, trades: List[Dict], position: str,
+                                    entry_price: float, entry_index: int, current_index: int):
+        """Aktualisiert nur die Trade-Marker (ohne Chart-Daten neu zu laden)."""
+        # Alte Linien und Labels entfernen
+        for line in self.trade_lines:
+            self.trade_plot.removeItem(line)
+        self.trade_lines.clear()
+        for label in self.trade_labels:
+            self.trade_plot.removeItem(label)
+        self.trade_labels.clear()
+
+        # Trade-Marker sammeln
+        entry_spots = []
+        exit_spots = []
+        wins = 0
+        losses = 0
+
+        for trade_index, trade in enumerate(trades):
+            entry_idx = trade.get('entry_index', 0) - 1
+            exit_idx = trade.get('exit_index', 0) - 1
+            pnl = trade.get('pnl', 0)
+
+            if entry_idx < 0 or exit_idx < 0:
+                continue
+            if entry_idx >= len(self.data) or exit_idx >= len(self.data):
+                continue
+
+            trade_entry_price = trade.get('entry_price', 0)
+            exit_price = trade.get('exit_price', 0)
+            trade_type = trade.get('position', 'LONG')
+
+            # Timestamps fuer Entry/Exit
+            entry_ts = self.timestamps[entry_idx]
+            exit_ts = self.timestamps[exit_idx]
+
+            # Preise mit Offset
+            entry_price_offset = trade_entry_price + self.signal_entry_offset
+            exit_price_offset = exit_price + self.signal_exit_offset
+
+            # Farbe basierend auf P/L
+            if pnl > 0:
+                line_color = '#33cc33'
+                wins += 1
+            else:
+                line_color = '#cc3333'
+                losses += 1
+
+            # Verbindungslinie (mit Offsets)
+            line = self.trade_plot.plot(
+                [entry_ts, exit_ts], [entry_price_offset, exit_price_offset],
+                pen=pg.mkPen(color=line_color, width=2)
+            )
+            self.trade_lines.append(line)
+
+            # Entry-Marker (mit Offset)
+            entry_color = '#33cc33' if trade_type == 'LONG' else '#cc3333'
+            entry_symbol = 't' if trade_type == 'LONG' else 't1'
+            entry_spots.append({
+                'pos': (entry_ts, entry_price_offset),
+                'brush': pg.mkBrush(entry_color),
+                'symbol': entry_symbol,
+                'size': 14,
+                'data': trade_index
+            })
+
+            # Exit-Marker (mit Offset)
+            exit_spots.append({
+                'pos': (exit_ts, exit_price_offset),
+                'brush': pg.mkBrush(line_color),
+                'symbol': 'x',
+                'size': 12,
+                'data': trade_index
+            })
+
+            # P/L Label
+            time_offset = (self.timestamps[1] - self.timestamps[0]) if len(self.timestamps) > 1 else 3600
+            pnl_text = f'+${pnl:.0f}' if pnl > 0 else f'-${abs(pnl):.0f}'
+            label = pg.TextItem(text=pnl_text, color=line_color, anchor=(0, 0.5))
+            label.setPos(exit_ts + time_offset, exit_price_offset)
+            self.trade_plot.addItem(label)
+            self.trade_labels.append(label)
+
+        # Aktuelle offene Position
+        if position != 'NONE' and entry_index > 0:
+            entry_idx = entry_index - 1
+            if entry_idx < len(self.data):
+                curr_idx = min(current_index - 1, len(self.data) - 1)
+                curr_price = self.data['Close'].iloc[curr_idx]
+
+                entry_ts = self.timestamps[entry_idx]
+                curr_ts = self.timestamps[curr_idx]
+
+                entry_price_offset = entry_price + self.signal_entry_offset
+                curr_price_offset = curr_price + self.signal_exit_offset
+
+                line = self.trade_plot.plot(
+                    [entry_ts, curr_ts], [entry_price_offset, curr_price_offset],
+                    pen=pg.mkPen(color='#e6b333', width=2, style=Qt.PenStyle.DashLine)
+                )
+                self.trade_lines.append(line)
+
+                open_color = '#33cc33' if position == 'LONG' else '#cc3333'
+                open_symbol = 't' if position == 'LONG' else 't1'
+                entry_spots.append({
+                    'pos': (entry_ts, entry_price_offset),
+                    'brush': pg.mkBrush(open_color),
+                    'symbol': open_symbol,
+                    'size': 14,
+                    'data': -1
+                })
+
+        # Scatter-Daten setzen
+        self.trade_entry_scatter.setData(entry_spots)
+        self.trade_exit_scatter.setData(exit_spots)
 
     def _create_zoom_controls(self) -> QWidget:
         """Erstellt die Zoom-Kontrollen."""
@@ -579,6 +817,15 @@ class ChartPanel(QWidget):
         if not hasattr(self, 'trade_plot') or self.data is None:
             return
 
+        # Parameter speichern fuer Offset-Updates
+        self._last_trade_params = {
+            'trades': trades,
+            'position': position,
+            'entry_price': entry_price,
+            'entry_index': entry_index,
+            'current_index': current_index
+        }
+
         # Alte Linien und Labels entfernen
         for line in self.trade_lines:
             self.trade_plot.removeItem(line)
@@ -629,6 +876,10 @@ class ChartPanel(QWidget):
             entry_ts = self.timestamps[entry_idx]
             exit_ts = self.timestamps[exit_idx]
 
+            # Preise mit Offset
+            entry_price_offset = trade_entry_price + self.signal_entry_offset
+            exit_price_offset = exit_price + self.signal_exit_offset
+
             # Farbe basierend auf P/L
             if pnl > 0:
                 line_color = '#33cc33'
@@ -637,38 +888,38 @@ class ChartPanel(QWidget):
                 line_color = '#cc3333'
                 losses += 1
 
-            # Verbindungslinie (mit Timestamps)
+            # Verbindungslinie (mit Offsets)
             line = self.trade_plot.plot(
-                [entry_ts, exit_ts], [trade_entry_price, exit_price],
+                [entry_ts, exit_ts], [entry_price_offset, exit_price_offset],
                 pen=pg.mkPen(color=line_color, width=2)
             )
             self.trade_lines.append(line)
 
-            # Entry-Marker
+            # Entry-Marker (mit Offset)
             entry_color = '#33cc33' if trade_type == 'LONG' else '#cc3333'
             entry_symbol = 't' if trade_type == 'LONG' else 't1'
             entry_spots.append({
-                'pos': (entry_ts, trade_entry_price),
+                'pos': (entry_ts, entry_price_offset),
                 'brush': pg.mkBrush(entry_color),
                 'symbol': entry_symbol,
                 'size': 14,
                 'data': trade_index
             })
 
-            # Exit-Marker
+            # Exit-Marker (mit Offset)
             exit_spots.append({
-                'pos': (exit_ts, exit_price),
+                'pos': (exit_ts, exit_price_offset),
                 'brush': pg.mkBrush(line_color),
                 'symbol': 'x',
                 'size': 12,
                 'data': trade_index
             })
 
-            # P/L Label (mit etwas Offset in X-Richtung)
+            # P/L Label (mit Offset)
             time_offset = (self.timestamps[1] - self.timestamps[0]) if len(self.timestamps) > 1 else 3600
             pnl_text = f'+${pnl:.0f}' if pnl > 0 else f'-${abs(pnl):.0f}'
             label = pg.TextItem(text=pnl_text, color=line_color, anchor=(0, 0.5))
-            label.setPos(exit_ts + time_offset, exit_price)
+            label.setPos(exit_ts + time_offset, exit_price_offset)
             self.trade_plot.addItem(label)
             self.trade_labels.append(label)
 
@@ -682,8 +933,11 @@ class ChartPanel(QWidget):
                 entry_ts = self.timestamps[entry_idx]
                 curr_ts = self.timestamps[curr_idx]
 
+                entry_price_offset = entry_price + self.signal_entry_offset
+                curr_price_offset = curr_price + self.signal_exit_offset
+
                 line = self.trade_plot.plot(
-                    [entry_ts, curr_ts], [entry_price, curr_price],
+                    [entry_ts, curr_ts], [entry_price_offset, curr_price_offset],
                     pen=pg.mkPen(color='#e6b333', width=2, style=Qt.PenStyle.DashLine)
                 )
                 self.trade_lines.append(line)
@@ -691,7 +945,7 @@ class ChartPanel(QWidget):
                 open_color = '#33cc33' if position == 'LONG' else '#cc3333'
                 open_symbol = 't' if position == 'LONG' else 't1'
                 entry_spots.append({
-                    'pos': (entry_ts, entry_price),
+                    'pos': (entry_ts, entry_price_offset),
                     'brush': pg.mkBrush(open_color),
                     'symbol': open_symbol,
                     'size': 14,
