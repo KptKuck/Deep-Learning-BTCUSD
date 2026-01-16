@@ -12,8 +12,84 @@ from PyQt6.QtCore import Qt, pyqtSignal
 import pandas as pd
 import numpy as np
 import pyqtgraph as pg
+from pyqtgraph import DateAxisItem
 
 from ..styles import StyleFactory, COLORS
+
+
+class CandlestickItem(pg.GraphicsObject):
+    """Kerzenchart-Item fuer pyqtgraph."""
+
+    def __init__(self, data: np.ndarray = None):
+        """
+        data: ndarray mit Spalten [timestamp, open, high, low, close]
+        timestamp ist Unix-Timestamp (Sekunden)
+        """
+        pg.GraphicsObject.__init__(self)
+        self.data = data
+        self.picture = None
+        self.generatePicture()
+
+    def setData(self, data: np.ndarray):
+        """Setzt neue Daten und zeichnet neu."""
+        self.data = data
+        self.picture = None
+        self.generatePicture()
+        self.update()
+
+    def generatePicture(self):
+        """Generiert das QPicture fuer die Kerzen."""
+        from PyQt6.QtGui import QPicture, QPainter, QPen, QBrush, QColor
+        from PyQt6.QtCore import QRectF
+
+        self.picture = QPicture()
+        p = QPainter(self.picture)
+
+        if self.data is None or len(self.data) == 0:
+            p.end()
+            return
+
+        # Kerzenbreite berechnen (basierend auf Zeitabstand)
+        if len(self.data) > 1:
+            time_diff = self.data[1, 0] - self.data[0, 0]
+            w = time_diff * 0.6  # 60% des Abstands
+        else:
+            w = 3600 * 0.6  # Default: 1 Stunde
+
+        for row in self.data:
+            t, o, h, l, c = row[0], row[1], row[2], row[3], row[4]
+
+            if c >= o:
+                # Gruene Kerze (Bullish)
+                color = QColor('#33b34d')
+            else:
+                # Rote Kerze (Bearish)
+                color = QColor('#cc4d33')
+
+            # Docht (Linie)
+            p.setPen(pg.mkPen(color, width=1))
+            p.drawLine(pg.QtCore.QPointF(t, l), pg.QtCore.QPointF(t, h))
+
+            # Kerzenkoerper
+            p.setBrush(QBrush(color))
+            body_top = max(o, c)
+            body_bottom = min(o, c)
+            body_height = body_top - body_bottom
+            if body_height < 0.01:  # Mindesthoehe fuer Doji
+                body_height = (h - l) * 0.01 if (h - l) > 0 else 1
+
+            p.drawRect(QRectF(t - w/2, body_bottom, w, body_height))
+
+        p.end()
+
+    def paint(self, p, *args):
+        if self.picture:
+            self.picture.play(p)
+
+    def boundingRect(self):
+        if self.picture is None:
+            return pg.QtCore.QRectF(0, 0, 1, 1)
+        return pg.QtCore.QRectF(self.picture.boundingRect())
 
 
 class ChartPanel(QWidget):
@@ -112,7 +188,7 @@ class ChartPanel(QWidget):
             layout.addWidget(QLabel("matplotlib nicht installiert"))
 
     def _create_trade_tab(self) -> QWidget:
-        """Erstellt den Trade-Chart Tab mit pyqtgraph."""
+        """Erstellt den Trade-Chart Tab mit pyqtgraph und Kerzenchart."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -121,8 +197,11 @@ class ChartPanel(QWidget):
         # pyqtgraph konfigurieren
         pg.setConfigOptions(antialias=True)
 
-        # PlotWidget erstellen
-        self.trade_plot = pg.PlotWidget()
+        # DateAxisItem fuer echte Zeitachse
+        date_axis = DateAxisItem(orientation='bottom')
+
+        # PlotWidget mit DateAxisItem erstellen
+        self.trade_plot = pg.PlotWidget(axisItems={'bottom': date_axis})
         self.trade_plot.setBackground('#262626')
         self.trade_plot.setLabel('left', 'Preis ($)')
         self.trade_plot.setLabel('bottom', 'Zeit')
@@ -132,10 +211,16 @@ class ChartPanel(QWidget):
         self.trade_plot.getAxis('left').setTextPen(pg.mkPen(color='#aaaaaa'))
         self.trade_plot.getAxis('bottom').setTextPen(pg.mkPen(color='#aaaaaa'))
 
-        # Plot-Items erstellen (werden wiederverwendet)
-        self.trade_price_line = self.trade_plot.plot([], [], pen=pg.mkPen(color='#8899bb', width=1))
-        self.trade_entry_scatter = pg.ScatterPlotItem(size=12, pen=pg.mkPen(color='white', width=1))
-        self.trade_exit_scatter = pg.ScatterPlotItem(size=10, pen=pg.mkPen(color='white', width=1))
+        # Kerzenchart-Item
+        self.candlestick_item = CandlestickItem()
+        self.trade_plot.addItem(self.candlestick_item)
+
+        # Timestamp-Array fuer Koordinaten-Umrechnung
+        self.timestamps: np.ndarray = None
+
+        # Scatter-Items fuer Trade-Marker
+        self.trade_entry_scatter = pg.ScatterPlotItem(size=14, pen=pg.mkPen(color='white', width=1.5))
+        self.trade_exit_scatter = pg.ScatterPlotItem(size=12, pen=pg.mkPen(color='white', width=1.5))
         self.trade_plot.addItem(self.trade_entry_scatter)
         self.trade_plot.addItem(self.trade_exit_scatter)
 
@@ -326,8 +411,18 @@ class ChartPanel(QWidget):
         end_idx = min(len(self.data), self.current_index + window_size // 2)
 
         if ax is None:
-            if hasattr(self, 'trade_plot'):
-                self.trade_plot.setXRange(start_idx, end_idx, padding=0.02)
+            # Trade-Chart mit Timestamps
+            if hasattr(self, 'trade_plot') and self.timestamps is not None and len(self.timestamps) > 0:
+                start_ts = self.timestamps[start_idx]
+                end_ts = self.timestamps[min(end_idx, len(self.timestamps) - 1)]
+                self.trade_plot.setXRange(start_ts, end_ts, padding=0.02)
+
+                # Y-Range anpassen
+                visible_data = self.data.iloc[start_idx:end_idx]
+                if len(visible_data) > 0:
+                    y_min = visible_data['Low'].min() * 0.998
+                    y_max = visible_data['High'].max() * 1.002
+                    self.trade_plot.setYRange(y_min, y_max, padding=0)
             return
 
         ax.set_xlim(start_idx, end_idx)
@@ -465,7 +560,7 @@ class ChartPanel(QWidget):
 
     def _update_trade_chart(self, trades: List[Dict], position: str,
                            entry_price: float, entry_index: int, current_index: int):
-        """Aktualisiert den Trade-Chart."""
+        """Aktualisiert den Trade-Chart mit Kerzen und echter Zeitachse."""
         if not hasattr(self, 'trade_plot') or self.data is None:
             return
 
@@ -477,10 +572,18 @@ class ChartPanel(QWidget):
             self.trade_plot.removeItem(label)
         self.trade_labels.clear()
 
-        # X-Achse: Indizes verwenden
-        x_data = np.arange(len(self.data))
-        y_data = self.data['Close'].values
-        self.trade_price_line.setData(x_data, y_data)
+        # Timestamps aus DataFrame extrahieren
+        self.timestamps = self._extract_timestamps()
+
+        # Kerzendaten erstellen: [timestamp, open, high, low, close]
+        candle_data = np.column_stack([
+            self.timestamps,
+            self.data['Open'].values,
+            self.data['High'].values,
+            self.data['Low'].values,
+            self.data['Close'].values
+        ])
+        self.candlestick_item.setData(candle_data)
 
         # Trade-Marker sammeln
         entry_spots = []
@@ -502,6 +605,10 @@ class ChartPanel(QWidget):
             exit_price = trade.get('exit_price', 0)
             trade_type = trade.get('position', 'LONG')
 
+            # Timestamps fuer Entry/Exit
+            entry_ts = self.timestamps[entry_idx]
+            exit_ts = self.timestamps[exit_idx]
+
             # Farbe basierend auf P/L
             if pnl > 0:
                 line_color = '#33cc33'
@@ -510,9 +617,9 @@ class ChartPanel(QWidget):
                 line_color = '#cc3333'
                 losses += 1
 
-            # Verbindungslinie
+            # Verbindungslinie (mit Timestamps)
             line = self.trade_plot.plot(
-                [entry_idx, exit_idx], [trade_entry_price, exit_price],
+                [entry_ts, exit_ts], [trade_entry_price, exit_price],
                 pen=pg.mkPen(color=line_color, width=2)
             )
             self.trade_lines.append(line)
@@ -521,26 +628,27 @@ class ChartPanel(QWidget):
             entry_color = '#33cc33' if trade_type == 'LONG' else '#cc3333'
             entry_symbol = 't' if trade_type == 'LONG' else 't1'
             entry_spots.append({
-                'pos': (entry_idx, trade_entry_price),
+                'pos': (entry_ts, trade_entry_price),
                 'brush': pg.mkBrush(entry_color),
                 'symbol': entry_symbol,
-                'size': 12,
+                'size': 14,
                 'data': trade_index
             })
 
             # Exit-Marker
             exit_spots.append({
-                'pos': (exit_idx, exit_price),
+                'pos': (exit_ts, exit_price),
                 'brush': pg.mkBrush(line_color),
                 'symbol': 'x',
-                'size': 10,
+                'size': 12,
                 'data': trade_index
             })
 
-            # P/L Label
+            # P/L Label (mit etwas Offset in X-Richtung)
+            time_offset = (self.timestamps[1] - self.timestamps[0]) if len(self.timestamps) > 1 else 3600
             pnl_text = f'+${pnl:.0f}' if pnl > 0 else f'-${abs(pnl):.0f}'
             label = pg.TextItem(text=pnl_text, color=line_color, anchor=(0, 0.5))
-            label.setPos(exit_idx + 1, exit_price)
+            label.setPos(exit_ts + time_offset, exit_price)
             self.trade_plot.addItem(label)
             self.trade_labels.append(label)
 
@@ -551,8 +659,11 @@ class ChartPanel(QWidget):
                 curr_idx = min(current_index - 1, len(self.data) - 1)
                 curr_price = self.data['Close'].iloc[curr_idx]
 
+                entry_ts = self.timestamps[entry_idx]
+                curr_ts = self.timestamps[curr_idx]
+
                 line = self.trade_plot.plot(
-                    [entry_idx, curr_idx], [entry_price, curr_price],
+                    [entry_ts, curr_ts], [entry_price, curr_price],
                     pen=pg.mkPen(color='#e6b333', width=2, style=Qt.PenStyle.DashLine)
                 )
                 self.trade_lines.append(line)
@@ -560,10 +671,10 @@ class ChartPanel(QWidget):
                 open_color = '#33cc33' if position == 'LONG' else '#cc3333'
                 open_symbol = 't' if position == 'LONG' else 't1'
                 entry_spots.append({
-                    'pos': (entry_idx, entry_price),
+                    'pos': (entry_ts, entry_price),
                     'brush': pg.mkBrush(open_color),
                     'symbol': open_symbol,
-                    'size': 12,
+                    'size': 14,
                     'data': -1
                 })
 
@@ -585,6 +696,30 @@ class ChartPanel(QWidget):
         else:
             self.trade_nav_label.setText("Trade 0/0")
 
+    def _extract_timestamps(self) -> np.ndarray:
+        """Extrahiert Unix-Timestamps aus dem DataFrame."""
+        if self.data is None:
+            return np.array([])
+
+        # Versuche DateTime aus Index
+        try:
+            if hasattr(self.data.index, 'to_pydatetime'):
+                # DatetimeIndex
+                return np.array([dt.timestamp() for dt in self.data.index.to_pydatetime()])
+        except:
+            pass
+
+        # Versuche DateTime-Spalte
+        if 'DateTime' in self.data.columns:
+            try:
+                dt_col = pd.to_datetime(self.data['DateTime'])
+                return np.array([dt.timestamp() for dt in dt_col])
+            except:
+                pass
+
+        # Fallback: Kuenstliche Timestamps (1 Stunde Abstand)
+        return np.arange(len(self.data)) * 3600
+
     def _on_scatter_clicked(self, scatter, points):
         """pyqtgraph Scatter-Click Handler."""
         if points:
@@ -597,8 +732,10 @@ class ChartPanel(QWidget):
                 self.trade_clicked.emit(trade_idx)
 
     def _goto_trade(self, trade_idx: int):
-        """Zoomt auf einen bestimmten Trade."""
+        """Zoomt auf einen bestimmten Trade (mit Timestamps)."""
         if not self.trades or trade_idx < 0 or trade_idx >= len(self.trades):
+            return
+        if self.timestamps is None or len(self.timestamps) == 0:
             return
 
         self.current_trade_view = trade_idx
@@ -610,15 +747,18 @@ class ChartPanel(QWidget):
         if entry_idx < 0 or exit_idx < 0:
             return
 
+        # Mit Timestamps arbeiten
         start = max(0, entry_idx - 12)
         end = min(len(self.data) - 1, exit_idx + 12)
 
-        self.trade_plot.setXRange(start, end, padding=0.02)
+        start_ts = self.timestamps[start]
+        end_ts = self.timestamps[end]
+        self.trade_plot.setXRange(start_ts, end_ts, padding=0.02)
 
         if start < len(self.data) and end < len(self.data):
             visible_data = self.data.iloc[start:end + 1]
-            y_min = visible_data['Close'].min() * 0.998
-            y_max = visible_data['Close'].max() * 1.002
+            y_min = visible_data['Low'].min() * 0.998
+            y_max = visible_data['High'].max() * 1.002
             self.trade_plot.setYRange(y_min, y_max, padding=0)
 
         self._update_trade_detail(trade, trade_idx)
