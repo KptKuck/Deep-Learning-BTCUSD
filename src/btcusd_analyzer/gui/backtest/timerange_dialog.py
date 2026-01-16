@@ -3,7 +3,7 @@ TimeRange Dialog - Dialog zur Auswahl eines neuen Zeitraums fuer den Backtest.
 """
 
 from typing import Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -29,7 +29,7 @@ class TimeRangeDialog(QDialog):
     """
 
     def __init__(self, parent=None, current_file: str = None,
-                 current_start: datetime = None, current_end: datetime = None):
+                 current_data: pd.DataFrame = None):
         super().__init__(parent)
         self.setWindowTitle("Zeitraum aendern")
         self.setMinimumSize(500, 400)
@@ -50,8 +50,10 @@ class TimeRangeDialog(QDialog):
         self._setup_ui()
         self.setStyleSheet(self._dialog_style())
 
-        # Wenn Datei vorhanden, laden
-        if current_file:
+        # Session-Daten als Default verwenden
+        if current_data is not None and len(current_data) > 0:
+            self._use_session_data(current_data)
+        elif current_file:
             self._load_file(current_file)
 
     def _setup_ui(self):
@@ -198,6 +200,48 @@ class TimeRangeDialog(QDialog):
         if file_path:
             self._load_file(file_path)
 
+    def _use_session_data(self, df: pd.DataFrame):
+        """Verwendet die aktuellen Session-Daten als Ausgangspunkt."""
+        self.loaded_data = df
+
+        # Datums-Bereich ermitteln
+        if hasattr(df.index, 'min') and hasattr(df.index[0], 'year'):
+            self.data_start = df.index.min().to_pydatetime()
+            self.data_end = df.index.max().to_pydatetime()
+        elif 'DateTime' in df.columns:
+            dt_col = pd.to_datetime(df['DateTime'])
+            self.data_start = dt_col.min().to_pydatetime()
+            self.data_end = dt_col.max().to_pydatetime()
+        else:
+            # Fallback
+            self.data_start = datetime(2020, 1, 1)
+            self.data_end = datetime(2020, 1, 1) + timedelta(hours=len(df))
+
+        # UI aktualisieren
+        if self.current_file:
+            self.file_label.setText(self.current_file.split('/')[-1].split('\\')[-1])
+            self.file_label.setToolTip(self.current_file)
+        else:
+            self.file_label.setText("Session-Daten (kein Dateipfad)")
+
+        # DateTimeEdit-Bereich setzen
+        self.start_edit.setDateTimeRange(
+            QDateTime(self.data_start),
+            QDateTime(self.data_end)
+        )
+        self.end_edit.setDateTimeRange(
+            QDateTime(self.data_start),
+            QDateTime(self.data_end)
+        )
+
+        # Auf aktuellen Zeitraum setzen (gesamte Session)
+        self.start_edit.setDateTime(QDateTime(self.data_start))
+        self.end_edit.setDateTime(QDateTime(self.data_end))
+
+        # Info aktualisieren
+        self._update_info()
+        self.apply_btn.setEnabled(True)
+
     def _load_file(self, file_path: str):
         """Laedt eine CSV-Datei und aktualisiert die UI."""
         try:
@@ -224,7 +268,7 @@ class TimeRangeDialog(QDialog):
             else:
                 # Fallback: Index als Datenpunkte
                 self.data_start = datetime(2020, 1, 1)
-                self.data_end = datetime(2020, 1, 1) + pd.Timedelta(hours=len(df))
+                self.data_end = datetime(2020, 1, 1) + timedelta(hours=len(df))
 
             # UI aktualisieren
             self.file_label.setText(file_path.split('/')[-1].split('\\')[-1])
@@ -257,31 +301,35 @@ class TimeRangeDialog(QDialog):
 
     def _on_preset_changed(self, index: int):
         """Handler fuer Schnellauswahl-Aenderungen."""
-        if self.loaded_data is None or self.data_start is None:
+        if self.loaded_data is None or self.data_start is None or self.data_end is None:
             return
 
-        total_range = self.data_end - self.data_start
+        total_seconds = (self.data_end - self.data_start).total_seconds()
 
         if index == 0:  # Gesamter Zeitraum
             start = self.data_start
             end = self.data_end
         elif index == 1:  # Letzte Woche
             end = self.data_end
-            start = max(self.data_start, end - pd.Timedelta(days=7))
+            candidate = end - timedelta(days=7)
+            start = max(self.data_start, candidate)
         elif index == 2:  # Letzter Monat
             end = self.data_end
-            start = max(self.data_start, end - pd.Timedelta(days=30))
+            candidate = end - timedelta(days=30)
+            start = max(self.data_start, candidate)
         elif index == 3:  # Letzte 3 Monate
             end = self.data_end
-            start = max(self.data_start, end - pd.Timedelta(days=90))
+            candidate = end - timedelta(days=90)
+            start = max(self.data_start, candidate)
         elif index == 4:  # Letztes Jahr
             end = self.data_end
-            start = max(self.data_start, end - pd.Timedelta(days=365))
+            candidate = end - timedelta(days=365)
+            start = max(self.data_start, candidate)
         elif index == 5:  # Erste Haelfte
             start = self.data_start
-            end = self.data_start + total_range / 2
+            end = self.data_start + timedelta(seconds=total_seconds / 2)
         elif index == 6:  # Zweite Haelfte
-            start = self.data_start + total_range / 2
+            start = self.data_start + timedelta(seconds=total_seconds / 2)
             end = self.data_end
         else:
             return

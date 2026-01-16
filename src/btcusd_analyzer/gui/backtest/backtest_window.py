@@ -720,10 +720,11 @@ class BacktestWindow(QMainWindow):
             self._log("Kein Modell geladen - Zeitraum aendern nicht moeglich", 'WARNING')
             return
 
-        # Dialog oeffnen
+        # Dialog oeffnen mit aktuellen Session-Daten
         dialog = TimeRangeDialog(
             self,
-            current_file=self.current_data_file
+            current_file=self.current_data_file,
+            current_data=self.data
         )
 
         if dialog.exec():
