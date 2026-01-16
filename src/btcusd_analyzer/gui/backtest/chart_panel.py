@@ -120,6 +120,9 @@ class ChartPanel(QWidget):
         self.trade_lines = []
         self.trade_labels = []
 
+        # Chart-Modus: 'candle' oder 'line'
+        self.chart_mode = 'candle'
+
         self._setup_ui()
 
     def _setup_ui(self):
@@ -215,6 +218,10 @@ class ChartPanel(QWidget):
         self.candlestick_item = CandlestickItem()
         self.trade_plot.addItem(self.candlestick_item)
 
+        # Linienchart-Item (alternativ zu Kerzen)
+        self.trade_price_line = self.trade_plot.plot([], [], pen=pg.mkPen(color='#6699cc', width=1.5))
+        self.trade_price_line.setVisible(False)  # Initial unsichtbar
+
         # Timestamp-Array fuer Koordinaten-Umrechnung
         self.timestamps: np.ndarray = None
 
@@ -236,11 +243,18 @@ class ChartPanel(QWidget):
         layout.addWidget(self.trade_chart_title)
         layout.addWidget(self.trade_plot, stretch=1)
 
-        # Trade-Navigation
+        # Trade-Navigation mit Chart-Modus-Toggle
         nav_widget = QWidget()
         nav_layout = QHBoxLayout(nav_widget)
         nav_layout.setContentsMargins(5, 2, 5, 2)
         nav_layout.setSpacing(10)
+
+        # Chart-Modus Toggle
+        self.btn_chart_mode = QPushButton("Linie")
+        self.btn_chart_mode.setStyleSheet(self._toggle_button_style(False))
+        self.btn_chart_mode.setFixedWidth(70)
+        self.btn_chart_mode.setToolTip("Zwischen Kerzen- und Linienchart wechseln")
+        self.btn_chart_mode.clicked.connect(self._toggle_chart_mode)
 
         self.btn_prev_trade = QPushButton("<< Vorheriger")
         self.btn_prev_trade.setStyleSheet(self._nav_button_style())
@@ -254,6 +268,7 @@ class ChartPanel(QWidget):
         self.btn_next_trade.setStyleSheet(self._nav_button_style())
         self.btn_next_trade.clicked.connect(self._next_trade)
 
+        nav_layout.addWidget(self.btn_chart_mode)
         nav_layout.addStretch()
         nav_layout.addWidget(self.btn_prev_trade)
         nav_layout.addWidget(self.trade_nav_label)
@@ -575,15 +590,20 @@ class ChartPanel(QWidget):
         # Timestamps aus DataFrame extrahieren
         self.timestamps = self._extract_timestamps()
 
-        # Kerzendaten erstellen: [timestamp, open, high, low, close]
-        candle_data = np.column_stack([
-            self.timestamps,
-            self.data['Open'].values,
-            self.data['High'].values,
-            self.data['Low'].values,
-            self.data['Close'].values
-        ])
-        self.candlestick_item.setData(candle_data)
+        # Chart-Daten aktualisieren je nach Modus
+        if self.chart_mode == 'candle':
+            # Kerzendaten erstellen: [timestamp, open, high, low, close]
+            candle_data = np.column_stack([
+                self.timestamps,
+                self.data['Open'].values,
+                self.data['High'].values,
+                self.data['Low'].values,
+                self.data['Close'].values
+            ])
+            self.candlestick_item.setData(candle_data)
+        else:
+            # Liniendaten aktualisieren (Close-Preis)
+            self.trade_price_line.setData(self.timestamps, self.data['Close'].values)
 
         # Trade-Marker sammeln
         entry_spots = []
@@ -888,3 +908,58 @@ class ChartPanel(QWidget):
             QPushButton:hover { background-color: #4a4a4a; color: white; }
             QPushButton:pressed { background-color: #2a2a2a; }
         '''
+
+    def _toggle_button_style(self, active: bool) -> str:
+        """Gibt das Toggle-Button-Stylesheet zurueck."""
+        if active:
+            return '''
+                QPushButton { background-color: #4da8da; color: white; border: 1px solid #5bc0eb;
+                             border-radius: 3px; padding: 5px 10px; font-size: 11px; font-weight: bold; }
+                QPushButton:hover { background-color: #5bc0eb; }
+            '''
+        else:
+            return '''
+                QPushButton { background-color: #3a3a3a; color: #aaa; border: 1px solid #555;
+                             border-radius: 3px; padding: 5px 10px; font-size: 11px; }
+                QPushButton:hover { background-color: #4a4a4a; color: white; }
+            '''
+
+    def _toggle_chart_mode(self):
+        """Wechselt zwischen Kerzen- und Linienchart."""
+        if self.chart_mode == 'candle':
+            self.chart_mode = 'line'
+            self.btn_chart_mode.setText("Kerzen")
+            self.btn_chart_mode.setStyleSheet(self._toggle_button_style(True))
+            # Kerzen ausblenden, Linie einblenden
+            self.candlestick_item.setVisible(False)
+            self.trade_price_line.setVisible(True)
+        else:
+            self.chart_mode = 'candle'
+            self.btn_chart_mode.setText("Linie")
+            self.btn_chart_mode.setStyleSheet(self._toggle_button_style(False))
+            # Linie ausblenden, Kerzen einblenden
+            self.trade_price_line.setVisible(False)
+            self.candlestick_item.setVisible(True)
+
+        # Chart neu zeichnen wenn Daten vorhanden
+        if self.data is not None and self.timestamps is not None:
+            self._refresh_chart_data()
+
+    def _refresh_chart_data(self):
+        """Aktualisiert die Chart-Daten basierend auf dem aktuellen Modus."""
+        if self.data is None or self.timestamps is None:
+            return
+
+        if self.chart_mode == 'candle':
+            # Kerzendaten aktualisieren
+            candle_data = np.column_stack([
+                self.timestamps,
+                self.data['Open'].values,
+                self.data['High'].values,
+                self.data['Low'].values,
+                self.data['Close'].values
+            ])
+            self.candlestick_item.setData(candle_data)
+        else:
+            # Liniendaten aktualisieren (Close-Preis)
+            self.trade_price_line.setData(self.timestamps, self.data['Close'].values)
