@@ -230,7 +230,7 @@ class AutoTrainer:
     def run(
         self,
         complexity: int = 3,
-        progress_callback: Optional[Callable[[int, int, str, float], None]] = None,
+        progress_callback: Optional[Callable[[int, int, str, Dict[str, float]], None]] = None,
         learning_rate: float = 0.001
     ) -> List[AutoTrainResult]:
         """
@@ -238,7 +238,8 @@ class AutoTrainer:
 
         Args:
             complexity: Komplexitaetsstufe 1-5
-            progress_callback: Callback(current, total, model_name, progress)
+            progress_callback: Callback(current, total, model_name, metrics_dict)
+                               metrics_dict: {'progress': 0-1, 'train_loss', 'train_acc', 'val_loss', 'val_acc'}
             learning_rate: Basis-Lernrate
 
         Returns:
@@ -265,9 +266,22 @@ class AutoTrainer:
 
             # Progress Update
             if progress_callback:
-                progress_callback(i, total, model_type, 0.0)
+                progress_callback(i, total, model_type, {'progress': 0.0})
 
             self.logger.info(f'[{i+1}/{total}] Training: {model_type} - {params}')
+
+            # Erstelle epoch_callback der Metriken weitergibt
+            def make_epoch_callback(model_idx, model_name):
+                def callback(e, ep, tl, ta, vl, va):
+                    if progress_callback:
+                        progress_callback(model_idx, total, model_name, {
+                            'progress': e / ep,
+                            'train_loss': tl,
+                            'train_acc': ta,
+                            'val_loss': vl,
+                            'val_acc': va
+                        })
+                return callback
 
             try:
                 result = self._train_single(
@@ -276,7 +290,7 @@ class AutoTrainer:
                     max_epochs=config['max_epochs'],
                     patience=config['patience'],
                     learning_rate=learning_rate,
-                    epoch_callback=lambda e, ep: progress_callback(i, total, model_type, e / ep) if progress_callback else None
+                    epoch_callback=make_epoch_callback(i, model_type)
                 )
                 self.results.append(result)
 
@@ -305,7 +319,7 @@ class AutoTrainer:
         max_epochs: int,
         patience: int,
         learning_rate: float,
-        epoch_callback: Optional[Callable[[int, int], None]] = None
+        epoch_callback: Optional[Callable[[int, int, float, float, float, float], None]] = None
     ) -> AutoTrainResult:
         """
         Trainiert ein einzelnes Modell.
@@ -316,7 +330,7 @@ class AutoTrainer:
             max_epochs: Maximale Epochen
             patience: Early Stopping Patience
             learning_rate: Lernrate
-            epoch_callback: Callback(epoch, max_epochs)
+            epoch_callback: Callback(epoch, max_epochs, train_loss, train_acc, val_loss, val_acc)
 
         Returns:
             AutoTrainResult
@@ -438,9 +452,9 @@ class AutoTrainer:
             if epochs_without_improvement >= patience:
                 break
 
-            # Epoch Callback
+            # Epoch Callback mit Metriken
             if epoch_callback:
-                epoch_callback(epoch, max_epochs)
+                epoch_callback(epoch, max_epochs, train_loss, train_acc, val_loss, val_acc)
 
         # Metriken berechnen
         f1 = f1_score(all_labels, all_preds, average='weighted', zero_division=0)

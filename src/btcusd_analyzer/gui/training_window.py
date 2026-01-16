@@ -1769,10 +1769,18 @@ class TrainingWindow(QMainWindow):
             )
 
             # Progress Callback
-            def progress_callback(current, total, model_name, progress):
+            def progress_callback(current, total, model_name, metrics):
                 self.epoch_label.setText(f"Modell: {current+1}/{total} - {model_name}")
-                self.progress_bar.setMaximum(total)
-                self.progress_bar.setValue(current)
+                self.progress_bar.setMaximum(100)
+                self.progress_bar.setValue(int(((current + metrics.get('progress', 0)) / total) * 100))
+
+                # Metriken anzeigen
+                if 'train_loss' in metrics:
+                    self.train_loss_label.setText(f"Train Loss: {metrics['train_loss']:.4f}")
+                    self.train_acc_label.setText(f"Train Acc: {metrics['train_acc']:.2%}")
+                    self.val_loss_label.setText(f"Val Loss: {metrics['val_loss']:.4f}")
+                    self.val_acc_label.setText(f"Val Acc: {metrics['val_acc']:.2%}")
+
                 QApplication.processEvents()
 
                 if self._stop_requested:
