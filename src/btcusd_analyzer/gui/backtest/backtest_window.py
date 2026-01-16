@@ -187,8 +187,8 @@ class BacktestWindow(QMainWindow):
         self._debug(f"_prepare_sequences(lookback={lookback}) gestartet")
         try:
             import torch
-            from ..data.processor import FeatureProcessor
-            from ..training.normalizer import ZScoreNormalizer
+            from ...data.processor import FeatureProcessor
+            from ...training.normalizer import ZScoreNormalizer
 
             features = self.model_info.get('features', ['Open', 'High', 'Low', 'Close', 'PriceChange', 'PriceChangePct'])
             self._log(f"Features aus Training: {features}")
