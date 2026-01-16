@@ -71,10 +71,9 @@ class VisualizationPanel(QWidget):
             self.ax_loss = self.figure.add_subplot(211)
             self.ax_acc = self.figure.add_subplot(212)
 
+            self._has_matplotlib = True
             self._setup_plot_style()
             layout.addWidget(self.canvas)
-
-            self._has_matplotlib = True
 
         except ImportError:
             layout.addWidget(QLabel("matplotlib nicht installiert - pip install matplotlib"))

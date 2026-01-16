@@ -404,6 +404,17 @@ class TrainingWindow(QMainWindow):
             'epochs_trained': epoch,
             'best_accuracy': round(best_val_acc, 2),
             'final_val_loss': round(avg_val_loss, 4),
+            # Modellspezifische Parameter aus config uebernehmen
+            'hidden_sizes': config.get('hidden_sizes'),
+            'dropout': config.get('dropout'),
+            'use_layer_norm': config.get('use_layer_norm', False),
+            'use_attention': config.get('use_attention', False),
+            'use_residual': config.get('use_residual', False),
+            # Transformer-spezifische Parameter
+            'd_model': config.get('d_model'),
+            'nhead': config.get('nhead'),
+            'num_encoder_layers': config.get('num_encoder_layers'),
+            'dim_feedforward': config.get('dim_feedforward'),
         }
 
         self.model.save(final_path, metrics={'best_accuracy': best_val_acc}, model_info=model_info)

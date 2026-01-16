@@ -451,8 +451,8 @@ class PrepareDataWindow(QMainWindow):
             pivot_lookback=self.pivot_lookback_spin.value(),
         )
 
-        # Worker starten
-        self._peak_worker = PeakFinderWorker(self.data, config, self)
+        # Worker starten - DataFrame kopieren um Thread-Safety zu gewaehrleisten
+        self._peak_worker = PeakFinderWorker(self.data.copy(), config, self)
         self._peak_worker.progress.connect(self._on_peak_progress)
         self._peak_worker.result_ready.connect(self._on_peaks_found)
         self._peak_worker.error.connect(self._on_peak_error)
@@ -464,6 +464,8 @@ class PrepareDataWindow(QMainWindow):
 
     def _on_peaks_found(self, result: dict):
         """Callback wenn Peaks gefunden wurden."""
+        self._log('[_on_peaks_found] Start', 'DEBUG')
+
         # Worker-Referenz freigeben
         self._peak_worker = None
         self.find_peaks_btn.setEnabled(True)
@@ -477,6 +479,7 @@ class PrepareDataWindow(QMainWindow):
 
         num_buy = len(self.detected_peaks['buy_indices'])
         num_sell = len(self.detected_peaks['sell_indices'])
+        self._log(f'[_on_peaks_found] Peaks: {num_buy} BUY, {num_sell} SELL', 'DEBUG')
 
         # Status aktualisieren
         self.peaks_valid = True
@@ -488,6 +491,7 @@ class PrepareDataWindow(QMainWindow):
         self.peaks_status.setStyleSheet('color: #33b34d;')
 
         # Chart aktualisieren
+        self._log('[_on_peaks_found] Chart update...', 'DEBUG')
         close_col = 'Close' if 'Close' in self.data.columns else 'close'
         prices = self.data[close_col].values
         self.peaks_chart.update_price_chart(
@@ -496,9 +500,12 @@ class PrepareDataWindow(QMainWindow):
             self.detected_peaks['sell_indices'],
             'Erkannte Peaks'
         )
+        self._log('[_on_peaks_found] Chart update done', 'DEBUG')
 
         # Tabs aktualisieren
+        self._log('[_on_peaks_found] Tab update...', 'DEBUG')
         self._update_tab_status()
+        self._log('[_on_peaks_found] Tab update done', 'DEBUG')
 
         self._log(f'Peaks gefunden: {num_buy} BUY, {num_sell} SELL', 'SUCCESS')
 

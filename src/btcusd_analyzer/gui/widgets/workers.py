@@ -15,7 +15,7 @@ class PeakFinderWorker(QThread):
     progress = pyqtSignal(str)   # Status-Meldung
     error = pyqtSignal(str)      # Fehlermeldung
 
-    def __init__(self, data: pd.DataFrame, config: dict, parent=None):
+    def __init__(self, data: pd.DataFrame, config, parent=None):
         super().__init__(parent)
         self.data = data
         self.config = config

@@ -177,7 +177,7 @@ class ModelFactory:
             )
 
         # Transformer (PyTorch nativ)
-        elif model_name in ['transformer']:
+        elif model_name in ['transformer', 'transformerclassifier']:
             return TransformerClassifier(
                 input_size=input_size,
                 d_model=d_model,
