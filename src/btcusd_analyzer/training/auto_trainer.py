@@ -44,6 +44,10 @@ class AutoTrainResult:
     best_epoch: int = 0
     model_state: Optional[Dict] = None
     num_parameters: int = 0
+    # Trainingsverlauf pro Epoche
+    training_history: Dict[str, List[float]] = field(default_factory=lambda: {
+        'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': [], 'lr': []
+    })
 
 
 # Auto-Trainer Konfigurationen nach Komplexitaet
@@ -378,6 +382,12 @@ class AutoTrainer:
         val_loss = 0.0
         val_acc = 0.0
 
+        # Trainingsverlauf speichern
+        history = {
+            'train_loss': [], 'train_acc': [],
+            'val_loss': [], 'val_acc': [], 'lr': []
+        }
+
         for epoch in range(1, max_epochs + 1):
             if self._stop_requested:
                 break
@@ -438,7 +448,15 @@ class AutoTrainer:
             val_acc = correct / total
 
             # LR Scheduler Step
+            current_lr = optimizer.param_groups[0]['lr']
             scheduler.step(val_acc)
+
+            # Trainingsverlauf speichern
+            history['train_loss'].append(train_loss)
+            history['train_acc'].append(train_acc)
+            history['val_loss'].append(val_loss)
+            history['val_acc'].append(val_acc)
+            history['lr'].append(current_lr)
 
             # Early Stopping Check
             if val_acc > best_val_acc:
@@ -482,7 +500,8 @@ class AutoTrainer:
             training_time=training_time,
             best_epoch=best_epoch,
             model_state=best_state,
-            num_parameters=num_params
+            num_parameters=num_params,
+            training_history=history
         )
 
     def get_best_model(self) -> Tuple[nn.Module, Dict[str, Any]]:

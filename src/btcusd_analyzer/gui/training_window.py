@@ -1598,7 +1598,14 @@ class TrainingWindow(QMainWindow):
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
-        # Ergebnis-Tabelle
+        # Splitter fuer Tabelle links und Detail rechts
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Linke Seite: Ergebnis-Tabelle
+        table_widget = QWidget()
+        table_layout = QVBoxLayout(table_widget)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+
         self.auto_results_table = QTableWidget()
         self.auto_results_table.setColumnCount(8)
         self.auto_results_table.setHorizontalHeaderLabels([
@@ -1606,7 +1613,80 @@ class TrainingWindow(QMainWindow):
         ])
         self.auto_results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.auto_results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        layout.addWidget(self.auto_results_table)
+        self.auto_results_table.itemSelectionChanged.connect(self._on_auto_result_selected)
+        table_layout.addWidget(self.auto_results_table)
+
+        splitter.addWidget(table_widget)
+
+        # Rechte Seite: Trainingsverlauf Detail
+        detail_widget = QWidget()
+        detail_layout = QVBoxLayout(detail_widget)
+        detail_layout.setContentsMargins(5, 0, 0, 0)
+
+        # Header
+        detail_header = QLabel("Trainingsverlauf")
+        detail_header.setStyleSheet("font-weight: bold; font-size: 12px;")
+        detail_layout.addWidget(detail_header)
+
+        # Modell-Info
+        self.detail_model_label = QLabel("Modell: -")
+        detail_layout.addWidget(self.detail_model_label)
+
+        self.detail_config_label = QLabel("Config: -")
+        detail_layout.addWidget(self.detail_config_label)
+
+        # Metriken
+        metrics_group = QGroupBox("Metriken")
+        metrics_layout = QGridLayout(metrics_group)
+
+        metrics_layout.addWidget(QLabel("Best Epoch:"), 0, 0)
+        self.detail_best_epoch_label = QLabel("-")
+        metrics_layout.addWidget(self.detail_best_epoch_label, 0, 1)
+
+        metrics_layout.addWidget(QLabel("Trainingszeit:"), 1, 0)
+        self.detail_time_label = QLabel("-")
+        metrics_layout.addWidget(self.detail_time_label, 1, 1)
+
+        metrics_layout.addWidget(QLabel("F1-Score:"), 2, 0)
+        self.detail_f1_label = QLabel("-")
+        metrics_layout.addWidget(self.detail_f1_label, 2, 1)
+
+        detail_layout.addWidget(metrics_group)
+
+        # Trainingsverlauf Chart (als Text-Tabelle)
+        history_group = QGroupBox("Verlauf pro Epoche")
+        history_layout = QVBoxLayout(history_group)
+
+        self.history_table = QTableWidget()
+        self.history_table.setColumnCount(5)
+        self.history_table.setHorizontalHeaderLabels(['Epoche', 'Train Loss', 'Train Acc', 'Val Loss', 'Val Acc'])
+        self.history_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.history_table.setMaximumHeight(200)
+        history_layout.addWidget(self.history_table)
+
+        detail_layout.addWidget(history_group)
+
+        # Precision/Recall pro Klasse
+        class_group = QGroupBox("Precision/Recall pro Klasse")
+        class_layout = QVBoxLayout(class_group)
+
+        self.class_metrics_table = QTableWidget()
+        self.class_metrics_table.setColumnCount(3)
+        self.class_metrics_table.setHorizontalHeaderLabels(['Klasse', 'Precision', 'Recall'])
+        self.class_metrics_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.class_metrics_table.setMaximumHeight(100)
+        class_layout.addWidget(self.class_metrics_table)
+
+        detail_layout.addWidget(class_group)
+
+        detail_layout.addStretch()
+
+        splitter.addWidget(detail_widget)
+
+        # Splitter-Verhaeltnis (60% Tabelle, 40% Detail)
+        splitter.setSizes([600, 400])
+
+        layout.addWidget(splitter)
 
         # Buttons
         btn_layout = QHBoxLayout()
@@ -1623,6 +1703,59 @@ class TrainingWindow(QMainWindow):
         layout.addLayout(btn_layout)
 
         return widget
+
+    def _on_auto_result_selected(self):
+        """Zeigt Details zum ausgewaehlten Auto-Training Ergebnis."""
+        if not hasattr(self, 'auto_trainer') or not self.auto_trainer.results:
+            return
+
+        selected = self.auto_results_table.selectedItems()
+        if not selected:
+            return
+
+        row = selected[0].row()
+        if row >= len(self.auto_trainer.results):
+            return
+
+        result = self.auto_trainer.results[row]
+
+        # Modell-Info aktualisieren
+        self.detail_model_label.setText(f"Modell: {result.model_type}")
+
+        if 'hidden_sizes' in result.config:
+            config_str = f"hidden_sizes: {result.config['hidden_sizes']}"
+        elif 'd_model' in result.config:
+            config_str = f"d_model: {result.config.get('d_model')}, nhead: {result.config.get('nhead', 4)}"
+        else:
+            config_str = str(result.config)
+        self.detail_config_label.setText(f"Config: {config_str}")
+
+        # Metriken
+        self.detail_best_epoch_label.setText(f"{result.best_epoch}")
+        self.detail_time_label.setText(f"{result.training_time:.1f}s")
+        self.detail_f1_label.setText(f"{result.f1_score:.4f}")
+
+        # Trainingsverlauf
+        history = result.training_history
+        self.history_table.setRowCount(len(history.get('train_loss', [])))
+
+        for i in range(len(history.get('train_loss', []))):
+            self.history_table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
+            self.history_table.setItem(i, 1, QTableWidgetItem(f"{history['train_loss'][i]:.4f}"))
+            self.history_table.setItem(i, 2, QTableWidgetItem(f"{history['train_acc'][i]:.2%}"))
+            self.history_table.setItem(i, 3, QTableWidgetItem(f"{history['val_loss'][i]:.4f}"))
+            self.history_table.setItem(i, 4, QTableWidgetItem(f"{history['val_acc'][i]:.2%}"))
+
+        # Ans Ende scrollen (beste Epochen sind meist am Ende)
+        self.history_table.scrollToBottom()
+
+        # Precision/Recall pro Klasse
+        self.class_metrics_table.setRowCount(len(result.precision))
+        for i, (class_name, prec) in enumerate(result.precision.items()):
+            rec = result.recall.get(class_name, 0.0)
+            self.class_metrics_table.setItem(i, 0, QTableWidgetItem(class_name))
+            self.class_metrics_table.setItem(i, 1, QTableWidgetItem(f"{prec:.4f}"))
+            self.class_metrics_table.setItem(i, 2, QTableWidgetItem(f"{rec:.4f}"))
 
     def _on_model_changed(self, model_name: str):
         """Aktualisiert UI basierend auf Modell-Auswahl."""
