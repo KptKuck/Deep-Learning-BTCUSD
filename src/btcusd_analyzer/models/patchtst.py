@@ -99,7 +99,6 @@ class PatchTSTClassifier(BaseModel):
         self.patch_length = patch_length
         self.stride = stride
         self.d_model = d_model
-        self.num_attention_heads = num_attention_heads
         self.num_hidden_layers = num_hidden_layers
         self.ffn_dim = ffn_dim
         self.dropout_rate = dropout
@@ -108,6 +107,12 @@ class PatchTSTClassifier(BaseModel):
         self.channel_attention = channel_attention
         self.use_cls_token = use_cls_token
 
+        # Attention Heads anpassen: d_model muss durch num_heads teilbar sein
+        actual_heads = num_attention_heads
+        while d_model % actual_heads != 0 and actual_heads > 1:
+            actual_heads -= 1
+        self.num_attention_heads = actual_heads
+
         # PatchTST Konfiguration
         self.config = PatchTSTConfig(
             num_input_channels=input_size,
@@ -115,7 +120,7 @@ class PatchTSTClassifier(BaseModel):
             patch_length=patch_length,
             patch_stride=stride,
             d_model=d_model,
-            num_attention_heads=num_attention_heads,
+            num_attention_heads=actual_heads,
             num_hidden_layers=num_hidden_layers,
             ffn_dim=ffn_dim,
             dropout=dropout,
