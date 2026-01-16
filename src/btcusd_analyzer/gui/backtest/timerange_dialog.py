@@ -42,6 +42,10 @@ class TimeRangeDialog(QDialog):
         self.data_start: Optional[datetime] = None
         self.data_end: Optional[datetime] = None
 
+        # Session-Zeitraum (fuer Vorauswahl)
+        self.session_start: Optional[datetime] = None
+        self.session_end: Optional[datetime] = None
+
         # Ergebnis
         self.result_data: Optional[pd.DataFrame] = None
         self.result_start: Optional[datetime] = None
@@ -50,11 +54,16 @@ class TimeRangeDialog(QDialog):
         self._setup_ui()
         self.setStyleSheet(self._dialog_style())
 
-        # Session-Daten als Default verwenden
-        if current_data is not None and len(current_data) > 0:
-            self._use_session_data(current_data)
-        elif current_file:
+        # Datei laden (wenn vorhanden) und Session-Zeitraum als Vorauswahl setzen
+        if current_file:
+            # Session-Zeitraum ermitteln fuer Vorauswahl
+            if current_data is not None and len(current_data) > 0:
+                self._extract_session_range(current_data)
+            # Datei laden fuer volle Datengrenzen
             self._load_file(current_file)
+        elif current_data is not None and len(current_data) > 0:
+            # Nur Session-Daten ohne Datei
+            self._use_session_data(current_data)
 
     def _setup_ui(self):
         """Erstellt die UI-Komponenten."""
@@ -198,7 +207,20 @@ class TimeRangeDialog(QDialog):
             "CSV-Dateien (*.csv);;Alle Dateien (*.*)"
         )
         if file_path:
+            # Bei neuer Datei Session-Zeitraum zuruecksetzen
+            self.session_start = None
+            self.session_end = None
             self._load_file(file_path)
+
+    def _extract_session_range(self, df: pd.DataFrame):
+        """Extrahiert den Zeitraum aus den Session-Daten fuer Vorauswahl."""
+        if hasattr(df.index, 'min') and hasattr(df.index[0], 'year'):
+            self.session_start = df.index.min().to_pydatetime()
+            self.session_end = df.index.max().to_pydatetime()
+        elif 'DateTime' in df.columns:
+            dt_col = pd.to_datetime(df['DateTime'])
+            self.session_start = dt_col.min().to_pydatetime()
+            self.session_end = dt_col.max().to_pydatetime()
 
     def _use_session_data(self, df: pd.DataFrame):
         """Verwendet die aktuellen Session-Daten als Ausgangspunkt."""
@@ -224,17 +246,8 @@ class TimeRangeDialog(QDialog):
         else:
             self.file_label.setText("Session-Daten (kein Dateipfad)")
 
-        # DateTimeEdit-Bereich setzen
-        self.start_edit.setDateTimeRange(
-            QDateTime(self.data_start),
-            QDateTime(self.data_end)
-        )
-        self.end_edit.setDateTimeRange(
-            QDateTime(self.data_start),
-            QDateTime(self.data_end)
-        )
-
         # Auf aktuellen Zeitraum setzen (gesamte Session)
+        # Keine Limits - Zeitraum ist frei waehlbar
         self.start_edit.setDateTime(QDateTime(self.data_start))
         self.end_edit.setDateTime(QDateTime(self.data_end))
 
@@ -274,19 +287,14 @@ class TimeRangeDialog(QDialog):
             self.file_label.setText(file_path.split('/')[-1].split('\\')[-1])
             self.file_label.setToolTip(file_path)
 
-            # DateTimeEdit-Bereich setzen
-            self.start_edit.setDateTimeRange(
-                QDateTime(self.data_start),
-                QDateTime(self.data_end)
-            )
-            self.end_edit.setDateTimeRange(
-                QDateTime(self.data_start),
-                QDateTime(self.data_end)
-            )
-
-            # Auf gesamten Zeitraum setzen
-            self.start_edit.setDateTime(QDateTime(self.data_start))
-            self.end_edit.setDateTime(QDateTime(self.data_end))
+            # Keine DateTimeEdit-Limits - Zeitraum ist frei waehlbar
+            # Vorauswahl: Session-Zeitraum falls vorhanden, sonst gesamter Datei-Zeitraum
+            if self.session_start is not None and self.session_end is not None:
+                self.start_edit.setDateTime(QDateTime(self.session_start))
+                self.end_edit.setDateTime(QDateTime(self.session_end))
+            else:
+                self.start_edit.setDateTime(QDateTime(self.data_start))
+                self.end_edit.setDateTime(QDateTime(self.data_end))
 
             # Info aktualisieren
             self._update_info()
@@ -387,13 +395,56 @@ class TimeRangeDialog(QDialog):
 
     def _apply(self):
         """Wendet die Auswahl an."""
-        if self.loaded_data is None:
-            return
-
         start_dt = self.start_edit.dateTime().toPyDateTime()
         end_dt = self.end_edit.dateTime().toPyDateTime()
 
+        print(f"[TimeRange] Ausgewaehlter Zeitraum: {start_dt} - {end_dt}")
+        print(f"[TimeRange] Daten-Grenzen: {self.data_start} - {self.data_end}")
+        print(f"[TimeRange] Geladene Daten: {len(self.loaded_data) if self.loaded_data is not None else 'None'}")
+
+        # Validierung: Ende muss nach Start sein
+        if end_dt <= start_dt:
+            QMessageBox.warning(self, "Fehler", "Ende muss nach Start liegen.")
+            return
+
+        # Pruefen ob Zeitraum ausserhalb der geladenen Daten liegt
+        needs_reload = False
+        if self.loaded_data is not None and self.data_start and self.data_end:
+            if start_dt < self.data_start or end_dt > self.data_end:
+                needs_reload = True
+                print(f"[TimeRange] Nachladen erforderlich")
+
+        # Bei Bedarf Daten aus CSV nachladen
+        if needs_reload and self.selected_file:
+            try:
+                from ...data.reader import CSVReader
+                reader = CSVReader()
+                full_df = reader.read(self.selected_file)
+
+                if full_df is not None and len(full_df) > 0:
+                    self.loaded_data = full_df
+                    # Datengrenzen aktualisieren
+                    if hasattr(full_df.index, 'min') and hasattr(full_df.index[0], 'year'):
+                        self.data_start = full_df.index.min().to_pydatetime()
+                        self.data_end = full_df.index.max().to_pydatetime()
+                    elif 'DateTime' in full_df.columns:
+                        dt_col = pd.to_datetime(full_df['DateTime'])
+                        self.data_start = dt_col.min().to_pydatetime()
+                        self.data_end = dt_col.max().to_pydatetime()
+            except Exception as e:
+                QMessageBox.warning(self, "Fehler", f"Fehler beim Nachladen: {e}")
+                return
+
+        if self.loaded_data is None:
+            QMessageBox.warning(self, "Fehler", "Keine Daten verfuegbar.")
+            return
+
         filtered = self._filter_data(start_dt, end_dt)
+        print(f"[TimeRange] Gefilterte Daten: {len(filtered) if filtered is not None else 'None'}")
+        if filtered is not None and len(filtered) > 0:
+            if hasattr(filtered.index, 'min'):
+                print(f"[TimeRange] Gefilterter Bereich: {filtered.index.min()} - {filtered.index.max()}")
+
         if filtered is None or len(filtered) == 0:
             QMessageBox.warning(self, "Fehler", "Keine Daten im ausgewaehlten Zeitraum.")
             return
@@ -402,6 +453,7 @@ class TimeRangeDialog(QDialog):
         self.result_start = start_dt
         self.result_end = end_dt
 
+        print(f"[TimeRange] Ergebnis: {len(self.result_data)} Datenpunkte")
         self.accept()
 
     def get_result(self) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
