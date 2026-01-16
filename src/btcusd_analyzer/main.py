@@ -112,7 +112,7 @@ def _cli_train_model(base_dir: Path, logger):
     from btcusd_analyzer.data.processor import FeatureProcessor
     from btcusd_analyzer.training.labeler import DailyExtremaLabeler
     from btcusd_analyzer.training.sequence import SequenceGenerator
-    from btcusd_analyzer.models.bilstm import BiLSTMClassifier
+    from btcusd_analyzer.models.factory import ModelFactory
     from btcusd_analyzer.trainer.trainer import Trainer
     from btcusd_analyzer.trainer.callbacks import EarlyStopping, ModelCheckpoint
 
@@ -157,10 +157,10 @@ def _cli_train_model(base_dir: Path, logger):
     )
 
     # Modell erstellen
-    model = BiLSTMClassifier(
+    model = ModelFactory.create(
+        model_name='BiLSTM',
         input_size=config.training.input_size,
-        hidden_size=config.training.hidden_size,
-        num_layers=config.training.num_layers,
+        hidden_sizes=[config.training.hidden_size] * config.training.num_layers,
         num_classes=config.training.num_classes,
         dropout=config.training.dropout
     )

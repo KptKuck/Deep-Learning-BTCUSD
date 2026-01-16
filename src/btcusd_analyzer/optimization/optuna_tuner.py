@@ -16,7 +16,8 @@ import torch
 from torch.utils.data import DataLoader
 
 from ..core.logger import get_logger
-from ..models.base import BaseModel, ModelFactory
+from ..models.base import BaseModel
+from ..models.factory import ModelFactory
 from ..trainer.trainer import Trainer
 from ..trainer.callbacks import EarlyStopping
 

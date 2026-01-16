@@ -77,17 +77,43 @@ class ModelService:
                 self.model_info = checkpoint['model_info']
                 model_type = self.model_info.get('model_type', 'bilstm')
                 input_size = self.model_info.get('input_size', 6)
-                hidden_size = self.model_info.get('hidden_size', 100)
-                num_layers = self.model_info.get('num_layers', 2)
                 num_classes = self.model_info.get('num_classes', 3)
+                dropout = self.model_info.get('dropout', 0.3)
+
+                # hidden_sizes (neu) oder hidden_size/num_layers (alt)
+                hidden_sizes = self.model_info.get('hidden_sizes')
+                if hidden_sizes is None:
+                    hidden_size = self.model_info.get('hidden_size', 100)
+                    num_layers = self.model_info.get('num_layers', 2)
+                    hidden_sizes = [hidden_size] * num_layers
+
+                # Erweiterte Architektur-Optionen
+                use_layer_norm = self.model_info.get('use_layer_norm', False)
+                use_attention = self.model_info.get('use_attention', False)
+                use_residual = self.model_info.get('use_residual', False)
+                attention_heads = self.model_info.get('attention_heads', 4)
+
+                # Transformer-spezifische Parameter
+                d_model = self.model_info.get('d_model', 128)
+                nhead = self.model_info.get('nhead', 4)
+                num_encoder_layers = self.model_info.get('num_encoder_layers', 2)
+                dim_feedforward = self.model_info.get('dim_feedforward', 256)
 
                 # Modell erstellen und Gewichte laden
                 self.model = ModelFactory.create(
                     model_type,
                     input_size=input_size,
-                    hidden_size=hidden_size,
-                    num_layers=num_layers,
-                    num_classes=num_classes
+                    hidden_sizes=hidden_sizes,
+                    num_classes=num_classes,
+                    dropout=dropout,
+                    use_layer_norm=use_layer_norm,
+                    use_attention=use_attention,
+                    use_residual=use_residual,
+                    attention_heads=attention_heads,
+                    d_model=d_model,
+                    nhead=nhead,
+                    num_encoder_layers=num_encoder_layers,
+                    dim_feedforward=dim_feedforward
                 )
                 self.model.load_state_dict(checkpoint['model_state_dict'])
                 self.model.eval()

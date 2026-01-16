@@ -7,6 +7,12 @@ from .sequence import (
     compute_class_weights,
 )
 from .normalizer import ZScoreNormalizer
+from .auto_trainer import (
+    AutoTrainer,
+    AutoTrainResult,
+    AUTO_TRAINER_CONFIGS,
+    get_complexity_info
+)
 
 __all__ = [
     'DailyExtremaLabeler',
@@ -14,4 +20,8 @@ __all__ = [
     'ZScoreNormalizer',
     'expand_labels_lookahead',
     'compute_class_weights',
+    'AutoTrainer',
+    'AutoTrainResult',
+    'AUTO_TRAINER_CONFIGS',
+    'get_complexity_info',
 ]

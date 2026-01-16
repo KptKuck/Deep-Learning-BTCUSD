@@ -210,10 +210,22 @@ class WalkForwardConfig:
     manual_class_weights: Optional[List[float]] = None
 
     # --- Modell-Architektur (optional ueberschreiben) ---
-    hidden_size: Optional[int] = None
+    model_type: str = "BiLSTM"              # Modelltyp (BiLSTM, BiGRU, Transformer, etc.)
+    hidden_sizes: Optional[List[int]] = None  # Variable hidden_sizes pro Layer [256, 128, 64]
+    hidden_size: Optional[int] = None       # Alte API (Rueckwaertskompatibilitaet)
     num_layers: Optional[int] = None
     dropout: Optional[float] = None
     bidirectional: bool = True
+    # Erweiterte Architektur-Optionen
+    use_layer_norm: bool = False
+    use_attention: bool = False
+    use_residual: bool = False
+    attention_heads: int = 4
+    # Transformer-spezifische Parameter
+    d_model: int = 128
+    nhead: int = 4
+    num_encoder_layers: int = 2
+    dim_feedforward: int = 256
 
     # --- Regularisierung ---
     label_smoothing: float = 0.0
@@ -1006,7 +1018,7 @@ class WalkForwardEngine:
         config: WalkForwardConfig
     ) -> Tuple[nn.Module, Dict]:
         """Trainiert ein neues Modell fuer einen Split."""
-        from ..models import BiLSTMClassifier
+        from ..models import ModelFactory
 
         # Labels generieren
         labeler = DailyExtremaLabeler(
@@ -1029,14 +1041,7 @@ class WalkForwardEngine:
 
         if len(X) == 0:
             # Leeres Modell zurueckgeben
-            model = BiLSTMClassifier(
-                input_size=len(self.features),
-                hidden_size=config.hidden_size or self.model_info.get('hidden_size', 100),
-                num_layers=config.num_layers or self.model_info.get('num_layers', 2),
-                num_classes=self.num_classes,
-                dropout=config.dropout or self.model_info.get('dropout', 0.2),
-                bidirectional=config.bidirectional
-            )
+            model = self._create_model(config)
             return model, {'epochs': 0, 'best_val_acc': 0.0}
 
         # Train/Val Split
@@ -1067,14 +1072,7 @@ class WalkForwardEngine:
         )
 
         # Modell erstellen
-        model = BiLSTMClassifier(
-            input_size=len(self.features),
-            hidden_size=config.hidden_size or self.model_info.get('hidden_size', 100),
-            num_layers=config.num_layers or self.model_info.get('num_layers', 2),
-            num_classes=self.num_classes,
-            dropout=config.dropout or self.model_info.get('dropout', 0.2),
-            bidirectional=config.bidirectional
-        ).to(self.device)
+        model = self._create_model(config).to(self.device)
 
         # Optimizer
         optimizer = self._create_optimizer(model, config)
@@ -1151,6 +1149,54 @@ class WalkForwardEngine:
 
         epochs_completed = epoch + 1
         return model, {'epochs': epochs_completed, 'best_val_acc': best_val_acc}
+
+    def _create_model(self, config: WalkForwardConfig) -> nn.Module:
+        """
+        Erstellt ein Modell basierend auf der Konfiguration.
+
+        Verwendet ModelFactory fuer flexible Modell-Erstellung mit
+        Unterstuetzung fuer alle Modelltypen (BiLSTM, BiGRU, Transformer, etc.)
+        und erweiterte Architektur-Optionen.
+        """
+        from ..models import ModelFactory
+
+        # hidden_sizes ermitteln
+        if config.hidden_sizes is not None:
+            hidden_sizes = config.hidden_sizes
+        elif config.hidden_size is not None:
+            # Alte API: hidden_size mit num_layers
+            num_layers = config.num_layers or self.model_info.get('num_layers', 2)
+            hidden_sizes = [config.hidden_size] * num_layers
+        else:
+            # Aus model_info oder Default
+            hs = self.model_info.get('hidden_size', 100)
+            nl = self.model_info.get('num_layers', 2)
+            hidden_sizes = [hs] * nl
+
+        # Dropout ermitteln
+        dropout = config.dropout or self.model_info.get('dropout', 0.2)
+
+        # Modell erstellen via Factory
+        model = ModelFactory.create(
+            model_name=config.model_type,
+            input_size=len(self.features),
+            hidden_sizes=hidden_sizes,
+            num_classes=self.num_classes,
+            dropout=dropout,
+            # LSTM/GRU-spezifisch
+            bidirectional=config.bidirectional,
+            use_layer_norm=config.use_layer_norm,
+            use_attention=config.use_attention,
+            use_residual=config.use_residual,
+            attention_heads=config.attention_heads,
+            # Transformer-spezifisch
+            d_model=config.d_model,
+            nhead=config.nhead,
+            num_encoder_layers=config.num_encoder_layers,
+            dim_feedforward=config.dim_feedforward
+        )
+
+        return model
 
     def _create_optimizer(self, model: nn.Module, config: WalkForwardConfig):
         """Erstellt Optimizer basierend auf Config."""

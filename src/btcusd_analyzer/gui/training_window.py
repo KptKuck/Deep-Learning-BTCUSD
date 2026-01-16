@@ -1,5 +1,11 @@
 """
 Training Window - GUI fuer Modell-Training mit Live-Visualisierung
+
+Erweitert mit:
+- Architektur-Presets (LSTM, Transformer)
+- Variable hidden_sizes pro Layer
+- Auto-Trainer Integration
+- Erweiterte Modell-Optionen (LayerNorm, Attention, Residual)
 """
 
 from pathlib import Path
@@ -12,7 +18,7 @@ from PyQt6.QtWidgets import (
     QGroupBox, QLabel, QPushButton, QComboBox, QSpinBox, QDoubleSpinBox,
     QProgressBar, QTextEdit, QSplitter, QFileDialog, QMessageBox,
     QCheckBox, QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
-    QScrollArea
+    QScrollArea, QSlider, QLineEdit
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
@@ -21,6 +27,7 @@ import torch
 import numpy as np
 
 from .styles import get_stylesheet, COLORS
+from ..models.factory import ModelFactory, LSTM_PRESETS, TRANSFORMER_PRESETS, CNN_PRESETS
 
 
 class TrainingWorker(QThread):
@@ -306,33 +313,94 @@ class TrainingWindow(QMainWindow):
 
         model_layout.addWidget(QLabel("Architektur:"), 0, 0)
         self.model_combo = QComboBox()
-        # Nur implementierte Modelle anzeigen
-        self.model_combo.addItems([
-            'BiLSTM', 'LSTM', 'GRU', 'BiGRU', 'CNN', 'CNN-LSTM'
-        ])
+        self.model_combo.addItems(ModelFactory.get_available_models())
+        self.model_combo.currentTextChanged.connect(self._on_model_changed)
         model_layout.addWidget(self.model_combo, 0, 1)
 
-        model_layout.addWidget(QLabel("Hidden Size:"), 1, 0)
+        # Preset-Auswahl (fuer LSTM/GRU)
+        model_layout.addWidget(QLabel("Preset:"), 1, 0)
+        self.preset_combo = QComboBox()
+        self.preset_combo.addItems(list(LSTM_PRESETS.keys()))
+        self.preset_combo.currentTextChanged.connect(self._on_preset_changed)
+        model_layout.addWidget(self.preset_combo, 1, 1)
+
+        # Hidden Sizes (editierbar)
+        model_layout.addWidget(QLabel("Hidden Sizes:"), 2, 0)
+        self.hidden_sizes_edit = QLineEdit("128, 128")
+        self.hidden_sizes_edit.setToolTip("Komma-getrennte Liste: z.B. 256, 128, 64")
+        model_layout.addWidget(self.hidden_sizes_edit, 2, 1)
+
+        # Transformer-Parameter (anfangs versteckt)
+        self.d_model_label = QLabel("d_model:")
+        self.d_model_spin = QSpinBox()
+        self.d_model_spin.setRange(32, 1024)
+        self.d_model_spin.setValue(128)
+        self.d_model_spin.setSingleStep(32)
+        model_layout.addWidget(self.d_model_label, 3, 0)
+        model_layout.addWidget(self.d_model_spin, 3, 1)
+
+        self.nhead_label = QLabel("Attention Heads:")
+        self.nhead_spin = QSpinBox()
+        self.nhead_spin.setRange(1, 16)
+        self.nhead_spin.setValue(4)
+        model_layout.addWidget(self.nhead_label, 4, 0)
+        model_layout.addWidget(self.nhead_spin, 4, 1)
+
+        self.encoder_layers_label = QLabel("Encoder Layers:")
+        self.encoder_layers_spin = QSpinBox()
+        self.encoder_layers_spin.setRange(1, 12)
+        self.encoder_layers_spin.setValue(2)
+        model_layout.addWidget(self.encoder_layers_label, 5, 0)
+        model_layout.addWidget(self.encoder_layers_spin, 5, 1)
+
+        # Legacy Hidden Size (fuer CNN, CNN-LSTM)
+        model_layout.addWidget(QLabel("Hidden Size:"), 6, 0)
         self.hidden_size_spin = QSpinBox()
         self.hidden_size_spin.setRange(16, 512)
-        self.hidden_size_spin.setValue(100)
+        self.hidden_size_spin.setValue(128)
         self.hidden_size_spin.setSingleStep(16)
-        model_layout.addWidget(self.hidden_size_spin, 1, 1)
+        model_layout.addWidget(self.hidden_size_spin, 6, 1)
 
-        model_layout.addWidget(QLabel("Layers:"), 2, 0)
+        model_layout.addWidget(QLabel("Layers:"), 7, 0)
         self.num_layers_spin = QSpinBox()
         self.num_layers_spin.setRange(1, 6)
         self.num_layers_spin.setValue(2)
-        model_layout.addWidget(self.num_layers_spin, 2, 1)
+        model_layout.addWidget(self.num_layers_spin, 7, 1)
 
-        model_layout.addWidget(QLabel("Dropout:"), 3, 0)
+        model_layout.addWidget(QLabel("Dropout:"), 8, 0)
         self.dropout_spin = QDoubleSpinBox()
         self.dropout_spin.setRange(0.0, 0.8)
         self.dropout_spin.setValue(0.2)
         self.dropout_spin.setSingleStep(0.05)
-        model_layout.addWidget(self.dropout_spin, 3, 1)
+        model_layout.addWidget(self.dropout_spin, 8, 1)
 
         layout.addWidget(model_group)
+
+        # Erweiterte Optionen (LayerNorm, Attention, Residual)
+        advanced_group = QGroupBox("Erweiterte Architektur")
+        advanced_layout = QGridLayout(advanced_group)
+
+        self.use_layer_norm_check = QCheckBox("Layer Normalization")
+        self.use_layer_norm_check.setToolTip("Normalisierung nach jedem LSTM/GRU Layer")
+        advanced_layout.addWidget(self.use_layer_norm_check, 0, 0, 1, 2)
+
+        self.use_attention_check = QCheckBox("Attention")
+        self.use_attention_check.setToolTip("Self-Attention nach letztem LSTM/GRU")
+        advanced_layout.addWidget(self.use_attention_check, 1, 0)
+
+        self.attention_heads_spin = QSpinBox()
+        self.attention_heads_spin.setRange(1, 16)
+        self.attention_heads_spin.setValue(4)
+        advanced_layout.addWidget(self.attention_heads_spin, 1, 1)
+
+        self.use_residual_check = QCheckBox("Residual Connections")
+        self.use_residual_check.setToolTip("Skip-Connections zwischen Layern")
+        advanced_layout.addWidget(self.use_residual_check, 2, 0, 1, 2)
+
+        layout.addWidget(advanced_group)
+
+        # Initial UI-Status setzen
+        self._on_model_changed(self.model_combo.currentText())
 
         # Training-Parameter
         train_group = QGroupBox("Training")
@@ -463,6 +531,30 @@ class TrainingWindow(QMainWindow):
 
         layout.addWidget(device_group)
 
+        # Auto-Trainer GroupBox
+        auto_group = QGroupBox("Auto-Trainer")
+        auto_layout = QGridLayout(auto_group)
+
+        self.auto_trainer_check = QCheckBox("Auto-Modus aktivieren")
+        self.auto_trainer_check.setToolTip("Automatisch verschiedene Modelle und Parameter testen")
+        self.auto_trainer_check.stateChanged.connect(self._on_auto_trainer_toggled)
+        auto_layout.addWidget(self.auto_trainer_check, 0, 0, 1, 2)
+
+        auto_layout.addWidget(QLabel("Komplexitaet:"), 1, 0)
+        self.complexity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.complexity_slider.setRange(1, 5)
+        self.complexity_slider.setValue(3)
+        self.complexity_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.complexity_slider.setTickInterval(1)
+        self.complexity_slider.valueChanged.connect(self._on_complexity_changed)
+        auto_layout.addWidget(self.complexity_slider, 1, 1)
+
+        self.complexity_label = QLabel("Standard (10 Configs)")
+        self.complexity_label.setStyleSheet("color: #aaaaaa; font-size: 9px;")
+        auto_layout.addWidget(self.complexity_label, 2, 0, 1, 2)
+
+        layout.addWidget(auto_group)
+
         # Buttons
         btn_layout = QVBoxLayout()
 
@@ -502,6 +594,10 @@ class TrainingWindow(QMainWindow):
         # Tab 3: Log
         log_tab = self._create_log_tab()
         tabs.addTab(log_tab, "Log")
+
+        # Tab 4: Auto-Trainer Ergebnisse
+        auto_tab = self._create_auto_trainer_tab()
+        tabs.addTab(auto_tab, "Auto-Trainer")
 
         layout.addWidget(tabs)
 
@@ -787,6 +883,11 @@ class TrainingWindow(QMainWindow):
             QMessageBox.warning(self, "Fehler", "Keine Trainingsdaten geladen!")
             return
 
+        # Auto-Trainer Modus?
+        if self.auto_trainer_check.isChecked():
+            self._run_auto_training()
+            return
+
         # Altes Modell und GPU-Speicher aufraeumen vor neuem Training
         self._cleanup_previous_training()
 
@@ -794,15 +895,7 @@ class TrainingWindow(QMainWindow):
         try:
             from ..models import ModelFactory
 
-            model_name = self.model_combo.currentText().lower().replace('-', '_')
-            if model_name == 'bilstm':
-                model_name = 'bilstm'
-            elif model_name == 'bigru':
-                model_name = 'bigru'
-            elif model_name == 'cnn_lstm':
-                model_name = 'cnn_lstm'
-            elif model_name == 'n_beats':
-                model_name = 'nbeats'
+            model_name = self.model_combo.currentText()
 
             # Input-Size aus Daten ermitteln
             sample = next(iter(self.train_loader))
@@ -813,14 +906,45 @@ class TrainingWindow(QMainWindow):
             if self.training_info and 'num_classes' in self.training_info:
                 num_classes = self.training_info['num_classes']
 
-            self.model = ModelFactory.create(
-                model_name,
-                input_size=input_size,
-                hidden_size=self.hidden_size_spin.value(),
-                num_layers=self.num_layers_spin.value(),
-                num_classes=num_classes,
-                dropout=self.dropout_spin.value()
-            )
+            # Parameter je nach Modell-Typ
+            is_lstm_gru = ModelFactory.model_requires_hidden_sizes(model_name)
+            is_transformer = ModelFactory.model_is_transformer(model_name)
+
+            if is_lstm_gru:
+                # LSTM/GRU mit variablen hidden_sizes
+                hidden_sizes = self._parse_hidden_sizes()
+                self.model = ModelFactory.create(
+                    model_name,
+                    input_size=input_size,
+                    hidden_sizes=hidden_sizes,
+                    num_classes=num_classes,
+                    dropout=self.dropout_spin.value(),
+                    use_layer_norm=self.use_layer_norm_check.isChecked(),
+                    use_attention=self.use_attention_check.isChecked(),
+                    use_residual=self.use_residual_check.isChecked(),
+                    attention_heads=self.attention_heads_spin.value()
+                )
+            elif is_transformer:
+                # Transformer
+                self.model = ModelFactory.create(
+                    model_name,
+                    input_size=input_size,
+                    d_model=self.d_model_spin.value(),
+                    nhead=self.nhead_spin.value(),
+                    num_encoder_layers=self.encoder_layers_spin.value(),
+                    num_classes=num_classes,
+                    dropout=self.dropout_spin.value()
+                )
+            else:
+                # CNN, CNN-LSTM (legacy)
+                self.model = ModelFactory.create(
+                    model_name,
+                    input_size=input_size,
+                    hidden_size=self.hidden_size_spin.value(),
+                    num_layers=self.num_layers_spin.value(),
+                    num_classes=num_classes,
+                    dropout=self.dropout_spin.value()
+                )
 
             self._log(f"Klassenanzahl: {num_classes}")
 
@@ -1468,6 +1592,315 @@ class TrainingWindow(QMainWindow):
             self.gpu_test_btn.setText("GPU Test")
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+
+    def _create_auto_trainer_tab(self) -> QWidget:
+        """Erstellt den Auto-Trainer Ergebnisse Tab."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        # Ergebnis-Tabelle
+        self.auto_results_table = QTableWidget()
+        self.auto_results_table.setColumnCount(7)
+        self.auto_results_table.setHorizontalHeaderLabels([
+            'Rang', 'Modell', 'Config', 'Val ACC', 'F1', 'Epochen', 'Parameter'
+        ])
+        self.auto_results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.auto_results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        layout.addWidget(self.auto_results_table)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        self.adopt_best_btn = QPushButton("Bestes Modell uebernehmen")
+        self.adopt_best_btn.clicked.connect(self._adopt_best_model)
+        self.adopt_best_btn.setEnabled(False)
+        btn_layout.addWidget(self.adopt_best_btn)
+
+        self.export_results_btn = QPushButton("Ergebnisse exportieren")
+        self.export_results_btn.clicked.connect(self._export_auto_results)
+        self.export_results_btn.setEnabled(False)
+        btn_layout.addWidget(self.export_results_btn)
+
+        layout.addLayout(btn_layout)
+
+        return widget
+
+    def _on_model_changed(self, model_name: str):
+        """Aktualisiert UI basierend auf Modell-Auswahl."""
+        is_lstm_gru = ModelFactory.model_requires_hidden_sizes(model_name)
+        is_transformer = ModelFactory.model_is_transformer(model_name)
+
+        # LSTM/GRU spezifische UI
+        self.preset_combo.setVisible(is_lstm_gru or is_transformer)
+        self.hidden_sizes_edit.setVisible(is_lstm_gru)
+
+        # Transformer spezifische UI
+        self.d_model_label.setVisible(is_transformer)
+        self.d_model_spin.setVisible(is_transformer)
+        self.nhead_label.setVisible(is_transformer)
+        self.nhead_spin.setVisible(is_transformer)
+        self.encoder_layers_label.setVisible(is_transformer)
+        self.encoder_layers_spin.setVisible(is_transformer)
+
+        # Legacy Controls
+        self.hidden_size_spin.setVisible(not is_lstm_gru and not is_transformer)
+        self.num_layers_spin.setVisible(not is_lstm_gru and not is_transformer)
+
+        # Erweiterte Optionen nur fuer LSTM/GRU
+        if hasattr(self, 'use_layer_norm_check'):
+            self.use_layer_norm_check.setEnabled(is_lstm_gru)
+            self.use_attention_check.setEnabled(is_lstm_gru)
+            self.use_residual_check.setEnabled(is_lstm_gru)
+            self.attention_heads_spin.setEnabled(is_lstm_gru)
+
+        # Presets aktualisieren
+        presets = ModelFactory.get_presets(model_name)
+        self.preset_combo.clear()
+        self.preset_combo.addItems(list(presets.keys()))
+
+    def _on_preset_changed(self, preset_name: str):
+        """Aktualisiert Parameter basierend auf Preset."""
+        model_name = self.model_combo.currentText()
+        presets = ModelFactory.get_presets(model_name)
+
+        if preset_name == 'Custom' or preset_name not in presets or presets[preset_name] is None:
+            return
+
+        params = presets[preset_name]
+
+        # LSTM/GRU Presets
+        if 'hidden_sizes' in params:
+            hidden_sizes = params['hidden_sizes']
+            self.hidden_sizes_edit.setText(', '.join(map(str, hidden_sizes)))
+
+        # Transformer Presets
+        if 'd_model' in params:
+            self.d_model_spin.setValue(params['d_model'])
+        if 'nhead' in params:
+            self.nhead_spin.setValue(params['nhead'])
+        if 'num_encoder_layers' in params:
+            self.encoder_layers_spin.setValue(params['num_encoder_layers'])
+
+    def _on_auto_trainer_toggled(self, state: int):
+        """Aktiviert/deaktiviert Auto-Trainer Modus."""
+        is_auto = state == Qt.CheckState.Checked.value
+
+        # Manuelle Parameter deaktivieren wenn Auto-Modus aktiv
+        self.model_combo.setEnabled(not is_auto)
+        self.preset_combo.setEnabled(not is_auto)
+        self.hidden_sizes_edit.setEnabled(not is_auto)
+        self.hidden_size_spin.setEnabled(not is_auto)
+        self.num_layers_spin.setEnabled(not is_auto)
+        self.d_model_spin.setEnabled(not is_auto)
+        self.nhead_spin.setEnabled(not is_auto)
+        self.encoder_layers_spin.setEnabled(not is_auto)
+
+        # Komplexitaets-Slider aktivieren
+        self.complexity_slider.setEnabled(is_auto)
+
+        if is_auto:
+            self.start_btn.setText("Auto-Training starten")
+        else:
+            self.start_btn.setText("Training starten")
+
+    def _on_complexity_changed(self, value: int):
+        """Aktualisiert Komplexitaets-Label."""
+        from ..training.auto_trainer import get_complexity_info
+
+        info = get_complexity_info(value)
+        labels = {
+            1: "Schnell",
+            2: "Schnell+",
+            3: "Standard",
+            4: "Ausfuehrlich",
+            5: "Gruendlich"
+        }
+        self.complexity_label.setText(
+            f"{labels.get(value, 'Standard')} ({info['num_configs']} Configs, max {info['max_epochs']} Epochen)"
+        )
+
+    def _parse_hidden_sizes(self) -> List[int]:
+        """Parst hidden_sizes aus dem Textfeld."""
+        text = self.hidden_sizes_edit.text().strip()
+        if not text:
+            return [128, 128]
+
+        try:
+            sizes = [int(s.strip()) for s in text.split(',') if s.strip()]
+            return sizes if sizes else [128, 128]
+        except ValueError:
+            return [128, 128]
+
+    def _run_auto_training(self):
+        """Fuehrt Auto-Training durch."""
+        from PyQt6.QtWidgets import QApplication
+        from ..training.auto_trainer import AutoTrainer
+
+        if self.train_loader is None or self.val_loader is None:
+            QMessageBox.warning(self, "Fehler", "Keine Trainingsdaten geladen!")
+            return
+
+        self._cleanup_previous_training()
+
+        # Input Size ermitteln
+        sample = next(iter(self.train_loader))
+        input_size = sample[0].shape[-1]
+        num_classes = self.training_info.get('num_classes', 3) if self.training_info else 3
+
+        complexity = self.complexity_slider.value()
+
+        self._log(f"=== Auto-Training gestartet (Komplexitaet {complexity}) ===")
+        self.start_btn.setEnabled(False)
+        self.stop_btn.setEnabled(True)
+        self._start_time = datetime.now()
+
+        # Timer starten
+        self.timer = QTimer()
+        self.timer.timeout.connect(self._update_time)
+        self.timer.start(1000)
+
+        try:
+            # AutoTrainer erstellen
+            self.auto_trainer = AutoTrainer(
+                train_loader=self.train_loader,
+                val_loader=self.val_loader,
+                input_size=input_size,
+                num_classes=num_classes,
+                device=self.device
+            )
+
+            # Progress Callback
+            def progress_callback(current, total, model_name, progress):
+                self.epoch_label.setText(f"Modell: {current+1}/{total} - {model_name}")
+                self.progress_bar.setMaximum(total)
+                self.progress_bar.setValue(current)
+                QApplication.processEvents()
+
+                if self._stop_requested:
+                    self.auto_trainer.stop()
+
+            # Training ausfuehren
+            results = self.auto_trainer.run(
+                complexity=complexity,
+                progress_callback=progress_callback,
+                learning_rate=self.lr_spin.value()
+            )
+
+            # Ergebnisse anzeigen
+            self._display_auto_results(results)
+
+            self._log(f"Auto-Training abgeschlossen: {len(results)} Modelle getestet")
+            if results:
+                best = results[0]
+                self._log(f"Bestes Modell: {best.model_type} - Val ACC: {best.val_acc:.2%}, F1: {best.f1_score:.3f}")
+
+        except Exception as e:
+            import traceback
+            self._log(f"Auto-Training Fehler: {e}\n{traceback.format_exc()}", level='ERROR')
+            QMessageBox.critical(self, "Fehler", f"Auto-Training fehlgeschlagen:\n{e}")
+
+        finally:
+            self.timer.stop()
+            self.start_btn.setEnabled(True)
+            self.stop_btn.setEnabled(False)
+            self._stop_requested = False
+
+    def _display_auto_results(self, results):
+        """Zeigt Auto-Training Ergebnisse in der Tabelle an."""
+        self.auto_results_table.setRowCount(0)
+
+        for r in results:
+            row = self.auto_results_table.rowCount()
+            self.auto_results_table.insertRow(row)
+
+            # Config String erstellen
+            if 'hidden_sizes' in r.config:
+                config_str = str(r.config['hidden_sizes'])
+            elif 'd_model' in r.config:
+                config_str = f"d={r.config.get('d_model')}, h={r.config.get('nhead', 4)}"
+            else:
+                config_str = str(r.config)[:25]
+
+            self.auto_results_table.setItem(row, 0, QTableWidgetItem(str(r.rank)))
+            self.auto_results_table.setItem(row, 1, QTableWidgetItem(r.model_type))
+            self.auto_results_table.setItem(row, 2, QTableWidgetItem(config_str))
+            self.auto_results_table.setItem(row, 3, QTableWidgetItem(f"{r.val_acc:.2%}"))
+            self.auto_results_table.setItem(row, 4, QTableWidgetItem(f"{r.f1_score:.3f}"))
+            self.auto_results_table.setItem(row, 5, QTableWidgetItem(str(r.epochs_trained)))
+            self.auto_results_table.setItem(row, 6, QTableWidgetItem(f"{r.num_parameters:,}"))
+
+        self.adopt_best_btn.setEnabled(len(results) > 0)
+        self.export_results_btn.setEnabled(len(results) > 0)
+
+    def _adopt_best_model(self):
+        """Uebernimmt das beste Modell aus dem Auto-Training."""
+        if not hasattr(self, 'auto_trainer') or not self.auto_trainer.results:
+            return
+
+        try:
+            self.model, config = self.auto_trainer.get_best_model()
+            best = self.auto_trainer.results[0]
+
+            # Model-Combo aktualisieren
+            index = self.model_combo.findText(best.model_type, Qt.MatchFlag.MatchFixedString)
+            if index >= 0:
+                self.model_combo.setCurrentIndex(index)
+
+            # Parameter setzen
+            if 'hidden_sizes' in config:
+                self.hidden_sizes_edit.setText(', '.join(map(str, config['hidden_sizes'])))
+
+            self._log(f"Bestes Modell uebernommen: {best.model_type}", level='SUCCESS')
+            self.training_completed.emit(self.model, {'best_accuracy': best.val_acc * 100})
+
+            QMessageBox.information(
+                self, "Modell uebernommen",
+                f"Bestes Modell: {best.model_type}\n"
+                f"Val Accuracy: {best.val_acc:.2%}\n"
+                f"F1-Score: {best.f1_score:.3f}"
+            )
+
+        except Exception as e:
+            self._log(f"Fehler beim Uebernehmen: {e}", level='ERROR')
+            QMessageBox.critical(self, "Fehler", f"Modell konnte nicht uebernommen werden:\n{e}")
+
+    def _export_auto_results(self):
+        """Exportiert Auto-Training Ergebnisse als JSON."""
+        if not hasattr(self, 'auto_trainer') or not self.auto_trainer.results:
+            return
+
+        import json
+
+        filepath, _ = QFileDialog.getSaveFileName(
+            self, "Ergebnisse speichern", "", "JSON Dateien (*.json)"
+        )
+
+        if not filepath:
+            return
+
+        try:
+            results_data = []
+            for r in self.auto_trainer.results:
+                results_data.append({
+                    'rank': r.rank,
+                    'model_type': r.model_type,
+                    'config': r.config,
+                    'val_acc': r.val_acc,
+                    'train_acc': r.train_acc,
+                    'f1_score': r.f1_score,
+                    'precision': r.precision,
+                    'recall': r.recall,
+                    'epochs_trained': r.epochs_trained,
+                    'training_time': r.training_time,
+                    'num_parameters': r.num_parameters
+                })
+
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(results_data, f, indent=2, ensure_ascii=False)
+
+            self._log(f"Ergebnisse exportiert: {filepath}", level='SUCCESS')
+
+        except Exception as e:
+            self._log(f"Export fehlgeschlagen: {e}", level='ERROR')
 
     def closeEvent(self, event):
         """Behandelt das Schliessen des Fensters."""
