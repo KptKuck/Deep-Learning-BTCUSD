@@ -8,6 +8,9 @@ Orchestriert die modularen Komponenten:
 """
 
 import time
+import cProfile
+import pstats
+import io
 from typing import Optional, Dict, List
 
 from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QSplitter
@@ -95,6 +98,10 @@ class BacktestWindow(QMainWindow):
         self.debug_mode = False
         self.invert_signals = False
 
+        # Profiling
+        self._profiling_enabled = False
+        self._profiler: Optional[cProfile.Profile] = None
+
         self._setup_ui()
         self.setStyleSheet(get_stylesheet())
 
@@ -103,7 +110,6 @@ class BacktestWindow(QMainWindow):
         if self._parent and hasattr(self._parent, '_log'):
             self._parent._log(f'[Backtest] {message}', level)
         self.log_message.emit(message, level)
-        self.control_panel.add_tradelog(f'[{level}] {message}')
 
     def _debug(self, message: str):
         """Loggt DEBUG-Nachricht nur wenn debug_mode aktiv ist."""
@@ -151,6 +157,7 @@ class BacktestWindow(QMainWindow):
         self.control_panel.turbo_toggled.connect(self._toggle_turbo)
         self.control_panel.debug_toggled.connect(self._toggle_debug)
         self.control_panel.invert_toggled.connect(self._toggle_invert)
+        self.control_panel.profiling_toggled.connect(self.enable_profiling)
         self.control_panel.close_clicked.connect(self.close)
 
     def set_data(self, data: pd.DataFrame, signals: pd.Series = None,
@@ -233,6 +240,12 @@ class BacktestWindow(QMainWindow):
         self.is_paused = False
         self.control_panel.set_running_state(True)
 
+        # Profiling starten falls aktiviert
+        if self._profiling_enabled:
+            self._profiler = cProfile.Profile()
+            self._profiler.enable()
+            self._log("Profiling gestartet", 'INFO')
+
         # Timer starten
         interval = int(1000 / self.steps_per_second)
         self.backtest_timer = QTimer()
@@ -247,7 +260,6 @@ class BacktestWindow(QMainWindow):
         self._speed_update_timer.start(500)
 
         self.control_panel.set_actual_speed(f"0 / {self.steps_per_second} Schritte/Sek")
-        self.control_panel.add_tradelog("Backtest gestartet")
 
     def _stop_backtest(self):
         """Stoppt den Backtest."""
@@ -264,7 +276,6 @@ class BacktestWindow(QMainWindow):
 
         self.control_panel.set_running_state(False)
         self.control_panel.set_actual_speed("Gestoppt")
-        self.control_panel.add_tradelog("Backtest gestoppt")
         self._update_charts()
 
     def _reset_backtest(self):
@@ -413,9 +424,6 @@ class BacktestWindow(QMainWindow):
         self.entry_price = price
         self.entry_index = idx
 
-        if not self.turbo_mode:
-            self.control_panel.add_tradelog(f"{new_position} @ ${price:,.2f}")
-
     def _close_trade(self, price: float, idx: int, reason: str):
         """Schliesst die aktuelle Position."""
         if self.position == 'NONE':
@@ -439,9 +447,6 @@ class BacktestWindow(QMainWindow):
 
         self.total_pnl += pnl
         self.current_equity = self.initial_capital + self.total_pnl
-
-        pnl_str = f"+${pnl:,.2f}" if pnl >= 0 else f"-${abs(pnl):,.2f}"
-        self.control_panel.add_tradelog(f"#{len(self.trades)} {self.position}: {self.entry_price:,.2f} -> {price:,.2f} ({pnl_str})")
 
         self.position = 'NONE'
         self.entry_price = 0.0
@@ -561,6 +566,13 @@ class BacktestWindow(QMainWindow):
     def _finalize_backtest(self):
         """Finalisiert den Backtest."""
         self._debug(f"_finalize_backtest() aufgerufen")
+
+        # Profiling stoppen und Bericht ausgeben
+        if self._profiling_enabled and self._profiler:
+            self._profiler.disable()
+            self._output_profiling_report()
+            self._profiler = None
+
         self._stop_backtest()
 
         if self.position != 'NONE' and self.data is not None:
@@ -568,9 +580,7 @@ class BacktestWindow(QMainWindow):
             self._close_trade(final_price, len(self.data), 'Backtest Ende')
 
         self._update_charts()
-        self.control_panel.add_tradelog("=== Backtest abgeschlossen ===")
-        self.control_panel.add_tradelog(f"Gesamt P/L: ${self.total_pnl:,.2f}")
-        self.control_panel.add_tradelog(f"Trades: {len(self.trades)}")
+        self._log(f"Backtest abgeschlossen - P/L: ${self.total_pnl:,.2f}, Trades: {len(self.trades)}")
 
     def _update_speed(self, value: int):
         """Aktualisiert die eingestellte Geschwindigkeit."""
@@ -613,6 +623,79 @@ class BacktestWindow(QMainWindow):
             self._log("Signal-Invertierung aktiviert (BUY<->SELL)", 'INFO')
         else:
             self._log("Signal-Invertierung deaktiviert", 'INFO')
+
+    def enable_profiling(self, enabled: bool = True):
+        """Aktiviert/deaktiviert cProfile-Profiling fuer den Backtest."""
+        self._profiling_enabled = enabled
+        state = "aktiviert" if enabled else "deaktiviert"
+        self._log(f"Profiling {state}", 'INFO')
+
+    def _output_profiling_report(self):
+        """Gibt den Profiling-Bericht aus."""
+        if not self._profiler:
+            return
+
+        # String-Buffer fuer Bericht
+        stream = io.StringIO()
+
+        # Statistiken sortiert nach kumulative Zeit
+        stats = pstats.Stats(self._profiler, stream=stream)
+        stats.strip_dirs()
+        stats.sort_stats('cumulative')
+
+        # Header
+        stream.write("\n" + "=" * 80 + "\n")
+        stream.write("PROFILING BERICHT - Backtest\n")
+        stream.write("=" * 80 + "\n\n")
+
+        # Top 30 Funktionen nach kumulative Zeit
+        stream.write("Top 30 Funktionen (nach kumulativer Zeit):\n")
+        stream.write("-" * 80 + "\n")
+        stats.print_stats(30)
+
+        # Nur Backtest-relevante Funktionen
+        stream.write("\n" + "-" * 80 + "\n")
+        stream.write("Backtest-spezifische Funktionen:\n")
+        stream.write("-" * 80 + "\n")
+        stats.print_stats('backtest')
+
+        # Bericht ausgeben
+        report = stream.getvalue()
+
+        # In Log-Datei schreiben
+        try:
+            from ...core.logger import get_logger
+            logger = get_logger()
+            for line in report.split('\n'):
+                if line.strip():
+                    logger.info(line)
+        except Exception:
+            pass
+
+        # Zusammenfassung extrahieren und loggen
+        self._log("=== Profiling Bericht ===")
+
+        stats_dict = stats.stats
+        backtest_funcs = []
+
+        for (filename, line, func), (cc, nc, tt, ct, callers) in stats_dict.items():
+            if 'backtest' in filename.lower() or 'chart' in filename.lower():
+                backtest_funcs.append({
+                    'name': func,
+                    'calls': nc,
+                    'total_time': tt,
+                    'cumulative_time': ct
+                })
+
+        # Sortiere nach kumulativer Zeit
+        backtest_funcs.sort(key=lambda x: x['cumulative_time'], reverse=True)
+
+        # Zeige Top 10 im Log
+        for i, func in enumerate(backtest_funcs[:10], 1):
+            self._log(
+                f"{i}. {func['name']}: {func['calls']} Aufrufe, "
+                f"{func['cumulative_time']*1000:.1f}ms"
+            )
 
     def _show_trade_statistics(self):
         """Zeigt den Trade-Statistik Dialog."""

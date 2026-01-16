@@ -6,7 +6,7 @@ from typing import Callable, Optional
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QGroupBox, QLabel, QPushButton, QSlider, QTextEdit,
+    QGroupBox, QLabel, QPushButton, QSlider,
     QScrollArea, QCheckBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -25,7 +25,6 @@ class ControlPanel(QWidget):
     - Turbo/Debug/Invert Optionen
     - Positions-Anzeige
     - Fortschritts-Anzeige
-    - Trade-Log
     """
 
     # Signals
@@ -38,6 +37,7 @@ class ControlPanel(QWidget):
     turbo_toggled = pyqtSignal(bool)
     debug_toggled = pyqtSignal(bool)
     invert_toggled = pyqtSignal(bool)
+    profiling_toggled = pyqtSignal(bool)
     close_clicked = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -74,9 +74,6 @@ class ControlPanel(QWidget):
 
         # Fortschritt
         layout.addWidget(self._create_progress_group())
-
-        # Trade-Log
-        layout.addWidget(self._create_tradelog_group())
 
         layout.addStretch()
 
@@ -177,6 +174,13 @@ class ControlPanel(QWidget):
         self.invert_check.toggled.connect(self.invert_toggled.emit)
         layout.addWidget(self.invert_check)
 
+        # Profiling-Modus
+        self.profiling_check = QCheckBox("cProfile Profiling")
+        self.profiling_check.setStyleSheet("color: rgb(100, 200, 255);")
+        self.profiling_check.setToolTip("Aktiviert cProfile Profiling (Bericht am Ende)")
+        self.profiling_check.toggled.connect(self.profiling_toggled.emit)
+        layout.addWidget(self.profiling_check)
+
         # Aktuelle Geschwindigkeit
         speed_info = QHBoxLayout()
         speed_info.addWidget(QLabel("Aktuell:"))
@@ -229,28 +233,6 @@ class ControlPanel(QWidget):
             label.setStyleSheet("color: white;" if row < 2 else "color: gray; font-weight: bold;")
             setattr(self, attr, label)
             layout.addWidget(label, row, 1)
-
-        return group
-
-    def _create_tradelog_group(self) -> QGroupBox:
-        """Erstellt das Trade-Log."""
-        group = QGroupBox("Trade-Log")
-        group.setStyleSheet(self._group_style((0.9, 0.5, 0.9)))
-        layout = QVBoxLayout(group)
-
-        self.tradelog_text = QTextEdit()
-        self.tradelog_text.setReadOnly(True)
-        self.tradelog_text.setStyleSheet("""
-            QTextEdit {
-                background-color: rgb(38, 38, 38);
-                color: rgb(204, 204, 204);
-                font-family: 'Consolas', monospace;
-                font-size: 10px;
-            }
-        """)
-        self.tradelog_text.setPlainText("Kein Trade")
-        self.tradelog_text.setMaximumHeight(150)
-        layout.addWidget(self.tradelog_text)
 
         return group
 
@@ -317,23 +299,6 @@ class ControlPanel(QWidget):
             self.signal_label.setText("HOLD")
             self.signal_label.setStyleSheet("color: gray; font-weight: bold;")
 
-    def add_tradelog(self, message: str):
-        """Fuegt eine Nachricht zum Trade-Log hinzu."""
-        current = self.tradelog_text.toPlainText()
-        if current == "Kein Trade":
-            self.tradelog_text.setPlainText(message)
-        else:
-            lines = current.split('\n')
-            lines.append(message)
-            # Nur letzte 20 Zeilen behalten
-            if len(lines) > 20:
-                lines = lines[-20:]
-            self.tradelog_text.setPlainText('\n'.join(lines))
-
-        # Scroll nach unten
-        scrollbar = self.tradelog_text.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
-
     def reset_labels(self):
         """Setzt alle Labels zurueck."""
         self.position_label.setText("NONE")
@@ -344,7 +309,6 @@ class ControlPanel(QWidget):
         self.signal_label.setText("-")
         self.signal_label.setStyleSheet("color: gray;")
         self.actual_speed_label.setText("- Schritte/Sek")
-        self.tradelog_text.setPlainText("Kein Trade")
 
     def _group_style(self, color: tuple) -> str:
         """Generiert GroupBox-Style mit farbigem Titel."""
