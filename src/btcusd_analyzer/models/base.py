@@ -8,6 +8,8 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
+from btcusd_analyzer.core.logger import get_logger
+
 
 class BaseModel(nn.Module, ABC):
     """Abstrakte Basisklasse fuer alle Modelle."""
@@ -21,6 +23,11 @@ class BaseModel(nn.Module, ABC):
         """
         super().__init__()
         self._name = name
+        self._logger = get_logger()
+
+    def _log_debug(self, message: str):
+        """Loggt eine DEBUG-Meldung mit Modell-Prefix."""
+        self._logger.debug(f"[{self._name}] {message}")
 
     @property
     def name(self) -> str:

@@ -251,6 +251,9 @@ class AutoTrainer:
         self.device = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.class_names = class_names or ['HOLD', 'BUY', 'SELL']
 
+        self.logger.debug(f'[AutoTrainer] __init__() - input_size={input_size}, num_classes={num_classes}, device={self.device}')
+        self.logger.debug(f'[AutoTrainer] __init__() - train_samples={len(train_loader.dataset)}, val_samples={len(val_loader.dataset)}')
+
         # Mixed Precision nur auf CUDA
         self.use_amp = use_amp and self.device.type == 'cuda'
         self.scaler = torch.amp.GradScaler('cuda') if self.use_amp else None
@@ -260,6 +263,7 @@ class AutoTrainer:
 
         # Class Weights aus Training-Daten berechnen
         self.class_weights = self._compute_class_weights()
+        self.logger.debug(f'[AutoTrainer] __init__() - class_weights={self.class_weights.cpu().numpy().round(3)}')
 
         amp_status = "aktiviert" if self.use_amp else "deaktiviert"
         self.logger.info(f'AutoTrainer initialisiert auf {self.device} (AMP: {amp_status})')
@@ -398,6 +402,8 @@ class AutoTrainer:
         """
         start_time = time.time()
 
+        self.logger.debug(f'[AutoTrainer] _train_single() - Erstelle {model_type} mit params={params}')
+
         # Modell erstellen
         model = ModelFactory.create(
             model_name=model_type,
@@ -408,6 +414,7 @@ class AutoTrainer:
         model.to(self.device)
 
         num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        self.logger.debug(f'[AutoTrainer] _train_single() - Modell auf {self.device}, {num_params:,} Parameter')
 
         # Optimizer mit Weight Decay
         optimizer = torch.optim.AdamW(
@@ -424,6 +431,7 @@ class AutoTrainer:
             factor=0.5,
             min_lr=1e-6
         )
+        self.logger.debug(f'[AutoTrainer] _train_single() - Optimizer: AdamW(lr={learning_rate}), Scheduler: ReduceLROnPlateau')
 
         # Loss mit Class Weights
         criterion = nn.CrossEntropyLoss(weight=self.class_weights)
@@ -542,11 +550,17 @@ class AutoTrainer:
                 epochs_without_improvement += 1
 
             if epochs_without_improvement >= patience:
+                self.logger.debug(f'[AutoTrainer] _train_single() - Early Stopping nach Epoch {epoch} '
+                                 f'(keine Verbesserung seit {patience} Epochen)')
                 break
 
             # Epoch Callback mit Metriken
             if epoch_callback:
                 epoch_callback(epoch, max_epochs, train_loss, train_acc, val_loss, val_acc)
+
+        # Training beendet - Log
+        self.logger.debug(f'[AutoTrainer] _train_single() - Training beendet: {epoch}/{max_epochs} Epochen, '
+                         f'best_val_acc={best_val_acc:.4f} bei Epoch {best_epoch}')
 
         # Metriken berechnen
         f1 = f1_score(all_labels, all_preds, average='weighted', zero_division=0)

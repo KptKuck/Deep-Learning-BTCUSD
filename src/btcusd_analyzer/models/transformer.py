@@ -102,6 +102,9 @@ class TransformerClassifier(BaseModel):
         """
         super().__init__(name='TransformerClassifier')
 
+        self._log_debug(f"__init__() - input_size={input_size}, d_model={d_model}, "
+                       f"nhead={nhead}, layers={num_encoder_layers}, num_classes={num_classes}")
+
         self.input_size = input_size
         self.d_model = d_model
         self.nhead = nhead
@@ -111,6 +114,9 @@ class TransformerClassifier(BaseModel):
         self.dropout_rate = dropout
         self.max_seq_length = max_seq_length
         self.activation = activation
+
+        self._log_debug(f"__init__() - dim_feedforward={dim_feedforward}, dropout={dropout}, "
+                       f"max_seq_length={max_seq_length}, activation={activation}")
 
         # Input Embedding: Projiziere Features auf d_model Dimension
         self.input_embedding = nn.Linear(input_size, d_model)
@@ -141,6 +147,10 @@ class TransformerClassifier(BaseModel):
             nn.Dropout(dropout),
             nn.Linear(d_model // 2, num_classes)
         )
+
+        # Log Parameter-Anzahl
+        num_params = sum(p.numel() for p in self.parameters())
+        self._log_debug(f"__init__() - Modell erstellt: {num_params:,} Parameter")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

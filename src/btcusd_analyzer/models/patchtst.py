@@ -87,6 +87,9 @@ class PatchTSTClassifier(BaseModel):
         """
         super().__init__(name='PatchTSTClassifier')
 
+        self._log_debug(f"__init__() - input_size={input_size}, num_classes={num_classes}, "
+                       f"context_length={context_length}")
+
         if not _PATCHTST_AVAILABLE:
             raise ImportError(
                 "PatchTST nicht verfuegbar. "
@@ -113,6 +116,9 @@ class PatchTSTClassifier(BaseModel):
             actual_heads -= 1
         self.num_attention_heads = actual_heads
 
+        self._log_debug(f"__init__() - d_model={d_model}, heads={actual_heads}, layers={num_hidden_layers}, "
+                       f"patch_length={patch_length}, stride={stride}, ffn_dim={ffn_dim}")
+
         # PatchTST Konfiguration
         self.config = PatchTSTConfig(
             num_input_channels=input_size,
@@ -134,6 +140,10 @@ class PatchTSTClassifier(BaseModel):
 
         # PatchTST Modell fuer Klassifikation
         self.model = PatchTSTForClassification(self.config)
+
+        # Log Parameter-Anzahl
+        num_params = sum(p.numel() for p in self.parameters())
+        self._log_debug(f"__init__() - Modell erstellt: {num_params:,} Parameter")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

@@ -64,6 +64,8 @@ class BiLSTMClassifier(BaseModel):
         name = 'BiLSTM' if bidirectional else 'LSTM'
         super().__init__(name=f'{name}Classifier')
 
+        self._log_debug(f"__init__() - input_size={input_size}, hidden_sizes={hidden_sizes}, num_classes={num_classes}")
+
         # hidden_sizes normalisieren
         if isinstance(hidden_sizes, int):
             # Alte API: hidden_size + num_layers
@@ -82,6 +84,9 @@ class BiLSTMClassifier(BaseModel):
         self.use_attention = use_attention
         self.use_residual = use_residual
         self.attention_heads = attention_heads
+
+        self._log_debug(f"__init__() - layers={self.num_layers}, dropout={dropout}, "
+                       f"layer_norm={use_layer_norm}, attention={use_attention}, residual={use_residual}")
 
         # LSTM-Layer (ModuleList fuer variable Groessen)
         self.lstm_layers = nn.ModuleList()
@@ -162,6 +167,11 @@ class BiLSTMClassifier(BaseModel):
 
         # Fully Connected Layer fuer Klassifikation
         self.fc = nn.Linear(final_hidden_size, num_classes)
+
+        # Log Parameter-Anzahl
+        num_params = sum(p.numel() for p in self.parameters())
+        self._log_debug(f"__init__() - Modell erstellt: {num_params:,} Parameter, "
+                       f"final_hidden={final_hidden_size}, output={num_classes}")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
