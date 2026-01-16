@@ -407,33 +407,27 @@ class TimeRangeDialog(QDialog):
             QMessageBox.warning(self, "Fehler", "Ende muss nach Start liegen.")
             return
 
+        # Validierung: Ende darf nicht in der Zukunft liegen
+        now = datetime.now()
+        if end_dt > now:
+            QMessageBox.warning(self, "Fehler", "Ende darf nicht in der Zukunft liegen.")
+            return
+
         # Pruefen ob Zeitraum ausserhalb der geladenen Daten liegt
-        needs_reload = False
-        if self.loaded_data is not None and self.data_start and self.data_end:
+        needs_download = False
+        if self.loaded_data is None:
+            needs_download = True
+        elif self.data_start and self.data_end:
             if start_dt < self.data_start or end_dt > self.data_end:
-                needs_reload = True
-                print(f"[TimeRange] Nachladen erforderlich")
+                needs_download = True
+                print(f"[TimeRange] Daten ausserhalb des verfuegbaren Bereichs")
 
-        # Bei Bedarf Daten aus CSV nachladen
-        if needs_reload and self.selected_file:
-            try:
-                from ...data.reader import CSVReader
-                reader = CSVReader()
-                full_df = reader.read(self.selected_file)
-
-                if full_df is not None and len(full_df) > 0:
-                    self.loaded_data = full_df
-                    # Datengrenzen aktualisieren
-                    if hasattr(full_df.index, 'min') and hasattr(full_df.index[0], 'year'):
-                        self.data_start = full_df.index.min().to_pydatetime()
-                        self.data_end = full_df.index.max().to_pydatetime()
-                    elif 'DateTime' in full_df.columns:
-                        dt_col = pd.to_datetime(full_df['DateTime'])
-                        self.data_start = dt_col.min().to_pydatetime()
-                        self.data_end = dt_col.max().to_pydatetime()
-            except Exception as e:
-                QMessageBox.warning(self, "Fehler", f"Fehler beim Nachladen: {e}")
-                return
+        # Bei Bedarf Daten von Binance herunterladen
+        if needs_download:
+            print(f"[TimeRange] Lade Daten von Binance...")
+            downloaded = self._download_from_binance(start_dt, end_dt)
+            if not downloaded:
+                return  # Fehler wurde bereits angezeigt
 
         if self.loaded_data is None:
             QMessageBox.warning(self, "Fehler", "Keine Daten verfuegbar.")
@@ -459,6 +453,101 @@ class TimeRangeDialog(QDialog):
     def get_result(self) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
         """Gibt die ausgewaehlten Daten und den Dateipfad zurueck."""
         return self.result_data, self.selected_file
+
+    def _download_from_binance(self, start_dt: datetime, end_dt: datetime) -> bool:
+        """
+        Laedt fehlende Daten von Binance herunter.
+
+        Returns:
+            True bei Erfolg, False bei Fehler
+        """
+        from PyQt6.QtWidgets import QApplication, QProgressDialog
+        from PyQt6.QtCore import Qt
+
+        try:
+            from ...data.downloader import BinanceDownloader
+            from pathlib import Path
+
+            # Progress-Dialog anzeigen
+            progress = QProgressDialog(
+                "Lade Daten von Binance...",
+                "Abbrechen",
+                0, 0,
+                self
+            )
+            progress.setWindowTitle("Download")
+            progress.setWindowModality(Qt.WindowModality.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.show()
+            QApplication.processEvents()
+
+            # Datenverzeichnis ermitteln
+            if self.selected_file:
+                data_dir = Path(self.selected_file).parent
+            else:
+                data_dir = Path.cwd() / 'data'
+
+            # Downloader erstellen und Daten laden
+            downloader = BinanceDownloader(symbol='BTCUSDT', data_dir=data_dir)
+
+            start_str = start_dt.strftime('%Y-%m-%d')
+            end_str = end_dt.strftime('%Y-%m-%d')
+
+            print(f"[TimeRange] Binance Download: {start_str} bis {end_str}")
+
+            df = downloader.download(
+                start_date=start_str,
+                end_date=end_str,
+                interval='1h',
+                save=True
+            )
+
+            progress.close()
+
+            if df is None or len(df) == 0:
+                QMessageBox.warning(
+                    self,
+                    "Download fehlgeschlagen",
+                    "Konnte keine Daten von Binance laden.\n"
+                    "Bitte pruefen Sie Ihre Internetverbindung."
+                )
+                return False
+
+            # Daten uebernehmen
+            # DateTime als Index setzen falls nicht bereits
+            if 'DateTime' in df.columns and not isinstance(df.index, pd.DatetimeIndex):
+                df['DateTime'] = pd.to_datetime(df['DateTime'])
+                df = df.set_index('DateTime')
+
+            self.loaded_data = df
+            self.data_start = df.index.min().to_pydatetime()
+            self.data_end = df.index.max().to_pydatetime()
+
+            print(f"[TimeRange] Download erfolgreich: {len(df)} Datenpunkte")
+            print(f"[TimeRange] Neue Daten-Grenzen: {self.data_start} - {self.data_end}")
+
+            # Info aktualisieren
+            self._update_info()
+
+            return True
+
+        except ImportError as e:
+            QMessageBox.warning(
+                self,
+                "Modul fehlt",
+                f"Binance-Modul nicht installiert:\n{e}\n\n"
+                "Installieren mit: pip install python-binance"
+            )
+            return False
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "Download-Fehler",
+                f"Fehler beim Herunterladen:\n{e}"
+            )
+            import traceback
+            print(f"[TimeRange] Download-Fehler: {traceback.format_exc()}")
+            return False
 
     def _dialog_style(self) -> str:
         """Gibt das Dialog-Stylesheet zurueck."""
