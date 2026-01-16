@@ -51,105 +51,135 @@ class AutoTrainResult:
 
 
 # Auto-Trainer Konfigurationen nach Komplexitaet
+# Fokus auf BiLSTM/BiGRU (beste Performance), weniger Transformer/CNN
 AUTO_TRAINER_CONFIGS = {
-    1: {  # Schnell (~5 Min)
-        'max_epochs': 20,
-        'patience': 3,
-        'configs': [
-            ('BiLSTM', {'hidden_sizes': [128, 128]}),
-            ('Transformer', {'d_model': 64, 'nhead': 4, 'num_encoder_layers': 2}),
-            ('BiGRU', {'hidden_sizes': [128, 128]}),
-        ]
-    },
-    2: {  # Schnell+ (~10 Min)
-        'max_epochs': 30,
+    1: {  # Schnell (~5 Min) - 4 Configs
+        'max_epochs': 25,
         'patience': 4,
         'configs': [
+            # Basis-Konfigurationen
             ('BiLSTM', {'hidden_sizes': [128, 128]}),
-            ('BiLSTM', {'hidden_sizes': [256, 128]}),
             ('BiGRU', {'hidden_sizes': [128, 128]}),
-            ('Transformer', {'d_model': 64, 'nhead': 4, 'num_encoder_layers': 2}),
-            ('CNN', {'num_filters': 64}),
+            ('BiLSTM', {'hidden_sizes': [128, 64]}),
+            ('BiGRU', {'hidden_sizes': [128, 64]}),
         ]
     },
-    3: {  # Standard (~20 Min)
-        'max_epochs': 50,
+    2: {  # Schnell+ (~10 Min) - 8 Configs
+        'max_epochs': 30,
         'patience': 5,
         'configs': [
-            ('BiLSTM', {'hidden_sizes': [128, 128]}),
-            ('BiLSTM', {'hidden_sizes': [256, 128, 64]}),
-            ('BiLSTM', {'hidden_sizes': [64, 128, 256]}),
-            ('BiGRU', {'hidden_sizes': [128, 128]}),
-            ('BiGRU', {'hidden_sizes': [256, 128, 64]}),
-            ('Transformer', {'d_model': 64, 'nhead': 4, 'num_encoder_layers': 2}),
-            ('Transformer', {'d_model': 128, 'nhead': 4, 'num_encoder_layers': 4}),
-            ('CNN-LSTM', {'hidden_size': 128}),
-            ('CNN', {'num_filters': 64}),
-            ('LSTM', {'hidden_sizes': [256, 256]}),
-        ]
-    },
-    4: {  # Ausfuehrlich (~40 Min)
-        'max_epochs': 75,
-        'patience': 7,
-        'configs': [
             # BiLSTM Varianten
             ('BiLSTM', {'hidden_sizes': [128, 128]}),
-            ('BiLSTM', {'hidden_sizes': [256, 128, 64]}),
-            ('BiLSTM', {'hidden_sizes': [64, 128, 256]}),
-            ('BiLSTM', {'hidden_sizes': [256, 64, 256]}),
-            ('BiLSTM', {'hidden_sizes': [256, 128], 'use_attention': True}),
+            ('BiLSTM', {'hidden_sizes': [192, 96]}),
+            ('BiLSTM', {'hidden_sizes': [256, 128]}),
+            ('BiLSTM', {'hidden_sizes': [128, 128], 'dropout': 0.2}),
             # BiGRU Varianten
             ('BiGRU', {'hidden_sizes': [128, 128]}),
-            ('BiGRU', {'hidden_sizes': [256, 128, 64]}),
-            ('BiGRU', {'hidden_sizes': [64, 128, 256]}),
-            # Transformer
-            ('Transformer', {'d_model': 64, 'nhead': 4, 'num_encoder_layers': 2}),
-            ('Transformer', {'d_model': 128, 'nhead': 4, 'num_encoder_layers': 4}),
-            ('Transformer', {'d_model': 256, 'nhead': 8, 'num_encoder_layers': 6}),
-            # CNN
-            ('CNN', {'num_filters': 64}),
-            ('CNN', {'num_filters': 128}),
-            # CNN-LSTM
-            ('CNN-LSTM', {'hidden_size': 128}),
-            ('CNN-LSTM', {'hidden_size': 256, 'bidirectional': True}),
+            ('BiGRU', {'hidden_sizes': [192, 96]}),
+            ('BiGRU', {'hidden_sizes': [256, 128]}),
+            ('BiGRU', {'hidden_sizes': [128, 128], 'dropout': 0.2}),
         ]
     },
-    5: {  # Gruendlich (~60 Min)
-        'max_epochs': 100,
+    3: {  # Standard (~20 Min) - 12 Configs
+        'max_epochs': 40,
+        'patience': 6,
+        'configs': [
+            # BiLSTM Basis
+            ('BiLSTM', {'hidden_sizes': [128, 128]}),
+            ('BiLSTM', {'hidden_sizes': [192, 128]}),
+            ('BiLSTM', {'hidden_sizes': [256, 128]}),
+            ('BiLSTM', {'hidden_sizes': [256, 128, 64]}),
+            # BiLSTM mit Features
+            ('BiLSTM', {'hidden_sizes': [128, 128], 'use_layer_norm': True}),
+            ('BiLSTM', {'hidden_sizes': [192, 128], 'use_attention': True}),
+            # BiGRU Basis
+            ('BiGRU', {'hidden_sizes': [128, 128]}),
+            ('BiGRU', {'hidden_sizes': [192, 128]}),
+            ('BiGRU', {'hidden_sizes': [256, 128]}),
+            ('BiGRU', {'hidden_sizes': [256, 128, 64]}),
+            # BiGRU mit Features
+            ('BiGRU', {'hidden_sizes': [128, 128], 'use_layer_norm': True}),
+            ('BiGRU', {'hidden_sizes': [192, 128], 'use_attention': True}),
+        ]
+    },
+    4: {  # Ausfuehrlich (~40 Min) - 20 Configs
+        'max_epochs': 60,
+        'patience': 8,
+        'configs': [
+            # BiLSTM Groessen-Varianten
+            ('BiLSTM', {'hidden_sizes': [96, 96]}),
+            ('BiLSTM', {'hidden_sizes': [128, 128]}),
+            ('BiLSTM', {'hidden_sizes': [192, 128]}),
+            ('BiLSTM', {'hidden_sizes': [256, 128]}),
+            ('BiLSTM', {'hidden_sizes': [256, 192, 128]}),
+            ('BiLSTM', {'hidden_sizes': [256, 128, 64]}),
+            # BiLSTM mit Layer Norm
+            ('BiLSTM', {'hidden_sizes': [128, 128], 'use_layer_norm': True}),
+            ('BiLSTM', {'hidden_sizes': [256, 128], 'use_layer_norm': True}),
+            # BiLSTM mit Attention
+            ('BiLSTM', {'hidden_sizes': [128, 128], 'use_attention': True}),
+            ('BiLSTM', {'hidden_sizes': [256, 128], 'use_attention': True}),
+            # BiLSTM kombiniert
+            ('BiLSTM', {'hidden_sizes': [192, 128], 'use_layer_norm': True, 'use_attention': True}),
+            # BiGRU Groessen-Varianten
+            ('BiGRU', {'hidden_sizes': [96, 96]}),
+            ('BiGRU', {'hidden_sizes': [128, 128]}),
+            ('BiGRU', {'hidden_sizes': [192, 128]}),
+            ('BiGRU', {'hidden_sizes': [256, 128]}),
+            ('BiGRU', {'hidden_sizes': [256, 128, 64]}),
+            # BiGRU mit Features
+            ('BiGRU', {'hidden_sizes': [128, 128], 'use_layer_norm': True}),
+            ('BiGRU', {'hidden_sizes': [256, 128], 'use_attention': True}),
+            ('BiGRU', {'hidden_sizes': [192, 128], 'use_layer_norm': True, 'use_attention': True}),
+            # CNN-LSTM als Vergleich
+            ('CNN-LSTM', {'hidden_size': 128, 'bidirectional': True}),
+        ]
+    },
+    5: {  # Gruendlich (~60 Min) - 30 Configs
+        'max_epochs': 80,
         'patience': 10,
         'configs': [
-            # BiLSTM Varianten
+            # === BiLSTM Umfassend ===
+            # Groessen-Varianten
+            ('BiLSTM', {'hidden_sizes': [64, 64]}),
+            ('BiLSTM', {'hidden_sizes': [96, 96]}),
             ('BiLSTM', {'hidden_sizes': [128, 128]}),
+            ('BiLSTM', {'hidden_sizes': [192, 128]}),
+            ('BiLSTM', {'hidden_sizes': [256, 128]}),
+            ('BiLSTM', {'hidden_sizes': [256, 192]}),
+            ('BiLSTM', {'hidden_sizes': [128, 128, 64]}),
             ('BiLSTM', {'hidden_sizes': [256, 128, 64]}),
-            ('BiLSTM', {'hidden_sizes': [64, 128, 256]}),
-            ('BiLSTM', {'hidden_sizes': [256, 64, 256]}),
-            ('BiLSTM', {'hidden_sizes': [512, 256, 128, 64]}),
-            ('BiLSTM', {'hidden_sizes': [256, 128], 'use_attention': True}),
+            ('BiLSTM', {'hidden_sizes': [256, 192, 128]}),
+            # Mit Layer Norm
+            ('BiLSTM', {'hidden_sizes': [128, 128], 'use_layer_norm': True}),
+            ('BiLSTM', {'hidden_sizes': [192, 128], 'use_layer_norm': True}),
             ('BiLSTM', {'hidden_sizes': [256, 128], 'use_layer_norm': True}),
-            # BiGRU Varianten
+            # Mit Attention
+            ('BiLSTM', {'hidden_sizes': [128, 128], 'use_attention': True}),
+            ('BiLSTM', {'hidden_sizes': [192, 128], 'use_attention': True}),
+            ('BiLSTM', {'hidden_sizes': [256, 128], 'use_attention': True}),
+            # Kombiniert (Layer Norm + Attention)
+            ('BiLSTM', {'hidden_sizes': [128, 128], 'use_layer_norm': True, 'use_attention': True}),
+            ('BiLSTM', {'hidden_sizes': [192, 128], 'use_layer_norm': True, 'use_attention': True}),
+            ('BiLSTM', {'hidden_sizes': [256, 128], 'use_layer_norm': True, 'use_attention': True}),
+            # Dropout-Varianten
+            ('BiLSTM', {'hidden_sizes': [192, 128], 'dropout': 0.2}),
+            ('BiLSTM', {'hidden_sizes': [192, 128], 'dropout': 0.4}),
+
+            # === BiGRU Umfassend ===
+            ('BiGRU', {'hidden_sizes': [96, 96]}),
             ('BiGRU', {'hidden_sizes': [128, 128]}),
+            ('BiGRU', {'hidden_sizes': [192, 128]}),
+            ('BiGRU', {'hidden_sizes': [256, 128]}),
             ('BiGRU', {'hidden_sizes': [256, 128, 64]}),
-            ('BiGRU', {'hidden_sizes': [64, 128, 256]}),
-            # Transformer Varianten
+            # Mit Features
+            ('BiGRU', {'hidden_sizes': [128, 128], 'use_layer_norm': True}),
+            ('BiGRU', {'hidden_sizes': [192, 128], 'use_attention': True}),
+            ('BiGRU', {'hidden_sizes': [192, 128], 'use_layer_norm': True, 'use_attention': True}),
+
+            # === Vergleich: Andere Architekturen ===
+            ('CNN-LSTM', {'hidden_size': 128, 'bidirectional': True}),
             ('Transformer', {'d_model': 64, 'nhead': 4, 'num_encoder_layers': 2}),
-            ('Transformer', {'d_model': 128, 'nhead': 4, 'num_encoder_layers': 4}),
-            ('Transformer', {'d_model': 256, 'nhead': 8, 'num_encoder_layers': 6}),
-            # CNN Varianten
-            ('CNN', {'num_filters': 64}),
-            ('CNN', {'num_filters': 128}),
-            # CNN-LSTM Varianten
-            ('CNN-LSTM', {'hidden_size': 128}),
-            ('CNN-LSTM', {'hidden_size': 256, 'bidirectional': True}),
-            # LSTM (unidirektional)
-            ('LSTM', {'hidden_sizes': [256, 256]}),
-            ('LSTM', {'hidden_sizes': [512, 256]}),
-            # Dropout Variationen
-            ('BiLSTM', {'hidden_sizes': [256, 128], 'dropout': 0.2}),
-            ('BiLSTM', {'hidden_sizes': [256, 128], 'dropout': 0.4}),
-            ('BiLSTM', {'hidden_sizes': [256, 128], 'dropout': 0.5}),
-            # HuggingFace (falls installiert)
-            ('HF-Transformer', {'d_model': 64, 'num_encoder_layers': 2}),
-            ('HF-Transformer', {'d_model': 128, 'num_encoder_layers': 4}),
         ]
     }
 }
