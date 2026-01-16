@@ -33,6 +33,7 @@ class ControlPanel(QWidget):
     step_clicked = pyqtSignal()
     reset_clicked = pyqtSignal()
     stats_clicked = pyqtSignal()
+    timerange_clicked = pyqtSignal()
     speed_changed = pyqtSignal(int)
     turbo_toggled = pyqtSignal(bool)
     debug_toggled = pyqtSignal(bool)
@@ -133,6 +134,14 @@ class ControlPanel(QWidget):
         self.stats_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
         self.stats_btn.clicked.connect(self.stats_clicked.emit)
         layout.addWidget(self.stats_btn, 2, 0, 1, 2)
+
+        # Zeitraum aendern Button
+        self.timerange_btn = QPushButton("Zeitraum aendern")
+        self.timerange_btn.setStyleSheet(self._button_style((0.6, 0.4, 0.8)))
+        self.timerange_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        self.timerange_btn.setToolTip("Anderen Zeitraum mit demselben Modell testen")
+        self.timerange_btn.clicked.connect(self.timerange_clicked.emit)
+        layout.addWidget(self.timerange_btn, 3, 0, 1, 2)
 
         return group
 

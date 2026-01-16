@@ -23,6 +23,7 @@ from .control_panel import ControlPanel
 from .stats_panel import StatsPanel
 from .chart_panel import ChartPanel
 from .trade_statistics_dialog import TradeStatisticsDialog
+from .timerange_dialog import TimeRangeDialog
 from ..styles import get_stylesheet
 
 
@@ -102,6 +103,9 @@ class BacktestWindow(QMainWindow):
         self._profiling_enabled = False
         self._profiler: Optional[cProfile.Profile] = None
 
+        # Aktuelle Datei-Quelle (fuer Zeitraum-Wechsel)
+        self.current_data_file: Optional[str] = None
+
         self._setup_ui()
         self.setStyleSheet(get_stylesheet())
 
@@ -158,6 +162,7 @@ class BacktestWindow(QMainWindow):
         self.control_panel.debug_toggled.connect(self._toggle_debug)
         self.control_panel.invert_toggled.connect(self._toggle_invert)
         self.control_panel.profiling_toggled.connect(self.enable_profiling)
+        self.control_panel.timerange_clicked.connect(self._change_timerange)
         self.control_panel.close_clicked.connect(self.close)
 
     def set_data(self, data: pd.DataFrame, signals: pd.Series = None,
@@ -704,6 +709,98 @@ class BacktestWindow(QMainWindow):
             self.initial_capital, self.current_equity
         )
         dialog.exec()
+
+    def _change_timerange(self):
+        """Oeffnet den Dialog zum Aendern des Zeitraums."""
+        if self.is_running:
+            self._log("Bitte Backtest erst stoppen", 'WARNING')
+            return
+
+        if self.model is None:
+            self._log("Kein Modell geladen - Zeitraum aendern nicht moeglich", 'WARNING')
+            return
+
+        # Dialog oeffnen
+        dialog = TimeRangeDialog(
+            self,
+            current_file=self.current_data_file
+        )
+
+        if dialog.exec():
+            new_data, file_path = dialog.get_result()
+            if new_data is not None and len(new_data) > 0:
+                self._apply_new_timerange(new_data, file_path)
+
+    def _apply_new_timerange(self, new_data: pd.DataFrame, file_path: str):
+        """Wendet den neuen Zeitraum an und bereitet alles neu vor."""
+        self._log(f"Neuer Zeitraum: {len(new_data)} Datenpunkte")
+
+        # Datei-Pfad speichern
+        if file_path:
+            self.current_data_file = file_path
+
+        # Reset durchfuehren (ohne Charts neu zu initialisieren)
+        if self.backtest_timer:
+            self.backtest_timer.stop()
+            self.backtest_timer = None
+        if self._speed_update_timer:
+            self._speed_update_timer.stop()
+            self._speed_update_timer = None
+
+        self.is_running = False
+        self.is_paused = False
+
+        self.position = 'NONE'
+        self.entry_price = 0.0
+        self.entry_index = 0
+        self.total_pnl = 0.0
+        self.trades = []
+        self.signal_history = []
+
+        self.current_equity = self.initial_capital
+        self.equity_curve = [self.initial_capital]
+
+        self.buy_count = 0
+        self.sell_count = 0
+        self.hold_count = 0
+
+        # Neue Daten setzen
+        self.data = new_data
+        self.signals = None  # Signale werden neu vom Modell generiert
+
+        # Sequenzen neu vorbereiten
+        if self.model_info:
+            lookback = self.model_info.get('lookback_size', 60)
+            lookforward = self.model_info.get('lookforward_size', 5)
+            self.sequence_length = lookback + lookforward
+            self.current_index = self.sequence_length + 1
+
+            self.equity_indices = [self.current_index]
+
+            # Sequenzen neu berechnen
+            if self.model is not None:
+                self._prepare_sequences(lookback)
+
+        # UI aktualisieren
+        self.control_panel.set_running_state(False)
+        self.control_panel.reset_labels()
+        self.stats_panel.reset_labels()
+
+        # Charts mit neuen Daten initialisieren
+        self.chart_panel.set_data(new_data, self.initial_capital)
+        self.chart_panel.initialize_charts()
+
+        self._update_datapoint_label()
+
+        # Zeitraum-Info loggen
+        if hasattr(new_data.index, 'min') and hasattr(new_data.index[0], 'strftime'):
+            start_str = new_data.index.min().strftime('%d.%m.%Y %H:%M')
+            end_str = new_data.index.max().strftime('%d.%m.%Y %H:%M')
+            self._log(f"Zeitraum geladen: {start_str} - {end_str}")
+
+    def set_data_file(self, file_path: str):
+        """Setzt den Dateipfad fuer die Zeitraum-Auswahl."""
+        self.current_data_file = file_path
 
     def closeEvent(self, event):
         """Behandelt das Schliessen des Fensters."""
