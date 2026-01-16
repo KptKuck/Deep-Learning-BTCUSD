@@ -398,6 +398,24 @@ class BacktestWindow(QMainWindow):
             trade_layout.addWidget(self.trade_toolbar)
             trade_layout.addWidget(self.trade_canvas)
 
+            # Trade-Detail-Panel unter dem Chart
+            self.trade_detail_label = QLabel("Klicke auf einen Trade-Marker im Chart fuer Details")
+            self.trade_detail_label.setStyleSheet("""
+                QLabel {
+                    background-color: #1a1a1a;
+                    color: #808080;
+                    padding: 8px;
+                    border: 1px solid #333;
+                    font-family: Consolas, monospace;
+                    font-size: 11px;
+                }
+            """)
+            self.trade_detail_label.setMinimumHeight(35)
+            trade_layout.addWidget(self.trade_detail_label)
+
+            # Pick-Event fuer Trade-Marker registrieren
+            self.trade_canvas.mpl_connect('pick_event', self._on_trade_picked)
+
             self.chart_tabs.addTab(trade_widget, "Trades")
 
             # === Tab 3: Equity-Chart ===
@@ -1538,7 +1556,7 @@ class BacktestWindow(QMainWindow):
         wins = 0
         losses = 0
 
-        for trade in self.trades:
+        for trade_index, trade in enumerate(self.trades):
             entry_idx = trade.get('entry_index', 0) - 1
             exit_idx = trade.get('exit_index', 0) - 1
             pnl = trade.get('pnl', 0)
@@ -1566,19 +1584,21 @@ class BacktestWindow(QMainWindow):
             self.ax_trade.plot([entry_date, exit_date], [entry_price, exit_price],
                               color=color, linewidth=2, alpha=0.8)
 
-            # Entry-Marker
+            # Entry-Marker (anklickbar)
             if trade_type == 'LONG':
-                self.ax_trade.scatter([entry_date], [entry_price],
+                entry_scatter = self.ax_trade.scatter([entry_date], [entry_price],
                                      marker='^', c='#33cc33', s=80, zorder=5,
-                                     edgecolors='white', linewidths=0.5)
+                                     edgecolors='white', linewidths=0.5, picker=True)
             else:  # SHORT
-                self.ax_trade.scatter([entry_date], [entry_price],
+                entry_scatter = self.ax_trade.scatter([entry_date], [entry_price],
                                      marker='v', c='#cc3333', s=80, zorder=5,
-                                     edgecolors='white', linewidths=0.5)
+                                     edgecolors='white', linewidths=0.5, picker=True)
+            entry_scatter.trade_index = trade_index
 
-            # Exit-Marker (X)
-            self.ax_trade.scatter([exit_date], [exit_price],
-                                 marker='x', c=color, s=60, zorder=5, linewidths=2)
+            # Exit-Marker (X, anklickbar)
+            exit_scatter = self.ax_trade.scatter([exit_date], [exit_price],
+                                 marker='x', c=color, s=60, zorder=5, linewidths=2, picker=True)
+            exit_scatter.trade_index = trade_index
 
             # P/L Text am Exit (Gewinn oben, Verlust unten) mit Verbindungslinie
             pnl_text = f'+${pnl:.0f}' if pnl > 0 else f'-${abs(pnl):.0f}'
@@ -1627,6 +1647,66 @@ class BacktestWindow(QMainWindow):
 
         self.trade_figure.tight_layout()
         self.trade_canvas.draw()
+
+    def _on_trade_picked(self, event):
+        """Wird aufgerufen wenn ein Trade-Marker angeklickt wird."""
+        artist = event.artist
+        if hasattr(artist, 'trade_index'):
+            idx = artist.trade_index
+            if 0 <= idx < len(self.trades):
+                self._update_trade_detail(self.trades[idx], idx)
+
+    def _update_trade_detail(self, trade: dict, idx: int):
+        """Aktualisiert das Trade-Detail-Panel mit den Trade-Daten."""
+        entry_idx = trade.get('entry_index', 0) - 1
+        exit_idx = trade.get('exit_index', 0) - 1
+        pnl = trade.get('pnl', 0)
+        entry_price = trade.get('entry_price', 0)
+        exit_price = trade.get('exit_price', 0)
+        trade_type = trade.get('position', 'LONG')
+        reason = trade.get('reason', '-')
+
+        # Zeit-Informationen
+        entry_time = "-"
+        exit_time = "-"
+        duration = "-"
+        if self.data is not None and entry_idx >= 0 and exit_idx >= 0:
+            if entry_idx < len(self.data):
+                entry_dt = self._get_datetime(entry_idx)
+                entry_time = entry_dt.strftime('%Y-%m-%d %H:%M') if entry_dt else "-"
+            if exit_idx < len(self.data):
+                exit_dt = self._get_datetime(exit_idx)
+                exit_time = exit_dt.strftime('%Y-%m-%d %H:%M') if exit_dt else "-"
+            # Echte Zeitdauer berechnen
+            if entry_dt and exit_dt:
+                time_diff = exit_dt - entry_dt
+                duration = self._format_duration(time_diff)
+
+        # P/L Prozent
+        pnl_pct = (pnl / entry_price * 100) if entry_price > 0 else 0
+
+        # Farbe basierend auf P/L
+        pnl_color = '#33cc33' if pnl >= 0 else '#cc3333'
+        pnl_text = f"+${pnl:,.2f}" if pnl >= 0 else f"-${abs(pnl):,.2f}"
+
+        # Detail-Text formatieren
+        text = (f"#{idx + 1} | {trade_type} | "
+                f"Entry: {entry_time} @ ${entry_price:,.2f} | "
+                f"Exit: {exit_time} @ ${exit_price:,.2f} | "
+                f"P/L: {pnl_text} ({pnl_pct:+.2f}%) | "
+                f"Dauer: {duration} | Grund: {reason}")
+
+        self.trade_detail_label.setText(text)
+        self.trade_detail_label.setStyleSheet(f"""
+            QLabel {{
+                background-color: #1a1a1a;
+                color: {pnl_color};
+                padding: 8px;
+                border: 1px solid {pnl_color};
+                font-family: Consolas, monospace;
+                font-size: 11px;
+            }}
+        """)
 
     def _finalize_backtest(self):
         """Finalisiert den Backtest."""
