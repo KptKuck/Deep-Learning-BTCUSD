@@ -95,11 +95,6 @@ class BacktestWindow(QMainWindow):
         self.debug_mode = False
         self.invert_signals = False
 
-        # Benchmark-Tracking
-        self._benchmark_enabled = True
-        self._benchmark_data: Dict[str, List[float]] = {}
-        self._benchmark_call_count: Dict[str, int] = {}
-
         self._setup_ui()
         self.setStyleSheet(get_stylesheet())
 
@@ -114,69 +109,6 @@ class BacktestWindow(QMainWindow):
         """Loggt DEBUG-Nachricht nur wenn debug_mode aktiv ist."""
         if self.debug_mode:
             self._log(f'[DEBUG] {message}', 'DEBUG')
-
-    def _benchmark_start(self) -> float:
-        """Startet Zeitmessung fuer Benchmark."""
-        if self._benchmark_enabled:
-            return time.perf_counter()
-        return 0.0
-
-    def _benchmark_record(self, func_name: str, start_time: float):
-        """Zeichnet Benchmark-Zeit auf."""
-        if not self._benchmark_enabled or start_time == 0.0:
-            return
-        elapsed_ms = (time.perf_counter() - start_time) * 1000
-        if func_name not in self._benchmark_data:
-            self._benchmark_data[func_name] = []
-            self._benchmark_call_count[func_name] = 0
-        self._benchmark_data[func_name].append(elapsed_ms)
-        self._benchmark_call_count[func_name] += 1
-
-    def _benchmark_report(self):
-        """Gibt Benchmark-Report aus."""
-        if not self._benchmark_data:
-            self._log("[BENCHMARK] Keine Daten gesammelt", 'INFO')
-            return
-
-        self._log("=" * 60, 'INFO')
-        self._log("[BENCHMARK] Funktions-Performance Report", 'INFO')
-        self._log("=" * 60, 'INFO')
-
-        # Sortiere nach Gesamtzeit (absteigend)
-        sorted_funcs = sorted(
-            self._benchmark_data.keys(),
-            key=lambda f: sum(self._benchmark_data[f]),
-            reverse=True
-        )
-
-        for func_name in sorted_funcs:
-            times = self._benchmark_data[func_name]
-            count = self._benchmark_call_count[func_name]
-            total_ms = sum(times)
-            avg_ms = total_ms / len(times) if times else 0
-            min_ms = min(times) if times else 0
-            max_ms = max(times) if times else 0
-
-            self._log(
-                f"  {func_name:30s} | "
-                f"Calls: {count:6d} | "
-                f"Total: {total_ms:8.1f}ms | "
-                f"Avg: {avg_ms:6.3f}ms | "
-                f"Min: {min_ms:6.3f}ms | "
-                f"Max: {max_ms:6.3f}ms",
-                'INFO'
-            )
-
-        # Gesamtzeit
-        total_all = sum(sum(times) for times in self._benchmark_data.values())
-        self._log("-" * 60, 'INFO')
-        self._log(f"  {'GESAMT':30s} | Total: {total_all:8.1f}ms", 'INFO')
-        self._log("=" * 60, 'INFO')
-
-    def _benchmark_reset(self):
-        """Setzt Benchmark-Daten zurueck."""
-        self._benchmark_data.clear()
-        self._benchmark_call_count.clear()
 
     def _setup_ui(self):
         """Erstellt die 3-Spalten Benutzeroberflaeche."""
@@ -368,9 +300,6 @@ class BacktestWindow(QMainWindow):
         self.stats_panel.reset_labels()
         self.chart_panel.initialize_charts()
 
-        # Benchmark-Daten zuruecksetzen
-        self._benchmark_reset()
-
     def _single_step(self):
         """Fuehrt einen einzelnen Schritt aus."""
         if self.data is None or self.current_index > len(self.data):
@@ -398,17 +327,12 @@ class BacktestWindow(QMainWindow):
 
     def _process_step(self):
         """Verarbeitet einen einzelnen Backtest-Schritt."""
-        t_total = self._benchmark_start()
-
         if self.data is None or self.current_index > len(self.data):
             return
 
         idx = self.current_index - 1
         current_price = self.data['Close'].iloc[idx]
-
-        t_signal = self._benchmark_start()
         signal = self._get_signal(idx)
-        self._benchmark_record('_get_signal', t_signal)
 
         self.signal_history.append({
             'index': self.current_index,
@@ -423,16 +347,9 @@ class BacktestWindow(QMainWindow):
         else:
             self.hold_count += 1
 
-        t_proc = self._benchmark_start()
         self._process_signal(signal, current_price, self.current_index)
-        self._benchmark_record('_process_signal', t_proc)
-
-        t_equity = self._benchmark_start()
         self._update_equity(current_price)
-        self._benchmark_record('_update_equity', t_equity)
-
         self.current_index += 1
-        self._benchmark_record('_process_step', t_total)
 
     def _get_signal(self, idx: int) -> int:
         """Ermittelt das Signal fuer den aktuellen Index."""
@@ -543,29 +460,11 @@ class BacktestWindow(QMainWindow):
 
     def _update_ui(self):
         """Aktualisiert die UI-Elemente."""
-        t_total = self._benchmark_start()
-
-        t = self._benchmark_start()
         self._update_datapoint_label()
-        self._benchmark_record('_update_datapoint_label', t)
-
-        t = self._benchmark_start()
         self._update_position_labels()
-        self._benchmark_record('_update_position_labels', t)
-
-        t = self._benchmark_start()
         self._update_pnl_labels()
-        self._benchmark_record('_update_pnl_labels', t)
-
-        t = self._benchmark_start()
         self._update_trade_stats()
-        self._benchmark_record('_update_trade_stats', t)
-
-        t = self._benchmark_start()
         self._update_signal_counts()
-        self._benchmark_record('_update_signal_counts', t)
-
-        self._benchmark_record('_update_ui', t_total)
 
     def _update_datapoint_label(self):
         """Aktualisiert die Fortschritts-Anzeige."""
@@ -643,7 +542,6 @@ class BacktestWindow(QMainWindow):
 
     def _update_charts(self):
         """Aktualisiert die Charts."""
-        t = self._benchmark_start()
         self.chart_panel.update_charts(
             current_index=self.current_index,
             signal_history=self.signal_history,
@@ -659,7 +557,6 @@ class BacktestWindow(QMainWindow):
             entry_price=self.entry_price,
             entry_index=self.entry_index
         )
-        self._benchmark_record('_update_charts', t)
 
     def _finalize_backtest(self):
         """Finalisiert den Backtest."""
@@ -672,9 +569,6 @@ class BacktestWindow(QMainWindow):
 
         self._update_charts()
         self.control_panel.add_tradelog("=== Backtest abgeschlossen ===")
-
-        # Benchmark-Report ausgeben
-        self._benchmark_report()
         self.control_panel.add_tradelog(f"Gesamt P/L: ${self.total_pnl:,.2f}")
         self.control_panel.add_tradelog(f"Trades: {len(self.trades)}")
 
