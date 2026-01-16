@@ -86,9 +86,6 @@ class BiLSTMClassifier(BaseModel):
         # LSTM-Layer (ModuleList fuer variable Groessen)
         self.lstm_layers = nn.ModuleList()
 
-        # Projection-Layer (zwischen unterschiedlichen hidden_sizes)
-        self.projections = nn.ModuleList()
-
         # Layer Normalization (optional)
         if use_layer_norm:
             self.layer_norms = nn.ModuleList()
@@ -121,19 +118,6 @@ class BiLSTMClassifier(BaseModel):
                     bidirectional=bidirectional
                 )
             )
-
-            # Projection Layer (falls naechster Layer andere Groesse hat)
-            if i < self.num_layers - 1:
-                current_out = hidden_size * self.num_directions
-                next_in = self.hidden_sizes[i + 1] * self.num_directions
-
-                if current_out != next_in:
-                    self.projections.append(nn.Linear(current_out, next_in))
-                else:
-                    self.projections.append(nn.Identity())
-            else:
-                # Kein Projection nach letztem Layer
-                self.projections.append(None)
 
             # Layer Normalization
             if use_layer_norm:
@@ -213,10 +197,6 @@ class BiLSTMClassifier(BaseModel):
             # Dropout zwischen Layern (nicht nach letztem Layer)
             if i < self.num_layers - 1:
                 lstm_out = self.dropout(lstm_out)
-
-                # Projection falls naechster Layer andere Groesse hat
-                if self.projections[i] is not None:
-                    lstm_out = self.projections[i](lstm_out)
 
             # Input fuer naechsten Layer
             x = lstm_out

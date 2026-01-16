@@ -87,9 +87,6 @@ class GRUClassifier(BaseModel):
         # GRU-Layer (ModuleList fuer variable Groessen)
         self.gru_layers = nn.ModuleList()
 
-        # Projection-Layer (zwischen unterschiedlichen hidden_sizes)
-        self.projections = nn.ModuleList()
-
         # Layer Normalization (optional)
         if use_layer_norm:
             self.layer_norms = nn.ModuleList()
@@ -121,18 +118,6 @@ class GRUClassifier(BaseModel):
                     bidirectional=bidirectional
                 )
             )
-
-            # Projection Layer
-            if i < self.num_layers - 1:
-                current_out = hidden_size * self.num_directions
-                next_in = self.hidden_sizes[i + 1] * self.num_directions
-
-                if current_out != next_in:
-                    self.projections.append(nn.Linear(current_out, next_in))
-                else:
-                    self.projections.append(nn.Identity())
-            else:
-                self.projections.append(None)
 
             # Layer Normalization
             if use_layer_norm:
@@ -208,9 +193,6 @@ class GRUClassifier(BaseModel):
             # Dropout zwischen Layern
             if i < self.num_layers - 1:
                 gru_out = self.dropout(gru_out)
-
-                if self.projections[i] is not None:
-                    gru_out = self.projections[i](gru_out)
 
             x = gru_out
 
