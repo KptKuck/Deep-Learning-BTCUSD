@@ -7,6 +7,7 @@ torchvision>=0.15.0
 
 # GUI
 PyQt6>=6.5.0
+pyqtgraph>=0.14.0
 
 # Datenverarbeitung
 pandas>=2.0.0
