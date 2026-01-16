@@ -1600,9 +1600,9 @@ class TrainingWindow(QMainWindow):
 
         # Ergebnis-Tabelle
         self.auto_results_table = QTableWidget()
-        self.auto_results_table.setColumnCount(7)
+        self.auto_results_table.setColumnCount(8)
         self.auto_results_table.setHorizontalHeaderLabels([
-            'Rang', 'Modell', 'Config', 'Val ACC', 'F1', 'Epochen', 'Parameter'
+            'Rang', 'Modell', 'Config', 'Train ACC', 'Val ACC', 'F1', 'Epochen', 'Parameter'
         ])
         self.auto_results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.auto_results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -1823,10 +1823,11 @@ class TrainingWindow(QMainWindow):
             self.auto_results_table.setItem(row, 0, QTableWidgetItem(str(r.rank)))
             self.auto_results_table.setItem(row, 1, QTableWidgetItem(r.model_type))
             self.auto_results_table.setItem(row, 2, QTableWidgetItem(config_str))
-            self.auto_results_table.setItem(row, 3, QTableWidgetItem(f"{r.val_acc:.2%}"))
-            self.auto_results_table.setItem(row, 4, QTableWidgetItem(f"{r.f1_score:.3f}"))
-            self.auto_results_table.setItem(row, 5, QTableWidgetItem(str(r.epochs_trained)))
-            self.auto_results_table.setItem(row, 6, QTableWidgetItem(f"{r.num_parameters:,}"))
+            self.auto_results_table.setItem(row, 3, QTableWidgetItem(f"{r.train_acc:.2%}"))
+            self.auto_results_table.setItem(row, 4, QTableWidgetItem(f"{r.val_acc:.2%}"))
+            self.auto_results_table.setItem(row, 5, QTableWidgetItem(f"{r.f1_score:.3f}"))
+            self.auto_results_table.setItem(row, 6, QTableWidgetItem(str(r.epochs_trained)))
+            self.auto_results_table.setItem(row, 7, QTableWidgetItem(f"{r.num_parameters:,}"))
 
         self.adopt_best_btn.setEnabled(len(results) > 0)
         self.export_results_btn.setEnabled(len(results) > 0)
