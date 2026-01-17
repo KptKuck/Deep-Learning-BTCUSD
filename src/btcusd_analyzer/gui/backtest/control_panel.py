@@ -43,6 +43,10 @@ class ControlPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # Cache fuer Style-Zustaende (vermeidet wiederholte setStyleSheet-Aufrufe)
+        self._last_position_style = None
+        self._last_unrealized_style = None
+        self._last_signal_style = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -268,12 +272,18 @@ class ControlPanel(QWidget):
     def update_position(self, position: str, entry_price: float, current_price: float, unrealized: float):
         """Aktualisiert die Positions-Anzeige."""
         self.position_label.setText(position)
+
+        # Position-Style nur bei Aenderung setzen
         if position == 'LONG':
-            self.position_label.setStyleSheet("color: rgb(77, 230, 77); font-weight: bold;")
+            new_style = "color: rgb(77, 230, 77); font-weight: bold;"
         elif position == 'SHORT':
-            self.position_label.setStyleSheet("color: rgb(230, 77, 77); font-weight: bold;")
+            new_style = "color: rgb(230, 77, 77); font-weight: bold;"
         else:
-            self.position_label.setStyleSheet("color: gray;")
+            new_style = "color: gray;"
+
+        if new_style != self._last_position_style:
+            self.position_label.setStyleSheet(new_style)
+            self._last_position_style = new_style
 
         if entry_price > 0:
             self.entry_price_label.setText(f"${entry_price:,.2f}")
@@ -287,28 +297,35 @@ class ControlPanel(QWidget):
 
         if position != 'NONE':
             self.unrealized_pnl_label.setText(f"${unrealized:,.2f}")
-            if unrealized >= 0:
-                self.unrealized_pnl_label.setStyleSheet("color: rgb(77, 230, 77);")
-            else:
-                self.unrealized_pnl_label.setStyleSheet("color: rgb(230, 77, 77);")
+            new_unrealized_style = "color: rgb(77, 230, 77);" if unrealized >= 0 else "color: rgb(230, 77, 77);"
         else:
             self.unrealized_pnl_label.setText("-")
-            self.unrealized_pnl_label.setStyleSheet("color: white;")
+            new_unrealized_style = "color: white;"
+
+        # Unrealized-Style nur bei Aenderung setzen
+        if new_unrealized_style != self._last_unrealized_style:
+            self.unrealized_pnl_label.setStyleSheet(new_unrealized_style)
+            self._last_unrealized_style = new_unrealized_style
 
     def update_progress(self, current: int, total: int, date_str: str, signal: int):
         """Aktualisiert die Fortschritts-Anzeige."""
         self.datapoint_label.setText(f"{current} / {total}")
         self.date_label.setText(date_str)
 
+        # Signal-Style nur bei Aenderung setzen
         if signal == 1:
             self.signal_label.setText("BUY")
-            self.signal_label.setStyleSheet("color: rgb(77, 230, 77); font-weight: bold;")
+            new_style = "color: rgb(77, 230, 77); font-weight: bold;"
         elif signal == 2:
             self.signal_label.setText("SELL")
-            self.signal_label.setStyleSheet("color: rgb(230, 77, 77); font-weight: bold;")
+            new_style = "color: rgb(230, 77, 77); font-weight: bold;"
         else:
             self.signal_label.setText("HOLD")
-            self.signal_label.setStyleSheet("color: gray; font-weight: bold;")
+            new_style = "color: gray; font-weight: bold;"
+
+        if new_style != self._last_signal_style:
+            self.signal_label.setStyleSheet(new_style)
+            self._last_signal_style = new_style
 
     def reset_labels(self):
         """Setzt alle Labels zurueck."""
@@ -317,9 +334,14 @@ class ControlPanel(QWidget):
         self.entry_price_label.setText("-")
         self.current_price_label.setText("-")
         self.unrealized_pnl_label.setText("-")
+        self.unrealized_pnl_label.setStyleSheet("color: white;")
         self.signal_label.setText("-")
         self.signal_label.setStyleSheet("color: gray;")
         self.actual_speed_label.setText("- Schritte/Sek")
+        # Style-Cache zuruecksetzen
+        self._last_position_style = "color: gray;"
+        self._last_unrealized_style = "color: white;"
+        self._last_signal_style = None
 
     def _group_style(self, color: tuple) -> str:
         """Generiert GroupBox-Style mit farbigem Titel."""

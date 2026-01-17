@@ -97,6 +97,10 @@ class BacktestWindow(QMainWindow):
         self.steps_per_second = 10
         self.turbo_mode = True  # Standardmaessig aktiv fuer bessere Performance
 
+        # Batch-Processing: Mehrere Schritte pro Timer-Callback
+        self._batch_size = 1  # Wird dynamisch berechnet
+        self._timer_interval_ms = 16  # ~60 FPS fuer fluessige UI
+
         # Geschwindigkeitsmessung
         self._step_count = 0
         self._last_speed_update = 0.0
@@ -265,11 +269,15 @@ class BacktestWindow(QMainWindow):
             self._profiler.enable()
             self._log("Profiling gestartet", 'INFO')
 
-        # Timer starten
-        interval = int(1000 / self.steps_per_second)
+        # Batch-Size berechnen: steps_per_second / timer_calls_per_second
+        # Bei 16ms Intervall = ~62.5 Timer-Calls/Sek
+        timer_calls_per_sec = 1000 / self._timer_interval_ms
+        self._batch_size = max(1, int(self.steps_per_second / timer_calls_per_sec))
+
+        # Timer mit fixem Intervall starten (fuer fluessige UI)
         self.backtest_timer = QTimer()
         self.backtest_timer.timeout.connect(self._timer_callback)
-        self.backtest_timer.start(interval)
+        self.backtest_timer.start(self._timer_interval_ms)
 
         # Geschwindigkeitsmessung
         self._step_count = 0
@@ -346,7 +354,7 @@ class BacktestWindow(QMainWindow):
         self._update_charts()
 
     def _timer_callback(self):
-        """Timer-Callback fuer automatischen Durchlauf."""
+        """Timer-Callback fuer automatischen Durchlauf mit Batch-Processing."""
         if not self.is_running:
             return
 
@@ -354,11 +362,18 @@ class BacktestWindow(QMainWindow):
             self._finalize_backtest()
             return
 
-        self._process_step()
-        self._step_count += 1
+        # Batch-Processing: Mehrere Schritte pro Callback
+        for _ in range(self._batch_size):
+            if self.current_index > len(self.data):
+                self._finalize_backtest()
+                return
+            self._process_step()
+            self._step_count += 1
+
+        # UI nur einmal pro Batch aktualisieren
         self._update_ui()
 
-        if not self.turbo_mode and self.current_index % 10 == 0:
+        if not self.turbo_mode:
             self._update_charts()
 
     def _process_step(self):
@@ -610,8 +625,9 @@ class BacktestWindow(QMainWindow):
     def _update_speed(self, value: int):
         """Aktualisiert die eingestellte Geschwindigkeit."""
         self.steps_per_second = value
-        if self.is_running and self.backtest_timer:
-            self.backtest_timer.setInterval(int(1000 / value))
+        # Batch-Size neu berechnen
+        timer_calls_per_sec = 1000 / self._timer_interval_ms
+        self._batch_size = max(1, int(value / timer_calls_per_sec))
 
     def _update_actual_speed(self):
         """Berechnet und zeigt die tatsaechliche Geschwindigkeit an."""
