@@ -234,7 +234,7 @@ class AutoTrainerWidget(QWidget):
             self.results_table.setItem(row, 4, QTableWidgetItem(f"{result.val_acc:.2%}"))
             self.results_table.setItem(row, 5, QTableWidgetItem(f"{result.f1_score:.3f}"))
             self.results_table.setItem(row, 6, QTableWidgetItem(f"{result.epochs_trained}"))
-            self.results_table.setItem(row, 7, QTableWidgetItem(f"{result.num_params:,}"))
+            self.results_table.setItem(row, 7, QTableWidgetItem(f"{result.num_parameters:,}"))
 
             # Beste Zeile hervorheben
             if i == 0:
