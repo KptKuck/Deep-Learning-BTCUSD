@@ -103,6 +103,8 @@ class MainWindow(QMainWindow):
         self.log_level = 5  # 1-5 (ERROR bis TRACE)
         self.enable_timing = False
         self._gui_handler = None
+        self._log_entries: list[tuple[str, str, str]] = []  # (timestamp, level, message)
+        self._max_log_entries = 2000  # Maximum Eintraege im Speicher
 
         # UI initialisieren
         self._init_ui()
@@ -862,58 +864,105 @@ class MainWindow(QMainWindow):
         logger_layout.setContentsMargins(0, 0, 0, 0)
         logger_layout.setSpacing(5)
 
-        # Logger Header
-        header_layout = QHBoxLayout()
+        # === Logger Header (2 Zeilen) ===
+        header_frame = QFrame()
+        header_frame.setStyleSheet('''
+            QFrame {
+                background-color: #1e1e2e;
+                border: 1px solid #333355;
+                border-radius: 4px;
+                padding: 4px;
+            }
+        ''')
+        header_frame_layout = QVBoxLayout(header_frame)
+        header_frame_layout.setContentsMargins(8, 4, 8, 4)
+        header_frame_layout.setSpacing(4)
 
-        # Titel
+        # Zeile 1: Titel + Schriftgroesse
+        row1 = QHBoxLayout()
+        row1.setSpacing(8)
+
         logger_title = QLabel('Logger')
-        logger_title.setFont(QFont('Segoe UI', 14, QFont.Weight.Bold))
-        header_layout.addWidget(logger_title)
+        logger_title.setFont(QFont('Segoe UI', 12, QFont.Weight.Bold))
+        logger_title.setStyleSheet('color: #90cdf4;')
+        row1.addWidget(logger_title)
 
-        # Modus Dropdown
+        row1.addStretch()
+
+        # Schriftgroesse
+        font_label = QLabel('Schrift:')
+        font_label.setStyleSheet('color: #888888;')
+        row1.addWidget(font_label)
+
+        self.font_slider = QSlider(Qt.Orientation.Horizontal)
+        self.font_slider.setRange(8, 14)
+        self.font_slider.setValue(10)
+        self.font_slider.setFixedWidth(80)
+        self.font_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.font_slider.setTickInterval(2)
+        self.font_slider.valueChanged.connect(self._update_log_font_size)
+        row1.addWidget(self.font_slider)
+
+        self.font_size_label = QLabel('10')
+        self.font_size_label.setFixedWidth(20)
+        self.font_size_label.setStyleSheet('color: #888888;')
+        row1.addWidget(self.font_size_label)
+
+        header_frame_layout.addLayout(row1)
+
+        # Zeile 2: Optionen (Modus, Level, Timing, Clear)
+        row2 = QHBoxLayout()
+        row2.setSpacing(12)
+
+        # Modus
+        mode_label = QLabel('Modus:')
+        mode_label.setStyleSheet('color: #888888;')
+        row2.addWidget(mode_label)
+
         self.logger_mode_combo = QComboBox()
         self.logger_mode_combo.addItems(['Fenster', 'Fenster+Datei', 'Nur Datei'])
         self.logger_mode_combo.setCurrentIndex(1)  # Default: Fenster+Datei
+        self.logger_mode_combo.setFixedWidth(110)
         self.logger_mode_combo.currentIndexChanged.connect(self._update_logger_mode)
-        header_layout.addWidget(self.logger_mode_combo)
+        row2.addWidget(self.logger_mode_combo)
 
-        # Level Dropdown
+        # Level
+        level_label = QLabel('Level:')
+        level_label.setStyleSheet('color: #888888;')
+        row2.addWidget(level_label)
+
         self.logger_level_combo = QComboBox()
         self.logger_level_combo.addItems(['ERROR', 'WARNING', 'INFO', 'DEBUG', 'TRACE'])
         self.logger_level_combo.setCurrentIndex(4)  # Default: TRACE
-        self.logger_level_combo.setToolTip('Log-Level: Zeigt alle Meldungen bis zu diesem Level')
+        self.logger_level_combo.setFixedWidth(90)
+        self.logger_level_combo.setToolTip('Log-Level: Filtert die Anzeige (alle Meldungen bleiben gespeichert)')
         self.logger_level_combo.currentIndexChanged.connect(self._update_logger_level)
-        header_layout.addWidget(self.logger_level_combo)
+        row2.addWidget(self.logger_level_combo)
+
+        # Timing Checkbox
+        self.timing_checkbox = QCheckBox('Timing')
+        self.timing_checkbox.setToolTip('Zeitmessung aktivieren')
+        self.timing_checkbox.stateChanged.connect(self._update_timing)
+        row2.addWidget(self.timing_checkbox)
+
+        row2.addStretch()
+
+        # Anzahl-Label
+        self.log_count_label = QLabel('0')
+        self.log_count_label.setStyleSheet('color: #666666;')
+        self.log_count_label.setToolTip('Anzahl sichtbarer / gespeicherter Meldungen')
+        row2.addWidget(self.log_count_label)
 
         # Clear Button
         clear_btn = QPushButton('Clear')
         clear_btn.setFixedWidth(60)
+        clear_btn.setFixedHeight(26)
+        clear_btn.setFont(QFont('Segoe UI', 9))
         clear_btn.clicked.connect(self._clear_log)
-        header_layout.addWidget(clear_btn)
+        row2.addWidget(clear_btn)
 
-        # Timing Checkbox
-        self.timing_checkbox = QCheckBox('Timing')
-        self.timing_checkbox.setToolTip('Zeitmessung aktivieren (in TRACE immer aktiv)')
-        self.timing_checkbox.stateChanged.connect(self._update_timing)
-        header_layout.addWidget(self.timing_checkbox)
-
-        header_layout.addStretch()
-
-        # Schrift Label
-        font_label = QLabel('Schrift:')
-        header_layout.addWidget(font_label)
-
-        # Font Size Slider
-        self.font_slider = QSlider(Qt.Orientation.Horizontal)
-        self.font_slider.setRange(8, 14)
-        self.font_slider.setValue(10)
-        self.font_slider.setFixedWidth(100)
-        self.font_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.font_slider.setTickInterval(2)
-        self.font_slider.valueChanged.connect(self._update_log_font_size)
-        header_layout.addWidget(self.font_slider)
-
-        logger_layout.addLayout(header_layout)
+        header_frame_layout.addLayout(row2)
+        logger_layout.addWidget(header_frame)
 
         # Logger Textbereich (HTML-faehig)
         self.log_text = QTextEdit()
@@ -1009,6 +1058,58 @@ class MainWindow(QMainWindow):
 
     # === Log-Methoden ===
 
+    # Level-Prioritaeten (hoeher = wichtiger)
+    _LEVEL_PRIORITY = {
+        'TRACE': 1,
+        'DEBUG': 2,
+        'INFO': 3,
+        'SUCCESS': 3,  # Gleiche Prioritaet wie INFO
+        'WARNING': 4,
+        'ERROR': 5,
+        'CRITICAL': 6,
+        'TIMING': 1,  # Wie TRACE
+    }
+
+    # Farben nach Level
+    _LOG_COLORS = {
+        'TRACE': '#888888',
+        'DEBUG': '#b19cd9',
+        'INFO': '#90cdf4',
+        'SUCCESS': '#68d391',
+        'WARNING': '#fbd38d',
+        'ERROR': '#fc8181',
+        'CRITICAL': '#ff6b6b',
+        'TIMING': '#80cbc4',
+    }
+
+    _LOG_BG_COLORS = {
+        'TRACE': '#2d2d2d',
+        'DEBUG': '#3d3d5c',
+        'INFO': '#2d3748',
+        'SUCCESS': '#22543d',
+        'WARNING': '#744210',
+        'ERROR': '#742a2a',
+        'CRITICAL': '#5c1a1a',
+        'TIMING': '#1a3d3d',
+    }
+
+    def _should_show_level(self, level: str) -> bool:
+        """Prueft ob ein Level bei aktuellem Filter angezeigt werden soll."""
+        # log_level: 1=ERROR, 2=WARNING, 3=INFO, 4=DEBUG, 5=TRACE
+        min_priority = 6 - self.log_level  # Umrechnung: 5->1, 4->2, 3->3, 2->4, 1->5
+        level_priority = self._LEVEL_PRIORITY.get(level, 3)
+        return level_priority >= min_priority
+
+    def _format_log_html(self, timestamp: str, level: str, message: str) -> str:
+        """Formatiert einen Log-Eintrag als HTML."""
+        color = self._LOG_COLORS.get(level, '#cccccc')
+        bg = self._LOG_BG_COLORS.get(level, '#2d2d2d')
+        return f'''<div style="background-color: {bg}; padding: 2px 5px; margin: 1px 0; border-radius: 3px;">
+            <span style="color: #a0aec0;">[{timestamp}]</span>
+            <span style="color: {color}; font-weight: bold;">[{level}]</span>
+            <span style="color: {color};">{message}</span>
+        </div>'''
+
     def _log(self, message: str, level: str = 'INFO', _from_handler: bool = False):
         """
         Schreibt eine Nachricht in den Logger.
@@ -1020,43 +1121,24 @@ class MainWindow(QMainWindow):
         """
         timestamp = datetime.now().strftime('%H:%M:%S')
 
-        # Farben nach Level
-        colors = {
-            'TRACE': '#888888',
-            'DEBUG': '#b19cd9',
-            'INFO': '#90cdf4',
-            'SUCCESS': '#68d391',
-            'WARNING': '#fbd38d',
-            'ERROR': '#fc8181',
-            'CRITICAL': '#ff6b6b',
-            'TIMING': '#80cbc4',
-        }
+        # Eintrag speichern (fuer spaetere Filterung)
+        self._log_entries.append((timestamp, level, message))
 
-        bg_colors = {
-            'TRACE': '#2d2d2d',
-            'DEBUG': '#3d3d5c',
-            'INFO': '#2d3748',
-            'SUCCESS': '#22543d',
-            'WARNING': '#744210',
-            'ERROR': '#742a2a',
-            'CRITICAL': '#5c1a1a',
-            'TIMING': '#1a3d3d',
-        }
+        # Aelteste Eintraege entfernen wenn Maximum erreicht
+        if len(self._log_entries) > self._max_log_entries:
+            self._log_entries = self._log_entries[-self._max_log_entries:]
 
-        color = colors.get(level, '#cccccc')
-        bg = bg_colors.get(level, '#2d2d2d')
+        # Nur anzeigen wenn Level-Filter passt
+        if self._should_show_level(level):
+            html = self._format_log_html(timestamp, level, message)
+            self.log_text.append(html)
 
-        html = f'''<div style="background-color: {bg}; padding: 2px 5px; margin: 1px 0; border-radius: 3px;">
-            <span style="color: #a0aec0;">[{timestamp}]</span>
-            <span style="color: {color}; font-weight: bold;">[{level}]</span>
-            <span style="color: {color};">{message}</span>
-        </div>'''
+            # Auto-scroll
+            scrollbar = self.log_text.verticalScrollBar()
+            scrollbar.setValue(scrollbar.maximum())
 
-        self.log_text.append(html)
-
-        # Auto-scroll
-        scrollbar = self.log_text.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+        # Zaehler aktualisieren
+        self._update_log_count()
 
         # NUR an den echten Logger weiterleiten, wenn der Aufruf NICHT vom GUILogHandler kommt
         # (sonst wurde die Meldung bereits geloggt und wuerde doppelt erscheinen)
@@ -1082,6 +1164,28 @@ class MainWindow(QMainWindow):
             # GUI-Handler wieder aktivieren
             if self._gui_handler:
                 self._gui_handler.setLevel(Logger.TRACE)
+
+    def _rebuild_log_display(self):
+        """Baut die Log-Anzeige mit aktuellem Filter komplett neu auf."""
+        self.log_text.clear()
+
+        for timestamp, level, message in self._log_entries:
+            if self._should_show_level(level):
+                html = self._format_log_html(timestamp, level, message)
+                self.log_text.append(html)
+
+        # Auto-scroll ans Ende
+        scrollbar = self.log_text.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
+        # Zaehler aktualisieren
+        self._update_log_count()
+
+    def _update_log_count(self):
+        """Aktualisiert den Zaehler fuer sichtbare/gespeicherte Meldungen."""
+        visible = sum(1 for _, level, _ in self._log_entries if self._should_show_level(level))
+        total = len(self._log_entries)
+        self.log_count_label.setText(f'{visible}/{total}')
 
     def _setup_gui_log_handler(self):
         """Registriert den GUI-Handler beim Logger."""
@@ -1957,13 +2061,16 @@ class MainWindow(QMainWindow):
         self._log(f'Logger-Modus: {self.logger_mode_combo.currentText()}', 'DEBUG')
 
     def _update_logger_level(self, index):
-        """Aktualisiert das Log-Level."""
+        """Aktualisiert das Log-Level und filtert die Anzeige neu."""
         self.log_level = index + 1
-        self._log(f'Log-Level: {self.logger_level_combo.currentText()}', 'DEBUG')
+        # Log-Anzeige mit neuem Filter neu aufbauen
+        self._rebuild_log_display()
 
     def _clear_log(self):
-        """Leert den Log-Text."""
+        """Leert den Log-Text und die gespeicherten Eintraege."""
+        self._log_entries.clear()
         self.log_text.clear()
+        self._update_log_count()
 
     def _update_timing(self, state):
         """Aktualisiert die Timing-Einstellung."""
@@ -1972,6 +2079,7 @@ class MainWindow(QMainWindow):
     def _update_log_font_size(self, size: int):
         """Aktualisiert die Log-Schriftgroesse."""
         self._log_font_size = size
+        self.font_size_label.setText(str(size))
         self._update_log_stylesheet()
 
     def _update_log_stylesheet(self):
