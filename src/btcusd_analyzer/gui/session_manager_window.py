@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QComboBox, QGroupBox, QMessageBox, QWidget, QSplitter,
-    QTextEdit
+    QTextEdit, QApplication
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
@@ -50,7 +50,17 @@ class SessionManagerWindow(QDialog):
     def _init_ui(self):
         """Initialisiert die UI."""
         self.setWindowTitle('1.1 Session Manager')
-        self.setMinimumSize(1100, 800)
+
+        # Fenstergroesse: Breite fix, Hoehe 95% des Bildschirms
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_height = screen.availableGeometry().height()
+            window_height = int(screen_height * 0.95)
+        else:
+            window_height = 900
+
+        self.setMinimumSize(1100, 600)
+        self.resize(1100, window_height)
         self.setStyleSheet('''
             QDialog {
                 background-color: #262626;
