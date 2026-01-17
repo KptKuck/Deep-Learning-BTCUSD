@@ -95,6 +95,9 @@ class PrepareDataWindow(QMainWindow):
         self._init_ui()
         self._update_dynamic_limits()
 
+        # Fenster maximieren fuer volle Bildschirmhoehe
+        self.showMaximized()
+
     # Properties fuer Abwaertskompatibilitaet mit Boolean-Flags
     @property
     def peaks_valid(self) -> bool:

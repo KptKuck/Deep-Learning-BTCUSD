@@ -395,26 +395,28 @@ class TrainingWindow(QMainWindow):
 
         training_duration = (datetime.now() - training_start).total_seconds()
 
+        # Modell-Parameter direkt vom Modell holen (zuverlaessiger als config)
         model_info = {
             'model_type': model_name,
             'trained_at': timestamp,
             'training_duration_sec': round(training_duration, 1),
-            'input_size': self.model.input_size if hasattr(self.model, 'input_size') else None,
-            'num_classes': self.training_info.get('num_classes', 3) if self.training_info else 3,
+            'input_size': getattr(self.model, 'input_size', None),
+            'num_classes': getattr(self.model, 'num_classes', self.training_info.get('num_classes', 3) if self.training_info else 3),
             'epochs_trained': epoch,
             'best_accuracy': round(best_val_acc, 2),
             'final_val_loss': round(avg_val_loss, 4),
-            # Modellspezifische Parameter aus config uebernehmen
-            'hidden_sizes': config.get('hidden_sizes'),
-            'dropout': config.get('dropout'),
-            'use_layer_norm': config.get('use_layer_norm', False),
-            'use_attention': config.get('use_attention', False),
-            'use_residual': config.get('use_residual', False),
+            # BiLSTM/LSTM Parameter direkt vom Modell
+            'hidden_sizes': getattr(self.model, 'hidden_sizes', config.get('hidden_sizes')),
+            'dropout': getattr(self.model, 'dropout_rate', config.get('dropout')),
+            'use_layer_norm': getattr(self.model, 'use_layer_norm', config.get('use_layer_norm', False)),
+            'use_attention': getattr(self.model, 'use_attention', config.get('use_attention', False)),
+            'use_residual': getattr(self.model, 'use_residual', config.get('use_residual', False)),
+            'bidirectional': getattr(self.model, 'bidirectional', True),
             # Transformer-spezifische Parameter
-            'd_model': config.get('d_model'),
-            'nhead': config.get('nhead'),
-            'num_encoder_layers': config.get('num_encoder_layers'),
-            'dim_feedforward': config.get('dim_feedforward'),
+            'd_model': getattr(self.model, 'd_model', config.get('d_model')),
+            'nhead': getattr(self.model, 'nhead', config.get('nhead')),
+            'num_encoder_layers': getattr(self.model, 'num_encoder_layers', config.get('num_encoder_layers')),
+            'dim_feedforward': getattr(self.model, 'dim_feedforward', config.get('dim_feedforward')),
         }
 
         self.model.save(final_path, metrics={'best_accuracy': best_val_acc}, model_info=model_info)
