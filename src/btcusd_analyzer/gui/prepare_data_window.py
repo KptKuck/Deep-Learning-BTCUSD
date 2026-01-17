@@ -274,28 +274,32 @@ class PrepareDataWindow(QMainWindow):
 
         layout.addWidget(method_group)
 
-        # Gemeinsame Parameter
-        common_group = QGroupBox('Gemeinsame Parameter')
-        common_group.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
-        common_group.setStyleSheet(self._group_style('#7fe6b3'))
-        common_layout = QGridLayout(common_group)
+        # Future Return / ZigZag Parameter (nur fuer diese Methoden relevant)
+        self.common_group = QGroupBox('Rendite-Parameter')
+        self.common_group.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
+        self.common_group.setStyleSheet(self._group_style('#7fe6b3'))
+        common_layout = QGridLayout(self.common_group)
 
         # Lookforward
-        common_layout.addWidget(QLabel('Lookforward:'), 0, 0)
+        self.lookforward_label = QLabel('Lookforward:')
+        common_layout.addWidget(self.lookforward_label, 0, 0)
         self.peak_lookforward_spin = QSpinBox()
         self.peak_lookforward_spin.setRange(1, 500)
         self.peak_lookforward_spin.setValue(100)
+        self.peak_lookforward_spin.setToolTip('Anzahl Bars fuer Renditeberechnung')
         common_layout.addWidget(self.peak_lookforward_spin, 0, 1)
 
         # Threshold
-        common_layout.addWidget(QLabel('Threshold %:'), 1, 0)
+        self.threshold_label = QLabel('Threshold %:')
+        common_layout.addWidget(self.threshold_label, 1, 0)
         self.peak_threshold_spin = QDoubleSpinBox()
         self.peak_threshold_spin.setRange(0.1, 20.0)
         self.peak_threshold_spin.setValue(2.0)
         self.peak_threshold_spin.setSingleStep(0.1)
+        self.peak_threshold_spin.setToolTip('Min. Rendite fuer BUY/SELL Signal')
         common_layout.addWidget(self.peak_threshold_spin, 1, 1)
 
-        layout.addWidget(common_group)
+        layout.addWidget(self.common_group)
 
         # Methoden-spezifische Parameter
         self.method_params_group = QGroupBox('Methoden-Parameter')
@@ -390,10 +394,12 @@ class PrepareDataWindow(QMainWindow):
         self._invalidate_peaks()
 
     def _update_method_params_visibility(self):
-        """Zeigt/versteckt Methoden-spezifische Parameter."""
+        """Zeigt/versteckt Parameter je nach gewaehlter Methode."""
         method_idx = self.peak_method_combo.currentIndex()
+        # Methoden: 0=Future Return, 1=ZigZag, 2=Peak Detection,
+        #           3=Fractals, 4=Pivots, 5=Tages-Extrema, 6=Binary
 
-        # Alle verstecken
+        # Alle Methoden-Parameter verstecken
         for widget in [self.zigzag_label, self.zigzag_threshold_spin,
                        self.peak_distance_label, self.peak_distance_spin,
                        self.prominence_label, self.prominence_spin,
@@ -402,7 +408,13 @@ class PrepareDataWindow(QMainWindow):
                        self.pivot_label, self.pivot_lookback_spin]:
             widget.hide()
 
-        # Methoden-spezifisch anzeigen
+        # Rendite-Parameter (common_group) nur fuer Future Return und ZigZag
+        if method_idx in [0, 1, 6]:  # Future Return, ZigZag, Binary
+            self.common_group.show()
+        else:
+            self.common_group.hide()
+
+        # Methoden-spezifische Parameter anzeigen
         if method_idx == 1:  # ZigZag
             self.zigzag_label.show()
             self.zigzag_threshold_spin.show()
@@ -424,6 +436,7 @@ class PrepareDataWindow(QMainWindow):
             self.pivot_lookback_spin.show()
             self.method_params_group.show()
         else:
+            # Future Return, Tages-Extrema, Binary: keine Methoden-Parameter
             self.method_params_group.hide()
 
     def _find_peaks(self):
