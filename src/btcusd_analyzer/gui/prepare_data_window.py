@@ -321,12 +321,16 @@ class PrepareDataWindow(QMainWindow):
         self.zigzag_threshold_spin.setSingleStep(0.5)
         method_params_layout.addWidget(self.zigzag_threshold_spin, 0, 1)
 
-        # Peak Detection Parameter
+        # Peak Detection Parameter - Basis
         self.peak_distance_label = QLabel('Distance:')
         method_params_layout.addWidget(self.peak_distance_label, 1, 0)
         self.peak_distance_spin = QSpinBox()
         self.peak_distance_spin.setRange(1, 500)
-        self.peak_distance_spin.setValue(10)
+        self.peak_distance_spin.setValue(8)
+        self.peak_distance_spin.setToolTip(
+            "Minimaler Abstand zwischen Peaks in Datenpunkten.\n"
+            "Hoehere Werte = weniger, aber deutlichere Peaks."
+        )
         method_params_layout.addWidget(self.peak_distance_spin, 1, 1)
 
         self.prominence_label = QLabel('Prominence %:')
@@ -335,6 +339,10 @@ class PrepareDataWindow(QMainWindow):
         self.prominence_spin.setRange(0.0, 10.0)
         self.prominence_spin.setValue(0.5)
         self.prominence_spin.setSingleStep(0.1)
+        self.prominence_spin.setToolTip(
+            "Mindest-Prominenz als % des Preisbereichs.\n"
+            "Filtert kleine Schwankungen heraus."
+        )
         method_params_layout.addWidget(self.prominence_spin, 2, 1)
 
         self.peak_width_label = QLabel('Width:')
@@ -342,7 +350,71 @@ class PrepareDataWindow(QMainWindow):
         self.peak_width_spin = QSpinBox()
         self.peak_width_spin.setRange(0, 100)
         self.peak_width_spin.setValue(0)
+        self.peak_width_spin.setToolTip(
+            "Mindestbreite des Peaks in Datenpunkten.\n"
+            "0 = deaktiviert (keine Breiten-Einschraenkung)."
+        )
         method_params_layout.addWidget(self.peak_width_spin, 3, 1)
+
+        # Rel. Height (fuer Breitenberechnung)
+        self.rel_height_label = QLabel('Rel. Height:')
+        method_params_layout.addWidget(self.rel_height_label, 4, 0)
+        self.rel_height_spin = QDoubleSpinBox()
+        self.rel_height_spin.setRange(0.0, 1.0)
+        self.rel_height_spin.setValue(0.5)
+        self.rel_height_spin.setSingleStep(0.1)
+        self.rel_height_spin.setToolTip(
+            "Relative Hoehe (0-1) zur Breitenberechnung.\n"
+            "0.5 = Breite wird auf halber Peakhoehe gemessen."
+        )
+        method_params_layout.addWidget(self.rel_height_spin, 4, 1)
+
+        # Erweiterte Parameter (zweite Spalte)
+        self.height_label = QLabel('Height %:')
+        method_params_layout.addWidget(self.height_label, 1, 2)
+        self.height_spin = QDoubleSpinBox()
+        self.height_spin.setRange(0.0, 10.0)
+        self.height_spin.setValue(0.0)
+        self.height_spin.setSingleStep(0.1)
+        self.height_spin.setToolTip(
+            "Mindesthoehe als % des Preismittels.\n"
+            "0 = deaktiviert (keine Hoehen-Einschraenkung)."
+        )
+        method_params_layout.addWidget(self.height_spin, 1, 3)
+
+        self.threshold_pct_label = QLabel('Threshold %:')
+        method_params_layout.addWidget(self.threshold_pct_label, 2, 2)
+        self.threshold_pct_spin = QDoubleSpinBox()
+        self.threshold_pct_spin.setRange(0.0, 5.0)
+        self.threshold_pct_spin.setValue(0.0)
+        self.threshold_pct_spin.setSingleStep(0.1)
+        self.threshold_pct_spin.setToolTip(
+            "Schwellwert zwischen benachbarten Punkten\n"
+            "als % des Preisbereichs. 0 = deaktiviert."
+        )
+        method_params_layout.addWidget(self.threshold_pct_spin, 2, 3)
+
+        self.plateau_label = QLabel('Plateau Size:')
+        method_params_layout.addWidget(self.plateau_label, 3, 2)
+        self.plateau_spin = QSpinBox()
+        self.plateau_spin.setRange(0, 20)
+        self.plateau_spin.setValue(0)
+        self.plateau_spin.setToolTip(
+            "Minimale Plateau-Breite (flache Spitze)\n"
+            "in Datenpunkten. 0 = deaktiviert."
+        )
+        method_params_layout.addWidget(self.plateau_spin, 3, 3)
+
+        self.wlen_label = QLabel('Window Len:')
+        method_params_layout.addWidget(self.wlen_label, 4, 2)
+        self.wlen_spin = QSpinBox()
+        self.wlen_spin.setRange(0, 500)
+        self.wlen_spin.setValue(0)
+        self.wlen_spin.setToolTip(
+            "Fensterlaenge fuer Prominenz-Berechnung.\n"
+            "0 = gesamter Datenbereich wird verwendet."
+        )
+        method_params_layout.addWidget(self.wlen_spin, 4, 3)
 
         # Fractal Order
         self.fractal_label = QLabel('Fractal Order:')
@@ -409,6 +481,11 @@ class PrepareDataWindow(QMainWindow):
                        self.peak_distance_label, self.peak_distance_spin,
                        self.prominence_label, self.prominence_spin,
                        self.peak_width_label, self.peak_width_spin,
+                       self.rel_height_label, self.rel_height_spin,
+                       self.height_label, self.height_spin,
+                       self.threshold_pct_label, self.threshold_pct_spin,
+                       self.plateau_label, self.plateau_spin,
+                       self.wlen_label, self.wlen_spin,
                        self.fractal_label, self.fractal_order_spin,
                        self.pivot_label, self.pivot_lookback_spin]:
             widget.hide()
@@ -425,12 +502,24 @@ class PrepareDataWindow(QMainWindow):
             self.zigzag_threshold_spin.show()
             self.method_params_group.show()
         elif method_idx == 2:  # Peak Detection
+            # Basis-Parameter (linke Spalte)
             self.peak_distance_label.show()
             self.peak_distance_spin.show()
             self.prominence_label.show()
             self.prominence_spin.show()
             self.peak_width_label.show()
             self.peak_width_spin.show()
+            self.rel_height_label.show()
+            self.rel_height_spin.show()
+            # Erweiterte Parameter (rechte Spalte)
+            self.height_label.show()
+            self.height_spin.show()
+            self.threshold_pct_label.show()
+            self.threshold_pct_spin.show()
+            self.plateau_label.show()
+            self.plateau_spin.show()
+            self.wlen_label.show()
+            self.wlen_spin.show()
             self.method_params_group.show()
         elif method_idx == 3:  # Fractals
             self.fractal_label.show()
@@ -471,16 +560,24 @@ class PrepareDataWindow(QMainWindow):
             6: LabelingMethod.BINARY,
         }
 
-        # Config erstellen
+        # Config erstellen mit allen Peak-Parametern
         config = LabelingConfig(
             method=method_map[self.peak_method_combo.currentIndex()],
             lookforward=self.peak_lookforward_spin.value(),
             threshold_pct=self.peak_threshold_spin.value(),
             num_classes=3,  # Immer 3 fuer Peak-Erkennung
             zigzag_threshold=self.zigzag_threshold_spin.value(),
+            # Peak Detection Basis-Parameter
             peak_distance=self.peak_distance_spin.value(),
             peak_prominence=self.prominence_spin.value(),
             peak_width=self.peak_width_spin.value() if self.peak_width_spin.value() > 0 else None,
+            peak_rel_height=self.rel_height_spin.value(),
+            # Peak Detection Erweiterte Parameter (0 = deaktiviert)
+            peak_height=self.height_spin.value() if self.height_spin.value() > 0 else None,
+            peak_threshold=self.threshold_pct_spin.value() if self.threshold_pct_spin.value() > 0 else None,
+            peak_plateau_size=self.plateau_spin.value() if self.plateau_spin.value() > 0 else None,
+            peak_wlen=self.wlen_spin.value() if self.wlen_spin.value() > 0 else None,
+            # Andere Methoden
             fractal_order=self.fractal_order_spin.value(),
             pivot_lookback=self.pivot_lookback_spin.value(),
         )
