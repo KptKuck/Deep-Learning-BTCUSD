@@ -202,6 +202,9 @@ class PrepareDataWindow(QMainWindow):
         self.tab_widget.setTabEnabled(2, False)
         self.tab_widget.setTabEnabled(3, False)
 
+        # Initial: HOLD-Samples ausblenden (2 Klassen ist Standard)
+        self._update_hold_samples_visibility()
+
         # Status Label
         self.status_label = QLabel('1. Peak-Methode waehlen und Peaks finden')
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -439,6 +442,13 @@ class PrepareDataWindow(QMainWindow):
             # Future Return, Tages-Extrema, Binary: keine Methoden-Parameter
             self.method_params_group.hide()
 
+    def _update_hold_samples_visibility(self):
+        """Zeigt/versteckt HOLD-Samples Gruppe je nach Klassenanzahl."""
+        # Index 0 = 3 Klassen, Index 1 = 2 Klassen
+        is_three_classes = self.num_classes_combo.currentIndex() == 0
+        if hasattr(self, 'hold_group'):
+            self.hold_group.setVisible(is_three_classes)
+
     def _find_peaks(self):
         """Findet Peaks basierend auf der gewaehlten Methode (im Worker-Thread)."""
         from ..training.labeler import LabelingConfig, LabelingMethod
@@ -606,6 +616,9 @@ class PrepareDataWindow(QMainWindow):
         self.num_classes_combo.setToolTip(
             '3 Klassen: Peaks werden BUY/SELL, Rest wird HOLD\n'
             '2 Klassen: Nur BUY/SELL, kein HOLD'
+        )
+        self.num_classes_combo.currentIndexChanged.connect(
+            self._update_hold_samples_visibility
         )
         class_layout.addWidget(self.num_classes_combo)
 

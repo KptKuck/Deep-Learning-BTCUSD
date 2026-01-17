@@ -188,13 +188,13 @@ class FeatureProcessor:
         """Prozentuale Preisspanne."""
         return ((df['High'] - df['Low']) / df['Low']) * 100
 
-    def _calc_typical_price(self, df: pd.DataFrame) -> pd.Series:
+    def _calc_typicalprice(self, df: pd.DataFrame) -> pd.Series:
         """Typischer Preis (HLC/3)."""
         return (df['High'] + df['Low'] + df['Close']) / 3
 
     def _calc_hlc3(self, df: pd.DataFrame) -> pd.Series:
         """Alias fuer Typical Price."""
-        return self._calc_typical_price(df)
+        return self._calc_typicalprice(df)
 
     def _calc_ohlc4(self, df: pd.DataFrame) -> pd.Series:
         """OHLC/4 Durchschnitt."""
