@@ -171,7 +171,7 @@ class BacktestWindow(QMainWindow):
     def _connect_control_signals(self):
         """Verbindet die Signale des Control-Panels."""
         self.control_panel.start_clicked.connect(self._start_backtest)
-        self.control_panel.stop_clicked.connect(self._stop_backtest)
+        self.control_panel.stop_clicked.connect(self._manual_stop)
         self.control_panel.step_clicked.connect(self._single_step)
         self.control_panel.reset_clicked.connect(self._reset_backtest)
         self.control_panel.stats_clicked.connect(self._show_trade_statistics)
@@ -269,27 +269,70 @@ class BacktestWindow(QMainWindow):
             self._profiler.enable()
             self._log("Profiling gestartet", 'INFO')
 
-        # Batch-Size berechnen: steps_per_second / timer_calls_per_second
-        # Bei 16ms Intervall = ~62.5 Timer-Calls/Sek
-        timer_calls_per_sec = 1000 / self._timer_interval_ms
-        self._batch_size = max(1, int(self.steps_per_second / timer_calls_per_sec))
-
-        # Timer mit fixem Intervall starten (fuer fluessige UI)
-        self.backtest_timer = QTimer()
-        self.backtest_timer.timeout.connect(self._timer_callback)
-        self.backtest_timer.start(self._timer_interval_ms)
-
         # Geschwindigkeitsmessung
         self._step_count = 0
         self._last_speed_update = time.perf_counter()
-        self._speed_update_timer = QTimer()
-        self._speed_update_timer.timeout.connect(self._update_actual_speed)
-        self._speed_update_timer.start(500)
 
-        self.control_panel.set_actual_speed(f"0 / {self.steps_per_second} Schritte/Sek")
+        # Turbo-Modus: Instant-Durchlauf ohne Timer
+        if self.turbo_mode:
+            self._run_instant_backtest()
+        else:
+            # Normaler Modus mit Timer fuer Animation
+            timer_calls_per_sec = 1000 / self._timer_interval_ms
+            self._batch_size = max(1, int(self.steps_per_second / timer_calls_per_sec))
+
+            self.backtest_timer = QTimer()
+            self.backtest_timer.timeout.connect(self._timer_callback)
+            self.backtest_timer.start(self._timer_interval_ms)
+
+            self._speed_update_timer = QTimer()
+            self._speed_update_timer.timeout.connect(self._update_actual_speed)
+            self._speed_update_timer.start(500)
+
+            self.control_panel.set_actual_speed(f"0 / {self.steps_per_second} Schritte/Sek")
+
+    def _run_instant_backtest(self):
+        """Fuehrt den Backtest sofort ohne Timer durch (Turbo-Modus)."""
+        start_time = time.perf_counter()
+        total_steps = len(self.data) - self.current_index + 1
+        ui_update_interval = max(100, total_steps // 50)  # ~50 UI-Updates
+
+        self.control_panel.set_actual_speed("Turbo...")
+
+        while self.is_running and self.current_index <= len(self.data):
+            self._process_step()
+            self._step_count += 1
+
+            # UI periodisch aktualisieren (alle ~100 Steps oder 2%)
+            if self._step_count % ui_update_interval == 0:
+                self._update_ui()
+                QApplication.processEvents()  # UI responsiv halten
+
+                # Abbruch-Check
+                if not self.is_running:
+                    break
+
+        elapsed = time.perf_counter() - start_time
+        if elapsed > 0:
+            speed = self._step_count / elapsed
+            self.control_panel.set_actual_speed(f"{speed:.0f} Schritte/Sek (Turbo)")
+
+        self._finalize_backtest()
+
+    def _manual_stop(self):
+        """Manueller Stopp durch Benutzer (Stop-Button)."""
+        # Profiling bei manuellem Stopp ausgeben
+        if self._profiling_enabled and self._profiler:
+            self._profiler.disable()
+            self._output_profiling_report()
+            self._profiler = None
+
+        self._stop_backtest()
+        self.control_panel.set_actual_speed("Gestoppt")
+        self._update_charts()
 
     def _stop_backtest(self):
-        """Stoppt den Backtest."""
+        """Stoppt den Backtest (intern)."""
         self.is_running = False
         self.is_paused = True
 
@@ -301,15 +344,7 @@ class BacktestWindow(QMainWindow):
             self._speed_update_timer.stop()
             self._speed_update_timer = None
 
-        # Profiling stoppen und Bericht ausgeben (auch bei manuellem Stopp)
-        if self._profiling_enabled and self._profiler:
-            self._profiler.disable()
-            self._output_profiling_report()
-            self._profiler = None
-
         self.control_panel.set_running_state(False)
-        self.control_panel.set_actual_speed("Gestoppt")
-        self._update_charts()
 
     def _reset_backtest(self):
         """Setzt den Backtest zurueck."""
@@ -605,7 +640,16 @@ class BacktestWindow(QMainWindow):
 
     def _finalize_backtest(self):
         """Finalisiert den Backtest."""
+        if not self.is_running and self.is_paused:
+            # Bereits finalisiert (verhindert doppelten Aufruf)
+            return
+
         self._debug(f"_finalize_backtest() aufgerufen")
+
+        # Offene Position schliessen
+        if self.position != 'NONE' and self.data is not None:
+            final_price = self.data['Close'].iloc[-1]
+            self._close_trade(final_price, len(self.data), 'Backtest Ende')
 
         # Profiling stoppen und Bericht ausgeben
         if self._profiling_enabled and self._profiler:
@@ -614,11 +658,6 @@ class BacktestWindow(QMainWindow):
             self._profiler = None
 
         self._stop_backtest()
-
-        if self.position != 'NONE' and self.data is not None:
-            final_price = self.data['Close'].iloc[-1]
-            self._close_trade(final_price, len(self.data), 'Backtest Ende')
-
         self._update_charts()
         self._log(f"Backtest abgeschlossen - P/L: ${self.total_pnl:,.2f}, Trades: {len(self.trades)}")
 
