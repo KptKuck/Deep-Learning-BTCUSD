@@ -58,11 +58,11 @@ class FeatureDefinition:
 FEATURE_REGISTRY: Dict[str, List[FeatureDefinition]] = {
     'price': [
         FeatureDefinition('Open', 'Open', 'price', default_enabled=True),
-        FeatureDefinition('High', 'High', 'price', default_enabled=True),
-        FeatureDefinition('Low', 'Low', 'price', default_enabled=True),
-        FeatureDefinition('Close', 'Close', 'price', default_enabled=True),
-        FeatureDefinition('PriceChange', 'Price Change', 'price', default_enabled=True),
-        FeatureDefinition('PriceChangePct', 'Price Change %', 'price', default_enabled=True),
+        FeatureDefinition('High', 'High', 'price', default_enabled=False),
+        FeatureDefinition('Low', 'Low', 'price', default_enabled=False),
+        FeatureDefinition('Close', 'Close', 'price', default_enabled=False),
+        FeatureDefinition('PriceChange', 'Price Change', 'price', default_enabled=False),
+        FeatureDefinition('PriceChangePct', 'Price Change %', 'price', default_enabled=False),
         FeatureDefinition('Range', 'Range (H-L)', 'price'),
         FeatureDefinition('RangePct', 'Range %', 'price'),
         FeatureDefinition('TypicalPrice', 'Typical Price', 'price'),
