@@ -471,6 +471,16 @@ class TrainingWindow(QMainWindow):
                 # Status auf 'trained' setzen
                 self._log("--- Setze Status auf 'trained' ---", 'DEBUG')
                 manager.set_status('trained')
+
+                # Session-DB aktualisieren mit Modell-Infos
+                self._log("--- Aktualisiere SessionDB ---", 'DEBUG')
+                manager._update_session_db({
+                    'status': 'trained',
+                    'has_model': True,
+                    'model_accuracy': model_info.get('best_accuracy', 0),
+                    'model_version': 'bilstm_v1',
+                    'model_type': model_info.get('model_type', 'bilstm'),
+                })
             else:
                 self._log("Keine Session-Dir verfuegbar!", 'WARNING')
         except Exception as e:

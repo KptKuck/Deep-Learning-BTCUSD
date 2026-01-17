@@ -1823,9 +1823,21 @@ class PrepareDataWindow(QMainWindow):
             manager.save_config(config)
             self._log(f"Session-Config gespeichert: {session_dir.name}/session_config.json")
 
-            # 4. Status auf 'prepared' setzen
+            # 4. Status auf 'prepared' setzen und in DB registrieren
             self._log("--- Setze Status auf 'prepared' ---", 'DEBUG')
             manager.set_status('prepared')
+
+            # 5. Session in DB registrieren mit allen Metadaten
+            self._log("--- Registriere in SessionDB ---", 'DEBUG')
+            manager.register_in_db({
+                'status': 'prepared',
+                'features': feature_columns,
+                'num_features': len(feature_columns),
+                'num_samples': training_info.get('actual_samples', 0),
+                'has_training_data': True,
+                'has_backtest_data': True,
+                'has_model': False,
+            })
 
             self._log("=== SESSION SAVE DONE ===", 'DEBUG')
 

@@ -1043,6 +1043,12 @@ class MainWindow(QMainWindow):
         webserver_action.triggered.connect(self._open_webserver)
         window_menu.addAction(webserver_action)
 
+        window_menu.addSeparator()
+
+        session_manager_action = QAction('Session Manager...', self)
+        session_manager_action.triggered.connect(self._open_session_manager)
+        window_menu.addAction(session_manager_action)
+
         # Hilfe Menu
         help_menu = menu_bar.addMenu('Hilfe')
 
@@ -1083,14 +1089,14 @@ class MainWindow(QMainWindow):
     }
 
     _LOG_BG_COLORS = {
-        'TRACE': '#2d2d2d',
-        'DEBUG': '#3d3d5c',
-        'INFO': '#2d3748',
-        'SUCCESS': '#22543d',
-        'WARNING': '#744210',
-        'ERROR': '#742a2a',
-        'CRITICAL': '#5c1a1a',
-        'TIMING': '#1a3d3d',
+        'TRACE': '#171717',
+        'DEBUG': '#1f1f2e',
+        'INFO': '#171c24',
+        'SUCCESS': '#112a1f',
+        'WARNING': '#3a2108',
+        'ERROR': '#3a1515',
+        'CRITICAL': '#2e0d0d',
+        'TIMING': '#0d1f1f',
     }
 
     def _should_show_level(self, level: str) -> bool:
@@ -1976,6 +1982,23 @@ class MainWindow(QMainWindow):
         self._log('Web Dashboard noch nicht integriert', 'INFO')
         QMessageBox.information(self, 'Info', 'Web Dashboard kommt in einer spaeteren Version')
 
+    def _open_session_manager(self):
+        """Oeffnet den Session Manager."""
+        try:
+            from .session_manager_window import SessionManagerWindow
+
+            dialog = SessionManagerWindow(
+                data_dir=self.config.paths.data_dir,
+                log_dir=self.config.paths.log_dir,
+                parent=self
+            )
+            dialog.exec()
+            self._log('Session Manager geschlossen', 'DEBUG')
+        except Exception as e:
+            import traceback
+            self._log(f'Session Manager Fehler: {e}', 'ERROR')
+            self._log(traceback.format_exc(), 'DEBUG')
+
     def _save_parameters(self):
         """Speichert die aktuellen Parameter."""
         self._log('Parameter speichern...', 'INFO')
@@ -2086,7 +2109,7 @@ class MainWindow(QMainWindow):
         """Aktualisiert das Stylesheet des Log-Widgets mit aktueller Schriftgroesse."""
         self.log_text.setStyleSheet(f'''
             QTextEdit {{
-                background-color: #1a1a1a;
+                background-color: #0d0d0d;
                 color: #cccccc;
                 border: 1px solid #333333;
                 border-radius: 4px;

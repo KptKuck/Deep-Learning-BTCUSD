@@ -94,6 +94,9 @@ class SessionManager:
         self.save_config(config)
         self._logger.debug(f"[SessionManager] Status gesetzt: {status}")
 
+        # Session-DB aktualisieren
+        self._update_session_db({'status': status})
+
     def get_status(self) -> Optional[str]:
         """
         Gibt den Session-Status zurueck.
@@ -428,10 +431,70 @@ class SessionManager:
 
         return summary
 
+    # =========================================================================
+    # Session-Datenbank Integration
+    # =========================================================================
+
+    def _get_session_db(self):
+        """
+        Gibt die SessionDatabase zurueck (lazy loading).
+
+        Ermittelt das data-Verzeichnis aus dem Session-Pfad.
+        """
+        try:
+            from .session_database import SessionDatabase
+
+            # data-Verzeichnis ermitteln: session_dir ist in log/, data ist daneben
+            # z.B. log/session-xxx -> data/sessions.json
+            project_dir = self.session_dir.parent.parent
+            data_dir = project_dir / 'data'
+
+            return SessionDatabase(data_dir)
+        except Exception as e:
+            self._logger.debug(f"[SessionManager] SessionDatabase nicht verfuegbar: {e}")
+            return None
+
+    def _update_session_db(self, updates: dict):
+        """
+        Aktualisiert die Session in der Datenbank.
+
+        Args:
+            updates: Dictionary mit zu aktualisierenden Feldern
+        """
+        db = self._get_session_db()
+        if db:
+            session_id = self.session_dir.name
+            db.update_session(session_id, updates)
+
+    def register_in_db(self, session_info: dict = None):
+        """
+        Registriert diese Session in der Datenbank.
+
+        Args:
+            session_info: Optionale zusaetzliche Infos
+        """
+        db = self._get_session_db()
+        if db:
+            info = {
+                'id': self.session_dir.name,
+                'path': str(self.session_dir),
+                'has_training_data': self.training_data_file.exists(),
+                'has_backtest_data': self.backtest_data_file.exists(),
+                'has_model': self.get_model_path() is not None,
+            }
+            if session_info:
+                info.update(session_info)
+
+            db.add_session(info)
+            self._logger.debug(f"[SessionManager] In DB registriert: {self.session_dir.name}")
+
     @staticmethod
     def list_sessions(log_dir: Path) -> List[Dict[str, Any]]:
         """
         Listet alle verfuegbaren Sessions auf.
+
+        Verwendet die SessionDatabase fuer schnelles Laden.
+        Fuehrt bei Bedarf automatisch Migration durch.
 
         Args:
             log_dir: Pfad zum Log-Verzeichnis
@@ -439,20 +502,56 @@ class SessionManager:
         Returns:
             Liste von Session-Summaries
         """
-        sessions = []
+        from .session_database import SessionDatabase
+
         log_dir = Path(log_dir)
 
-        if not log_dir.exists():
+        # data-Verzeichnis ermitteln
+        project_dir = log_dir.parent
+        data_dir = project_dir / 'data'
+
+        try:
+            db = SessionDatabase(data_dir)
+
+            # Pruefen ob DB leer ist -> Migration
+            sessions = db.list_sessions()
+            if not sessions and log_dir.exists():
+                # Migration durchfuehren
+                db.migrate_from_folders(log_dir)
+                sessions = db.list_sessions()
+
+            # Format anpassen fuer Kompatibilitaet mit bestehendem Code
+            result = []
+            for s in sessions:
+                result.append({
+                    'session_dir': s.get('path', ''),
+                    'session_name': s.get('id', ''),
+                    'has_config': True,  # Wenn in DB, dann hat es Config
+                    'has_training_data': s.get('has_training_data', False),
+                    'has_backtest_data': s.get('has_backtest_data', False),
+                    'has_model': s.get('has_model', False),
+                    'status': s.get('status'),
+                    'model_accuracy': s.get('model_accuracy', 0),
+                    'model_type': s.get('model_type', '-'),
+                    'features_count': s.get('num_features', 0),
+                })
+
+            return result
+
+        except Exception as e:
+            # Fallback: Ordner-Scan (alte Methode)
+            get_logger().warning(f"[SessionManager] DB-Fehler, nutze Ordner-Scan: {e}")
+
+            sessions = []
+            if not log_dir.exists():
+                return sessions
+
+            for item in sorted(log_dir.iterdir(), reverse=True):
+                if item.is_dir() and item.name.startswith('session-'):
+                    manager = SessionManager(item)
+                    summary = manager.get_summary()
+
+                    if summary['has_training_data'] or summary['has_model']:
+                        sessions.append(summary)
+
             return sessions
-
-        # Alle Session-Ordner finden (nicht .txt Dateien)
-        for item in sorted(log_dir.iterdir(), reverse=True):
-            if item.is_dir() and item.name.startswith('session-'):
-                manager = SessionManager(item)
-                summary = manager.get_summary()
-
-                # Nur Sessions mit Daten anzeigen
-                if summary['has_training_data'] or summary['has_model']:
-                    sessions.append(summary)
-
-        return sessions
