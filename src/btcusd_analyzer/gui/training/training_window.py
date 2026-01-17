@@ -485,13 +485,23 @@ class TrainingWindow(QMainWindow):
 
                 # Session-DB aktualisieren mit Modell-Infos
                 self._log("--- Aktualisiere SessionDB ---", 'DEBUG')
-                manager._update_session_db({
+                update_data = {
                     'status': 'trained',
                     'has_model': True,
                     'model_accuracy': model_info.get('best_accuracy', 0),
                     'model_version': 'bilstm_v1',
                     'model_type': model_info.get('model_type', 'bilstm'),
-                })
+                }
+                # Features und Samples aus training_info hinzufuegen (falls vorhanden)
+                if self.training_info:
+                    features = self.training_info.get('features', [])
+                    if features:
+                        update_data['features'] = features
+                        update_data['num_features'] = len(features)
+                    num_samples = self.training_info.get('actual_samples', 0)
+                    if num_samples:
+                        update_data['num_samples'] = num_samples
+                manager._update_session_db(update_data)
             else:
                 self._log("Keine Session-Dir verfuegbar!", 'WARNING')
         except Exception as e:
