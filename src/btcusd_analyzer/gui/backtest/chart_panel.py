@@ -6,7 +6,7 @@ from typing import List, Dict, Optional, Callable
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTabWidget,
-    QSlider, QSpinBox
+    QSlider, QSpinBox, QCheckBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
@@ -230,6 +230,24 @@ class ChartPanel(QWidget):
         # Timestamp-Array fuer Koordinaten-Umrechnung
         self.timestamps: np.ndarray = None
 
+        # Equity-Overlay (zweite Y-Achse rechts)
+        self.equity_viewbox = pg.ViewBox()
+        self.trade_plot.scene().addItem(self.equity_viewbox)
+        self.trade_plot.getAxis('right').linkToView(self.equity_viewbox)
+        self.equity_viewbox.setXLink(self.trade_plot)
+        self.trade_plot.getAxis('right').setLabel('Equity ($)', color='#33cc33')
+        self.trade_plot.getAxis('right').setPen(pg.mkPen(color='#33cc33'))
+        self.trade_plot.getAxis('right').setTextPen(pg.mkPen(color='#33cc33'))
+        self.trade_plot.hideAxis('right')  # Initial ausgeblendet
+
+        # Equity-Linie (im Equity-ViewBox)
+        self.equity_line = pg.PlotDataItem([], [], pen=pg.mkPen(color='#33cc33', width=2))
+        self.equity_viewbox.addItem(self.equity_line)
+        self.equity_line.setVisible(False)  # Initial unsichtbar
+
+        # ViewBox-Geometrie bei Resize aktualisieren
+        self.trade_plot.getViewBox().sigResized.connect(self._on_viewbox_resized)
+
         # Scatter-Items fuer Trade-Marker
         self.trade_entry_scatter = pg.ScatterPlotItem(size=14, pen=pg.mkPen(color='white', width=1.5))
         self.trade_exit_scatter = pg.ScatterPlotItem(size=12, pen=pg.mkPen(color='white', width=1.5))
@@ -274,6 +292,19 @@ class ChartPanel(QWidget):
         self.btn_next_trade.clicked.connect(self._next_trade)
 
         nav_layout.addWidget(self.btn_chart_mode)
+
+        # Equity-Overlay Checkbox
+        self.equity_checkbox = QCheckBox("Equity")
+        self.equity_checkbox.setStyleSheet("""
+            QCheckBox { color: #33cc33; font-size: 11px; }
+            QCheckBox::indicator { width: 14px; height: 14px; }
+            QCheckBox::indicator:unchecked { border: 1px solid #555; background: #333; border-radius: 2px; }
+            QCheckBox::indicator:checked { border: 1px solid #33cc33; background: #33cc33; border-radius: 2px; }
+        """)
+        self.equity_checkbox.setToolTip("Equity-Kurve im Chart ein-/ausblenden")
+        self.equity_checkbox.toggled.connect(self._toggle_equity_overlay)
+        nav_layout.addWidget(self.equity_checkbox)
+
         nav_layout.addStretch()
         nav_layout.addWidget(self.btn_prev_trade)
         nav_layout.addWidget(self.trade_nav_label)
@@ -970,6 +1001,10 @@ class ChartPanel(QWidget):
         else:
             self.trade_nav_label.setText("Trade 0/0")
 
+        # Equity-Overlay aktualisieren
+        self._update_equity_viewbox()
+        self._update_equity_overlay()
+
     def _extract_timestamps(self) -> np.ndarray:
         """Extrahiert Unix-Timestamps aus dem DataFrame."""
         if self.data is None:
@@ -1217,3 +1252,51 @@ class ChartPanel(QWidget):
         else:
             # Liniendaten aktualisieren (Close-Preis)
             self.trade_price_line.setData(self.timestamps, self.data['Close'].values)
+
+    def _toggle_equity_overlay(self, checked: bool):
+        """Schaltet die Equity-Kurve im Trade-Chart ein/aus."""
+        self.equity_line.setVisible(checked)
+        # Rechte Y-Achse ein-/ausblenden
+        if checked:
+            self.trade_plot.showAxis('right')
+            # ViewBox-Geometrie aktualisieren
+            self._update_equity_viewbox()
+        else:
+            self.trade_plot.hideAxis('right')
+
+    def _on_viewbox_resized(self):
+        """Handler fuer ViewBox-Resize - aktualisiert Equity-ViewBox."""
+        self._update_equity_viewbox()
+
+    def _update_equity_viewbox(self):
+        """Aktualisiert die Geometrie des Equity-ViewBox."""
+        if not hasattr(self, 'equity_viewbox'):
+            return
+        # ViewBox an PlotItem-Geometrie anpassen
+        self.equity_viewbox.setGeometry(self.trade_plot.getViewBox().sceneBoundingRect())
+
+    def _update_equity_overlay(self):
+        """Aktualisiert die Equity-Kurve im Trade-Chart."""
+        if not hasattr(self, 'equity_line'):
+            return
+        if not self.equity_checkbox.isChecked():
+            return
+        if self.timestamps is None or len(self.timestamps) == 0:
+            return
+        if not self.equity_indices or not self.equity_curve:
+            return
+
+        # Equity-Timestamps und Werte
+        valid_indices = [i - 1 for i in self.equity_indices if 0 < i <= len(self.timestamps)]
+        if not valid_indices:
+            return
+
+        equity_timestamps = [self.timestamps[i] for i in valid_indices if i < len(self.timestamps)]
+        equity_values = self.equity_curve[:len(equity_timestamps)]
+
+        if len(equity_timestamps) > 0 and len(equity_values) > 0:
+            self.equity_line.setData(equity_timestamps, equity_values)
+            # Y-Range der Equity-Achse anpassen
+            min_eq = min(equity_values) * 0.99
+            max_eq = max(equity_values) * 1.01
+            self.equity_viewbox.setYRange(min_eq, max_eq, padding=0)

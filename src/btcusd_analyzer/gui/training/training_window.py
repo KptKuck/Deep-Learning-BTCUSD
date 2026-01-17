@@ -483,11 +483,55 @@ class TrainingWindow(QMainWindow):
                 self._log("--- Setze Status auf 'trained' ---", 'DEBUG')
                 manager.set_status('trained')
 
+                # Trainingsdaten in Session speichern (falls noch nicht vorhanden)
+                self._log("--- Pruefe Trainingsdaten ---", 'DEBUG')
+                training_data_path = session_dir / 'training_data.npz'
+                if not training_data_path.exists() and self.training_data is not None:
+                    self._log("Trainingsdaten nicht in Session - speichere...", 'DEBUG')
+                    try:
+                        import numpy as np
+                        # training_data hat X/Y Format, konvertiere zu sequences/labels
+                        X = self.training_data.get('X')
+                        Y = self.training_data.get('Y')
+                        if X is not None and Y is not None:
+                            features = self.training_info.get('features', []) if self.training_info else []
+                            params = self.training_info.get('params', {}) if self.training_info else {}
+                            manager.save_training_data(
+                                sequences=X,
+                                labels=Y,
+                                features=features,
+                                params=params
+                            )
+                            self._log(f"Trainingsdaten gespeichert: {X.shape[0]} Samples", 'DEBUG')
+                    except Exception as e:
+                        self._log(f"Trainingsdaten konnten nicht gespeichert werden: {e}", 'WARNING')
+                else:
+                    self._log(f"Trainingsdaten bereits vorhanden: {training_data_path.exists()}", 'DEBUG')
+
+                # Config mit Features und training_info aktualisieren
+                self._log("--- Aktualisiere Config ---", 'DEBUG')
+                if self.training_info:
+                    features = self.training_info.get('features', [])
+                    config_update = {}
+                    if features:
+                        config_update['features'] = features
+                    # training_info in config speichern
+                    config_update['training_info'] = {
+                        'num_classes': self.training_info.get('num_classes', 2),
+                        'actual_samples': self.training_info.get('actual_samples', 0),
+                        'lookahead_bars': self.training_info.get('params', {}).get('lookforward', 5),
+                        'train_split_pct': self.training_info.get('params', {}).get('train_test_split', 80),
+                    }
+                    if config_update:
+                        manager.save_config(config_update)
+                        self._log(f"Config aktualisiert: {len(features)} Features", 'DEBUG')
+
                 # Session-DB aktualisieren mit Modell-Infos
                 self._log("--- Aktualisiere SessionDB ---", 'DEBUG')
                 update_data = {
                     'status': 'trained',
                     'has_model': True,
+                    'has_training_data': True,
                     'model_accuracy': model_info.get('best_accuracy', 0),
                     'model_version': 'bilstm_v1',
                     'model_type': model_info.get('model_type', 'bilstm'),
@@ -499,6 +543,11 @@ class TrainingWindow(QMainWindow):
                         update_data['features'] = features
                         update_data['num_features'] = len(features)
                     num_samples = self.training_info.get('actual_samples', 0)
+                    if not num_samples and self.training_data:
+                        # Fallback: Samples aus training_data
+                        X = self.training_data.get('X')
+                        if X is not None:
+                            num_samples = X.shape[0]
                     if num_samples:
                         update_data['num_samples'] = num_samples
                 manager._update_session_db(update_data)
