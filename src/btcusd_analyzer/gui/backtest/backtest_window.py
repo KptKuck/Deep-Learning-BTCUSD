@@ -92,7 +92,7 @@ class BacktestWindow(QMainWindow):
 
         # Geschwindigkeit
         self.steps_per_second = 10
-        self.turbo_mode = False
+        self.turbo_mode = True  # Standardmaessig aktiv fuer bessere Performance
 
         # Geschwindigkeitsmessung
         self._step_count = 0

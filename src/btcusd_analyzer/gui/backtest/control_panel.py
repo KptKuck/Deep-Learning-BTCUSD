@@ -164,9 +164,10 @@ class ControlPanel(QWidget):
         slider_row.addWidget(self.speed_label)
         layout.addLayout(slider_row)
 
-        # Turbo-Modus
+        # Turbo-Modus (standardmaessig aktiv fuer bessere Performance)
         self.turbo_check = QCheckBox("Turbo-Modus (keine Chart-Updates)")
         self.turbo_check.setStyleSheet("color: rgb(128, 255, 128);")
+        self.turbo_check.setChecked(True)
         self.turbo_check.toggled.connect(self.turbo_toggled.emit)
         layout.addWidget(self.turbo_check)
 
