@@ -538,12 +538,54 @@ class SessionManagerWindow(QDialog):
 
         # Modell-Info
         acc = session.get('model_accuracy', 0)
+        model_info = session.get('model_info', {})
         if acc > 0:
             details.append("")
             details.append(f"<b style='color: #4de6ff;'>Modell:</b>")
             details.append(f"  Accuracy: <span style='color: #33b34d;'>{acc:.2f}%</span>")
-            details.append(f"  Version: {session.get('model_version', '-')}")
             details.append(f"  Typ: {session.get('model_type', '-')}")
+
+            # Architektur-Details aus model_info
+            if model_info:
+                # Hidden Sizes (LSTM/GRU)
+                hidden_sizes = model_info.get('hidden_sizes')
+                if hidden_sizes:
+                    details.append(f"  Architektur: {hidden_sizes}")
+
+                # Parameter-Anzahl
+                num_params = model_info.get('num_parameters', 0)
+                if num_params > 0:
+                    details.append(f"  Parameter: {num_params:,}")
+
+        # Training-Info (aus model_info)
+        if model_info and model_info.get('epochs_trained'):
+            details.append("")
+            details.append(f"<b style='color: #4de6ff;'>Training:</b>")
+
+            epochs_trained = model_info.get('epochs_trained', 0)
+            epochs_total = model_info.get('epochs_total', epochs_trained)
+            early_stopped = model_info.get('early_stopped', False)
+            epoch_str = f"{epochs_trained}/{epochs_total}"
+            if early_stopped:
+                epoch_str += " (Early Stop)"
+            details.append(f"  Epochen: {epoch_str}")
+
+            lr = model_info.get('learning_rate')
+            if lr:
+                details.append(f"  LR: {lr}")
+
+            batch_size = model_info.get('batch_size')
+            if batch_size:
+                details.append(f"  Batch: {batch_size}")
+
+            patience = model_info.get('patience')
+            if patience:
+                details.append(f"  Patience: {patience}")
+
+            duration = model_info.get('training_duration_sec', 0)
+            if duration > 0:
+                minutes, seconds = divmod(int(duration), 60)
+                details.append(f"  Dauer: {minutes}:{seconds:02d} min")
 
         # Daten-Status
         details.append("")

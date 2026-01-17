@@ -648,7 +648,7 @@ class SaveManager:
 
         # JSON-Metadaten separat speichern
         with open(self.model_info_file, 'w', encoding='utf-8') as f:
-            json.dump(model_info, f, indent=2, ensure_ascii=False)
+            json.dump(model_info, f, indent=2, ensure_ascii=False, default=str)
 
     def _save_config(self, config: SessionConfig):
         """Speichert Config."""
@@ -753,8 +753,9 @@ class SaveManager:
         }
 
         if config.model_info:
-            session_info['model_accuracy'] = config.model_info.get('accuracy', 0)
+            session_info['model_accuracy'] = config.model_info.get('best_accuracy', config.model_info.get('accuracy', 0))
             session_info['model_type'] = config.model_info.get('model_type', '-')
+            session_info['model_info'] = config.model_info  # Komplette model_info speichern
 
         try:
             existing = db.get_session(self.session_id)

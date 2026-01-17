@@ -460,6 +460,13 @@ class TrainingWindow(QMainWindow):
             'nhead': getattr(self.model, 'nhead', config.get('nhead')),
             'num_encoder_layers': getattr(self.model, 'num_encoder_layers', config.get('num_encoder_layers')),
             'dim_feedforward': getattr(self.model, 'dim_feedforward', config.get('dim_feedforward')),
+            # Training-Hyperparameter
+            'learning_rate': config.get('learning_rate'),
+            'batch_size': config.get('batch_size', 64),
+            'patience': config.get('patience', 10),
+            'epochs_total': config.get('epochs', 100),
+            'early_stopped': epoch < config.get('epochs', 100),
+            'num_parameters': sum(p.numel() for p in self.model.parameters()),
         }
 
         # Fuer spaeteres Speichern merken
