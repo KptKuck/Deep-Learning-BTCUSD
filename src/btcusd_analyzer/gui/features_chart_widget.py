@@ -18,6 +18,7 @@ from PyQt6.QtCharts import (
 )
 
 from .styles import StyleFactory, COLORS
+from ..core.logger import get_logger
 
 
 class InteractiveChartView(QChartView):
@@ -218,6 +219,7 @@ class FeaturesChartWidget(QWidget):
     def __init__(self, title: str = 'Features', parent=None):
         super().__init__(parent)
         self.title = title
+        self._logger = get_logger()
 
         # Dynamische Verwaltung
         self._series_map: Dict[str, QLineSeries] = {}
@@ -474,7 +476,7 @@ class FeaturesChartWidget(QWidget):
                 series.setName(feature_name)
                 color = self._get_color_for_feature(feature_name, idx)
                 pen = QPen(color)
-                pen.setWidthF(1.2)
+                pen.setWidthF(1.5)  # Dickere Linien fuer bessere Sichtbarkeit
                 series.setPen(pen)
 
                 self.chart.addSeries(series)
@@ -483,6 +485,8 @@ class FeaturesChartWidget(QWidget):
 
                 self._series_map[feature_name] = series
                 self._visibility_map[feature_name] = True
+
+                self._logger.debug(f"[FeaturesChart] Serie '{feature_name}' erstellt, Farbe: {color.name()}")
             else:
                 series = self._series_map[feature_name]
 
@@ -518,6 +522,9 @@ class FeaturesChartWidget(QWidget):
 
         self.x_axis.setRange(x_min, x_max)
         self.y_axis.setRange(y_min, y_max)
+
+        self._logger.debug(f"[FeaturesChart] Update: {len(features_dict)} Features, "
+                          f"X:{x_min}-{x_max}, Y:{y_min:.2f}-{y_max:.2f}")
 
     def _rebuild_checkboxes(self):
         """Erstellt Checkboxen dynamisch basierend auf aktuellen Features."""

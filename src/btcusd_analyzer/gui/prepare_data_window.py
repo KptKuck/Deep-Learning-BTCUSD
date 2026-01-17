@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QGroupBox, QScrollArea, QFrame,
     QCheckBox, QComboBox, QSpinBox, QDoubleSpinBox, QSplitter,
-    QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView, QSlider
+    QTabWidget
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -774,7 +774,7 @@ class PrepareDataWindow(QMainWindow):
     # =========================================================================
 
     def _create_features_tab(self) -> QWidget:
-        """Erstellt Tab 3: Feature-Auswahl mit Sub-Tabs fuer verschiedene Ansichten."""
+        """Erstellt Tab 3: Feature-Auswahl mit Chart."""
         tab = QWidget()
         layout = QHBoxLayout(tab)
         layout.setContentsMargins(5, 5, 5, 5)
@@ -782,145 +782,22 @@ class PrepareDataWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         layout.addWidget(splitter)
 
-        # Charts ZUERST erstellen (werden von _create_features_params referenziert)
-        # PyQtChart-basierte FeaturesChartWidgets mit Zoom, Pan und Crosshair
-        self.features_chart = FeaturesChartWidget('Features (Uebersicht)')
-        self.features_detail_chart = FeaturesChartWidget('Features (Detail)')
+        # Chart ZUERST erstellen (wird von _create_features_params referenziert)
+        # PyQtChart-basiertes FeaturesChartWidget mit Zoom, Pan und Crosshair
+        self.features_chart = FeaturesChartWidget('Features')
 
-        # Crosshair-Synchronisation zwischen Uebersicht und Detail
-        self.features_chart.crosshairMoved.connect(
-            self.features_detail_chart.set_crosshair_position
-        )
-        self.features_detail_chart.crosshairMoved.connect(
-            self.features_chart.set_crosshair_position
-        )
-
-        # Linke Seite: Parameter
+        # Linke Seite: Parameter (Feature-Auswahl)
         params_widget = self._create_features_params()
         splitter.addWidget(params_widget)
 
-        # Rechte Seite: Sub-Tab Widget fuer verschiedene Ansichten
-        self.features_view_tabs = QTabWidget()
-        self.features_view_tabs.setStyleSheet(self._get_subtab_stylesheet())
-
-        # Sub-Tab 1: Uebersicht-Chart
-        overview_tab = self._create_features_overview_subtab()
-        self.features_view_tabs.addTab(overview_tab, 'Uebersicht')
-
-        # Sub-Tab 2: Detail-Chart mit Slider
-        detail_tab = self._create_features_detail_subtab()
-        self.features_view_tabs.addTab(detail_tab, 'Detail')
-
-        # Sub-Tab 3: Datentabelle
-        table_tab = self._create_features_table_subtab()
-        self.features_view_tabs.addTab(table_tab, 'Daten')
-
-        splitter.addWidget(self.features_view_tabs)
-        splitter.setSizes([420, 1000])
+        # Rechte Seite: Nur der Chart
+        splitter.addWidget(self.features_chart)
+        splitter.setSizes([350, 1000])
 
         # Initiale Chart-Aktualisierung mit Standard-Features
         self._update_features_preview()
 
         return tab
-
-    def _get_subtab_stylesheet(self) -> str:
-        """Stylesheet fuer Sub-Tabs (kompakter als Haupt-Tabs)."""
-        return '''
-            QTabWidget::pane {
-                border: 1px solid #444;
-                background-color: #2a2a2a;
-                border-radius: 4px;
-            }
-            QTabBar::tab {
-                background: #333;
-                color: #999;
-                padding: 8px 16px;
-                margin-right: 2px;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-                font-size: 11px;
-            }
-            QTabBar::tab:selected {
-                background: #4da8da;
-                color: white;
-            }
-            QTabBar::tab:hover:!selected {
-                background: #444;
-                color: #ccc;
-            }
-        '''
-
-    def _create_features_overview_subtab(self) -> QWidget:
-        """Erstellt den Uebersicht Sub-Tab mit dem Haupt-Feature-Chart."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.addWidget(self.features_chart)
-        return widget
-
-    def _create_features_detail_subtab(self) -> QWidget:
-        """Erstellt den Detail Sub-Tab mit Slider-Navigation."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
-
-        # Detail-Kontrollen
-        controls = QHBoxLayout()
-
-        controls.addWidget(QLabel('Bereich:'))
-
-        self.detail_start_spin = QSpinBox()
-        self.detail_start_spin.setRange(0, max(0, self.total_points - 100))
-        self.detail_start_spin.setValue(0)
-        self.detail_start_spin.setFixedWidth(80)
-        self.detail_start_spin.setStyleSheet(StyleFactory.spinbox_style())
-        self.detail_start_spin.valueChanged.connect(self._update_detail_chart)
-        controls.addWidget(self.detail_start_spin)
-
-        controls.addWidget(QLabel('Fenster:'))
-
-        self.detail_window_spin = QSpinBox()
-        self.detail_window_spin.setRange(50, 500)
-        self.detail_window_spin.setValue(100)
-        self.detail_window_spin.setSingleStep(10)
-        self.detail_window_spin.setFixedWidth(70)
-        self.detail_window_spin.setStyleSheet(StyleFactory.spinbox_style())
-        self.detail_window_spin.valueChanged.connect(self._on_detail_window_changed)
-        controls.addWidget(self.detail_window_spin)
-
-        # Slider fuer schnelle Navigation
-        self.detail_slider = QSlider(Qt.Orientation.Horizontal)
-        self.detail_slider.setRange(0, max(0, self.total_points - 100))
-        self.detail_slider.setValue(0)
-        self.detail_slider.setStyleSheet('''
-            QSlider::groove:horizontal {
-                background: #333;
-                height: 8px;
-                border-radius: 4px;
-            }
-            QSlider::handle:horizontal {
-                background: #4da8da;
-                width: 16px;
-                margin: -4px 0;
-                border-radius: 8px;
-            }
-            QSlider::sub-page:horizontal {
-                background: #4da8da;
-                border-radius: 4px;
-            }
-        ''')
-        self.detail_slider.valueChanged.connect(self._on_detail_slider_changed)
-        controls.addWidget(self.detail_slider, 1)
-
-        layout.addLayout(controls)
-        layout.addWidget(self.features_detail_chart, 1)
-
-        return widget
-
-    def _create_features_table_subtab(self) -> QWidget:
-        """Erstellt den Daten Sub-Tab mit der Feature-Tabelle."""
-        return self._create_features_table()
 
     def _create_features_params(self) -> QWidget:
         """Erstellt die Parameter-Seite fuer Tab 3 mit allen Feature-Kategorien."""
@@ -995,218 +872,6 @@ class PrepareDataWindow(QMainWindow):
 
         return widget
 
-    def _create_features_table(self) -> QWidget:
-        """Erstellt die Datentabelle fuer Feature-Werte mit Navigation."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
-
-        # Navigationsleiste
-        nav_layout = QHBoxLayout()
-
-        # Titel
-        table_title = QLabel('Feature-Daten')
-        table_title.setStyleSheet('color: #4da8da; font-weight: bold;')
-        nav_layout.addWidget(table_title)
-
-        nav_layout.addStretch()
-
-        # Navigation Buttons
-        self.table_first_btn = QPushButton('<<')
-        self.table_first_btn.setFixedWidth(40)
-        self.table_first_btn.setStyleSheet(self._nav_button_style())
-        self.table_first_btn.clicked.connect(lambda: self._navigate_table('first'))
-        nav_layout.addWidget(self.table_first_btn)
-
-        self.table_prev_btn = QPushButton('<')
-        self.table_prev_btn.setFixedWidth(40)
-        self.table_prev_btn.setStyleSheet(self._nav_button_style())
-        self.table_prev_btn.clicked.connect(lambda: self._navigate_table('prev'))
-        nav_layout.addWidget(self.table_prev_btn)
-
-        # Index-Anzeige
-        self.table_index_label = QLabel('0 - 9')
-        self.table_index_label.setStyleSheet('color: white; padding: 0 10px;')
-        self.table_index_label.setMinimumWidth(80)
-        self.table_index_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        nav_layout.addWidget(self.table_index_label)
-
-        self.table_next_btn = QPushButton('>')
-        self.table_next_btn.setFixedWidth(40)
-        self.table_next_btn.setStyleSheet(self._nav_button_style())
-        self.table_next_btn.clicked.connect(lambda: self._navigate_table('next'))
-        nav_layout.addWidget(self.table_next_btn)
-
-        self.table_last_btn = QPushButton('>>')
-        self.table_last_btn.setFixedWidth(40)
-        self.table_last_btn.setStyleSheet(self._nav_button_style())
-        self.table_last_btn.clicked.connect(lambda: self._navigate_table('last'))
-        nav_layout.addWidget(self.table_last_btn)
-
-        # Direkte Index-Eingabe
-        nav_layout.addWidget(QLabel('Idx:'))
-        self.table_index_spin = QSpinBox()
-        self.table_index_spin.setRange(0, max(0, self.total_points - 10))
-        self.table_index_spin.setValue(0)
-        self.table_index_spin.setFixedWidth(80)
-        self.table_index_spin.setStyleSheet('''
-            QSpinBox {
-                background-color: #3a3a3a;
-                border: 1px solid #555;
-                border-radius: 3px;
-                color: white;
-                padding: 3px;
-            }
-        ''')
-        self.table_index_spin.valueChanged.connect(self._on_table_index_changed)
-        nav_layout.addWidget(self.table_index_spin)
-
-        layout.addLayout(nav_layout)
-
-        # Tabelle
-        self.features_table = QTableWidget()
-        self.features_table.setStyleSheet('''
-            QTableWidget {
-                background-color: #1a1a1a;
-                border: 1px solid #333;
-                gridline-color: #333;
-                color: white;
-            }
-            QTableWidget::item {
-                padding: 3px;
-            }
-            QTableWidget::item:selected {
-                background-color: #4da8da;
-            }
-            QHeaderView::section {
-                background-color: #333;
-                color: white;
-                padding: 5px;
-                border: 1px solid #444;
-                font-weight: bold;
-            }
-        ''')
-        self.features_table.setAlternatingRowColors(True)
-        self.features_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        v_header = self.features_table.verticalHeader()
-        if v_header is not None:
-            v_header.setVisible(False)
-        # Keine feste Hoehe mehr - fuellt den gesamten Sub-Tab aus
-
-        layout.addWidget(self.features_table, 1)  # stretch=1 fuer volle Hoehe
-
-        # Aktueller Tabellenindex
-        self._table_start_index = 0
-
-        return widget
-
-    def _nav_button_style(self) -> str:
-        """Gibt das Stylesheet fuer Navigations-Buttons zurueck."""
-        return '''
-            QPushButton {
-                background-color: #444;
-                color: white;
-                border: none;
-                border-radius: 3px;
-                padding: 5px;
-            }
-            QPushButton:hover {
-                background-color: #555;
-            }
-            QPushButton:pressed {
-                background-color: #333;
-            }
-        '''
-
-    def _navigate_table(self, direction: str):
-        """Navigiert in der Datentabelle."""
-        rows_per_page = 10
-        max_start = max(0, self.total_points - rows_per_page)
-
-        if direction == 'first':
-            self._table_start_index = 0
-        elif direction == 'prev':
-            self._table_start_index = max(0, self._table_start_index - rows_per_page)
-        elif direction == 'next':
-            self._table_start_index = min(max_start, self._table_start_index + rows_per_page)
-        elif direction == 'last':
-            self._table_start_index = max_start
-
-        # SpinBox aktualisieren ohne Signal
-        self.table_index_spin.blockSignals(True)
-        self.table_index_spin.setValue(self._table_start_index)
-        self.table_index_spin.blockSignals(False)
-
-        self._update_features_table()
-
-    def _on_table_index_changed(self, value: int):
-        """Wird aufgerufen wenn der Tabellenindex geaendert wird."""
-        self._table_start_index = value
-        self._update_features_table()
-
-    def _update_features_table(self):
-        """Aktualisiert die Datentabelle mit den aktuellen Feature-Werten."""
-        if not hasattr(self, 'features_table') or self.features_table is None:
-            return
-        if not hasattr(self, '_cached_features_dict') or not self._cached_features_dict:
-            self.features_table.clear()
-            self.features_table.setRowCount(0)
-            self.features_table.setColumnCount(0)
-            return
-
-        rows_per_page = 10
-        start = self._table_start_index
-        end = min(start + rows_per_page, self.total_points)
-
-        # Index-Label aktualisieren
-        self.table_index_label.setText(f'{start} - {end - 1}')
-
-        # Spalten: Index + alle Features
-        feature_names = list(self._cached_features_dict.keys())
-        columns = ['Index'] + feature_names
-
-        self.features_table.setColumnCount(len(columns))
-        self.features_table.setHorizontalHeaderLabels(columns)
-        self.features_table.setRowCount(end - start)
-
-        # Daten einfuegen
-        for row, idx in enumerate(range(start, end)):
-            # Index-Spalte
-            idx_item = QTableWidgetItem(str(idx))
-            idx_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.features_table.setItem(row, 0, idx_item)
-
-            # Feature-Werte
-            for col, feat_name in enumerate(feature_names, start=1):
-                values = self._cached_features_dict[feat_name]
-                if idx < len(values):
-                    val = values[idx]
-                    if np.isnan(val):
-                        text = 'NaN'
-                    else:
-                        # Formatierung je nach Groesse
-                        if abs(val) >= 1000:
-                            text = f'{val:,.0f}'
-                        elif abs(val) >= 1:
-                            text = f'{val:.2f}'
-                        else:
-                            text = f'{val:.4f}'
-                else:
-                    text = '-'
-
-                item = QTableWidgetItem(text)
-                item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                self.features_table.setItem(row, col, item)
-
-        # Spaltenbreiten anpassen
-        h_header = self.features_table.horizontalHeader()
-        if h_header is not None:
-            h_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-            self.features_table.setColumnWidth(0, 60)
-            for col in range(1, len(columns)):
-                h_header.setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
-
     def _on_feature_changed(self):
         """Wird aufgerufen wenn sich die Feature-Auswahl aendert."""
         self._update_feature_count()
@@ -1277,68 +942,15 @@ class PrepareDataWindow(QMainWindow):
                         display_name = feat_name
                     features_dict[display_name] = values
 
-            # Charts und Tabelle aktualisieren
+            # Chart aktualisieren
             if features_dict:
                 self.features_chart.update_features_chart(features_dict)
-                # Feature-Dict speichern fuer Detail-Chart und Tabelle
-                self._cached_features_dict = features_dict
-                self._update_detail_chart()
-                self._update_features_table()
             else:
                 self.features_chart.clear()
-                if hasattr(self, 'features_detail_chart'):
-                    self.features_detail_chart.clear()
-                self._cached_features_dict = {}
-                self._update_features_table()
 
         except Exception as e:
             self._log(f'Feature-Vorschau Fehler: {e}', 'WARNING')
             self.features_chart.clear()
-
-    def _on_detail_slider_changed(self, value: int):
-        """Wird aufgerufen wenn der Detail-Slider bewegt wird."""
-        self.detail_start_spin.blockSignals(True)
-        self.detail_start_spin.setValue(value)
-        self.detail_start_spin.blockSignals(False)
-        self._update_detail_chart()
-
-    def _on_detail_window_changed(self, value: int):
-        """Wird aufgerufen wenn die Fenstergroesse geaendert wird."""
-        # Slider-Maximum anpassen
-        max_start = max(0, self.total_points - value)
-        self.detail_slider.setMaximum(max_start)
-        self.detail_start_spin.setMaximum(max_start)
-        self._update_detail_chart()
-
-    def _update_detail_chart(self):
-        """Aktualisiert den Detail-Chart mit dem ausgewaehlten Bereich."""
-        if not hasattr(self, 'features_detail_chart') or self.features_detail_chart is None:
-            return
-
-        if not hasattr(self, '_cached_features_dict') or not self._cached_features_dict:
-            self.features_detail_chart.clear()
-            return
-
-        try:
-            start = self.detail_start_spin.value()
-            window = self.detail_window_spin.value()
-            end = min(start + window, self.total_points)
-
-            # Ausschnitt der Features erstellen
-            detail_features = {}
-            for name, values in self._cached_features_dict.items():
-                detail_features[name] = values[start:end]
-
-            if detail_features:
-                self.features_detail_chart.update_features_chart(
-                    detail_features,
-                    title=f'Detail: Index {start} - {end} ({end - start} Punkte)'
-                )
-            else:
-                self.features_detail_chart.clear()
-
-        except Exception as e:
-            self._log(f'Detail-Chart Fehler: {e}', 'WARNING')
 
     def _confirm_features(self):
         """Bestaetigt die Feature-Auswahl."""

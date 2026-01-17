@@ -76,10 +76,12 @@ class FeatureCache:
         # Feature berechnen
         try:
             from ...data.processor import FeatureProcessor
-            processor = FeatureProcessor()
+
+            # FeatureProcessor erwartet features im Konstruktor
+            processor = FeatureProcessor(features=[feat_name])
 
             # Feature berechnen
-            result = processor.process(data, features=[feat_name])
+            result = processor.process(data, validate=False)
 
             if feat_name in result.columns:
                 values = result[feat_name].values
