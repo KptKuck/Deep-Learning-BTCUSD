@@ -17,6 +17,8 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
+from btcusd_analyzer.core.logger import get_logger
+
 
 class SessionManager:
     """
@@ -38,6 +40,7 @@ class SessionManager:
         Args:
             session_dir: Pfad zum Session-Ordner
         """
+        self._logger = get_logger()
         self.session_dir = Path(session_dir)
         self.session_dir.mkdir(parents=True, exist_ok=True)
 
@@ -45,6 +48,8 @@ class SessionManager:
         self.config_file = self.session_dir / 'session_config.json'
         self.training_data_file = self.session_dir / 'training_data.npz'
         self.backtest_data_file = self.session_dir / 'backtest_data.csv'
+
+        self._logger.debug(f"[SessionManager] Initialisiert: {self.session_dir.name}")
 
     # =========================================================================
     # Session-Konfiguration
@@ -57,6 +62,10 @@ class SessionManager:
         Args:
             config: Dictionary mit allen Parametern
         """
+        self._logger.debug(f"[SessionManager] === SAVE CONFIG START ===")
+        self._logger.debug(f"[SessionManager] Zieldatei: {self.config_file}")
+        self._logger.debug(f"[SessionManager] Config-Keys: {list(config.keys())}")
+
         # Timestamp hinzufuegen
         config['saved_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         config['session_name'] = self.session_dir.name
@@ -64,13 +73,61 @@ class SessionManager:
         with open(self.config_file, 'w', encoding='utf-8') as f:
             json.dump(config, f, indent=2, ensure_ascii=False, default=str)
 
+        file_size = self.config_file.stat().st_size / 1024
+        self._logger.debug(f"[SessionManager] Config gespeichert: {file_size:.1f} KB")
+        self._logger.debug(f"[SessionManager] === SAVE CONFIG DONE ===")
+
+    def set_status(self, status: str):
+        """
+        Setzt den Session-Status.
+
+        Args:
+            status: 'prepared' oder 'trained'
+        """
+        self._logger.debug(f"[SessionManager] === SET STATUS: {status} ===")
+
+        # Bestehende Config laden oder neue erstellen
+        config = self.load_config() or {}
+        config['status'] = status
+        config['status_updated_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        self.save_config(config)
+        self._logger.debug(f"[SessionManager] Status gesetzt: {status}")
+
+    def get_status(self) -> Optional[str]:
+        """
+        Gibt den Session-Status zurueck.
+
+        Returns:
+            'prepared', 'trained' oder None
+        """
+        config = self.load_config()
+        if config:
+            status = config.get('status')
+            self._logger.debug(f"[SessionManager] Status gelesen: {status}")
+            return status
+        return None
+
     def load_config(self) -> Optional[Dict[str, Any]]:
         """Laedt die Session-Konfiguration."""
+        self._logger.debug(f"[SessionManager] === LOAD CONFIG START ===")
+        self._logger.debug(f"[SessionManager] Quelldatei: {self.config_file}")
+
         if not self.config_file.exists():
+            self._logger.debug(f"[SessionManager] Config existiert nicht!")
             return None
 
         with open(self.config_file, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            config = json.load(f)
+
+        self._logger.debug(f"[SessionManager] Config geladen, Keys: {list(config.keys())}")
+        if 'features' in config:
+            self._logger.debug(f"[SessionManager] Features: {config['features']}")
+        if 'training_info' in config:
+            self._logger.debug(f"[SessionManager] Training-Info: {config['training_info']}")
+        self._logger.debug(f"[SessionManager] === LOAD CONFIG DONE ===")
+
+        return config
 
     # =========================================================================
     # Trainingsdaten
@@ -90,6 +147,16 @@ class SessionManager:
             features: Liste der Feature-Namen
             params: Parameter (lookback, lookforward, etc.)
         """
+        self._logger.debug(f"[SessionManager] === SAVE TRAINING DATA START ===")
+        self._logger.debug(f"[SessionManager] Zieldatei: {self.training_data_file}")
+        self._logger.debug(f"[SessionManager] Sequences Shape: {sequences.shape}")
+        self._logger.debug(f"[SessionManager] Sequences dtype: {sequences.dtype}")
+        self._logger.debug(f"[SessionManager] Labels Shape: {labels.shape}")
+        self._logger.debug(f"[SessionManager] Labels dtype: {labels.dtype}")
+        self._logger.debug(f"[SessionManager] Labels unique: {np.unique(labels)}")
+        self._logger.debug(f"[SessionManager] Features ({len(features)}): {features}")
+        self._logger.debug(f"[SessionManager] Params: {params}")
+
         np.savez_compressed(
             self.training_data_file,
             sequences=sequences,
@@ -98,6 +165,10 @@ class SessionManager:
             params=json.dumps(params)
         )
 
+        file_size = self.training_data_file.stat().st_size / (1024 * 1024)
+        self._logger.debug(f"[SessionManager] Training-Daten gespeichert: {file_size:.2f} MB")
+        self._logger.debug(f"[SessionManager] === SAVE TRAINING DATA DONE ===")
+
     def load_training_data(self) -> Optional[Dict[str, Any]]:
         """
         Laedt die Trainingsdaten.
@@ -105,15 +176,37 @@ class SessionManager:
         Returns:
             Dictionary mit sequences, labels, features, params
         """
+        self._logger.debug(f"[SessionManager] === LOAD TRAINING DATA START ===")
+        self._logger.debug(f"[SessionManager] Quelldatei: {self.training_data_file}")
+
         if not self.training_data_file.exists():
+            self._logger.debug(f"[SessionManager] Training-Daten existieren nicht!")
             return None
 
+        file_size = self.training_data_file.stat().st_size / (1024 * 1024)
+        self._logger.debug(f"[SessionManager] Dateigroesse: {file_size:.2f} MB")
+
         data = np.load(self.training_data_file, allow_pickle=True)
+
+        sequences = data['sequences']
+        labels = data['labels']
+        features = list(data['features'])
+        params = json.loads(str(data['params']))
+
+        self._logger.debug(f"[SessionManager] Sequences Shape: {sequences.shape}")
+        self._logger.debug(f"[SessionManager] Sequences dtype: {sequences.dtype}")
+        self._logger.debug(f"[SessionManager] Labels Shape: {labels.shape}")
+        self._logger.debug(f"[SessionManager] Labels dtype: {labels.dtype}")
+        self._logger.debug(f"[SessionManager] Labels unique: {np.unique(labels)}")
+        self._logger.debug(f"[SessionManager] Features ({len(features)}): {features}")
+        self._logger.debug(f"[SessionManager] Params: {params}")
+        self._logger.debug(f"[SessionManager] === LOAD TRAINING DATA DONE ===")
+
         return {
-            'sequences': data['sequences'],
-            'labels': data['labels'],
-            'features': list(data['features']),
-            'params': json.loads(str(data['params']))
+            'sequences': sequences,
+            'labels': labels,
+            'features': features,
+            'params': params
         }
 
     # =========================================================================
@@ -130,17 +223,32 @@ class SessionManager:
         Args:
             data: DataFrame mit OHLCV-Daten
         """
+        self._logger.debug(f"[SessionManager] === SAVE BACKTEST DATA START ===")
+        self._logger.debug(f"[SessionManager] Zieldatei: {self.backtest_data_file}")
+        self._logger.debug(f"[SessionManager] Input Shape: {data.shape}")
+        self._logger.debug(f"[SessionManager] Input Columns: {list(data.columns)}")
+        self._logger.debug(f"[SessionManager] Input Index Type: {type(data.index).__name__}")
+
         data = data.copy()
 
         # Falls DateTime als Spalte vorhanden, als Index setzen
         if 'DateTime' in data.columns:
+            self._logger.debug(f"[SessionManager] DateTime als Spalte gefunden -> setze als Index")
             data = data.set_index('DateTime')
 
         # Index-Namen sicherstellen (wichtig fuer korrektes Laden)
         if isinstance(data.index, pd.DatetimeIndex):
             data.index.name = 'DateTime'
 
+        self._logger.debug(f"[SessionManager] Final Index: {data.index.name}, Type: {type(data.index).__name__}")
+        self._logger.debug(f"[SessionManager] Final Columns: {list(data.columns)}")
+        self._logger.debug(f"[SessionManager] Zeitraum: {data.index[0]} bis {data.index[-1]}")
+
         data.to_csv(self.backtest_data_file, index=True)
+
+        file_size = self.backtest_data_file.stat().st_size / 1024
+        self._logger.debug(f"[SessionManager] Backtest-Daten gespeichert: {file_size:.1f} KB")
+        self._logger.debug(f"[SessionManager] === SAVE BACKTEST DATA DONE ===")
 
     def load_backtest_data(self) -> Optional[pd.DataFrame]:
         """
@@ -153,8 +261,15 @@ class SessionManager:
         Spalte zur Verfuegung, damit nachfolgende Module flexibel darauf
         zugreifen koennen.
         """
+        self._logger.debug(f"[SessionManager] === LOAD BACKTEST DATA START ===")
+        self._logger.debug(f"[SessionManager] Quelldatei: {self.backtest_data_file}")
+
         if not self.backtest_data_file.exists():
+            self._logger.debug(f"[SessionManager] Backtest-Daten existieren nicht!")
             return None
+
+        file_size = self.backtest_data_file.stat().st_size / 1024
+        self._logger.debug(f"[SessionManager] Dateigroesse: {file_size:.1f} KB")
 
         # Zuerst ohne index_col lesen um Format zu erkennen
         df = pd.read_csv(self.backtest_data_file)
@@ -162,13 +277,17 @@ class SessionManager:
         # Erste Spalte pruefen: "Unnamed: 0" = numerischer Index (altes Format)
         # "DateTime" = neues Format
         first_col = df.columns[0]
+        self._logger.debug(f"[SessionManager] Erste Spalte: '{first_col}'")
+        self._logger.debug(f"[SessionManager] Alle Spalten: {list(df.columns)}")
 
         if first_col == 'DateTime':
             # Neues Format: DateTime ist bereits Index
+            self._logger.debug(f"[SessionManager] Neues Format erkannt (DateTime als erste Spalte)")
             df = df.set_index('DateTime')
             df.index = pd.to_datetime(df.index)
         elif 'DateTime' in df.columns:
             # Altes Format: DateTime als separate Spalte
+            self._logger.debug(f"[SessionManager] Altes Format erkannt (DateTime als separate Spalte)")
             # Numerischen Index verwerfen (Unnamed: 0)
             if first_col.startswith('Unnamed'):
                 df = df.drop(columns=[first_col])
@@ -176,6 +295,7 @@ class SessionManager:
             df.index = pd.to_datetime(df.index)
         else:
             # Fallback: Erste Spalte als Index versuchen
+            self._logger.debug(f"[SessionManager] Fallback: Erste Spalte '{first_col}' als Index")
             df = df.set_index(df.columns[0])
             df.index = pd.to_datetime(df.index)
 
@@ -185,6 +305,12 @@ class SessionManager:
         # (z.B. FeatureProcessor fuer hour_sin/hour_cos)
         if 'DateTime' not in df.columns:
             df['DateTime'] = df.index
+
+        self._logger.debug(f"[SessionManager] Geladen: {len(df)} Zeilen")
+        self._logger.debug(f"[SessionManager] Spalten: {list(df.columns)}")
+        self._logger.debug(f"[SessionManager] Index Type: {type(df.index).__name__}")
+        self._logger.debug(f"[SessionManager] Zeitraum: {df.index[0]} bis {df.index[-1]}")
+        self._logger.debug(f"[SessionManager] === LOAD BACKTEST DATA DONE ===")
 
         return df
 
@@ -202,39 +328,73 @@ class SessionManager:
         Returns:
             Pfad zur kopierten Datei im Session-Ordner
         """
+        self._logger.debug(f"[SessionManager] === SAVE MODEL START ===")
+        self._logger.debug(f"[SessionManager] Quellpfad: {model_path}")
+
         model_path = Path(model_path)
         dest_path = self.session_dir / model_path.name
 
+        self._logger.debug(f"[SessionManager] Zielpfad: {dest_path}")
+
         # .pt Datei kopieren
         shutil.copy2(model_path, dest_path)
+        pt_size = dest_path.stat().st_size / (1024 * 1024)
+        self._logger.debug(f"[SessionManager] .pt kopiert: {pt_size:.2f} MB")
 
         # .json Datei kopieren (falls vorhanden)
         json_path = model_path.with_suffix('.json')
         if json_path.exists():
-            shutil.copy2(json_path, self.session_dir / json_path.name)
+            json_dest = self.session_dir / json_path.name
+            shutil.copy2(json_path, json_dest)
+            json_size = json_dest.stat().st_size / 1024
+            self._logger.debug(f"[SessionManager] .json kopiert: {json_size:.1f} KB")
+        else:
+            self._logger.debug(f"[SessionManager] Keine .json Datei gefunden: {json_path}")
 
+        self._logger.debug(f"[SessionManager] === SAVE MODEL DONE ===")
         return dest_path
 
     def get_model_path(self) -> Optional[Path]:
         """Gibt den Pfad zum Modell im Session-Ordner zurueck."""
+        self._logger.debug(f"[SessionManager] Suche Modelle in: {self.session_dir}")
         models = list(self.session_dir.glob('*.pt'))
+        self._logger.debug(f"[SessionManager] Gefundene .pt Dateien: {[m.name for m in models]}")
+
         if models:
             # Neuestes Modell zurueckgeben
-            return max(models, key=lambda p: p.stat().st_mtime)
+            newest = max(models, key=lambda p: p.stat().st_mtime)
+            self._logger.debug(f"[SessionManager] Neuestes Modell: {newest.name}")
+            return newest
+
+        self._logger.debug(f"[SessionManager] Kein Modell gefunden")
         return None
 
     def get_model_info(self) -> Optional[Dict[str, Any]]:
         """Laedt die Modell-Info (JSON-Plakette)."""
+        self._logger.debug(f"[SessionManager] === GET MODEL INFO ===")
         model_path = self.get_model_path()
         if model_path is None:
+            self._logger.debug(f"[SessionManager] Kein Modell -> keine Info")
             return None
 
         json_path = model_path.with_suffix('.json')
+        self._logger.debug(f"[SessionManager] Suche JSON: {json_path}")
+
         if not json_path.exists():
+            self._logger.debug(f"[SessionManager] JSON existiert nicht!")
             return None
 
         with open(json_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            info = json.load(f)
+
+        self._logger.debug(f"[SessionManager] Model-Info Keys: {list(info.keys())}")
+        self._logger.debug(f"[SessionManager] Model-Type: {info.get('model_type', '-')}")
+        self._logger.debug(f"[SessionManager] Accuracy: {info.get('best_accuracy', 0)}")
+        self._logger.debug(f"[SessionManager] Hidden-Sizes: {info.get('hidden_sizes', '-')}")
+        self._logger.debug(f"[SessionManager] Input-Size: {info.get('input_size', '-')}")
+        self._logger.debug(f"[SessionManager] Num-Classes: {info.get('num_classes', '-')}")
+
+        return info
 
     # =========================================================================
     # Session-Uebersicht
@@ -249,6 +409,7 @@ class SessionManager:
             'has_training_data': self.training_data_file.exists(),
             'has_backtest_data': self.backtest_data_file.exists(),
             'has_model': self.get_model_path() is not None,
+            'status': None,
         }
 
         # Config laden falls vorhanden
@@ -257,6 +418,7 @@ class SessionManager:
             if config:
                 summary['source_file'] = config.get('source_file', '-')
                 summary['features_count'] = len(config.get('features', []))
+                summary['status'] = config.get('status')
 
         # Model-Info laden falls vorhanden
         model_info = self.get_model_info()

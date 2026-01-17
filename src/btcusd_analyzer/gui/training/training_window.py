@@ -386,14 +386,30 @@ class TrainingWindow(QMainWindow):
 
     def _save_model(self, config: dict, best_val_acc: float, epoch: int, avg_val_loss: float, training_start: datetime):
         """Speichert das trainierte Modell."""
+        self._log("=== MODEL SAVE START ===", 'DEBUG')
+
         save_path = Path(config.get('save_path', 'models'))
         save_path.mkdir(parents=True, exist_ok=True)
+        self._log(f"Save-Path: {save_path}", 'DEBUG')
 
         model_name = self.model.name.lower().replace(' ', '_')
         timestamp = datetime.now().strftime('%Y%m%d_%H%M')
         final_path = save_path / f'{model_name}_{timestamp}_acc{best_val_acc:.1f}.pt'
+        self._log(f"Model-Name: {model_name}", 'DEBUG')
+        self._log(f"Final-Path: {final_path}", 'DEBUG')
 
         training_duration = (datetime.now() - training_start).total_seconds()
+
+        # Debug: Modell-Attribute auslesen
+        self._log("--- Lese Modell-Attribute ---", 'DEBUG')
+        self._log(f"model.name: {self.model.name}", 'DEBUG')
+        self._log(f"model.input_size: {getattr(self.model, 'input_size', 'NICHT GEFUNDEN')}", 'DEBUG')
+        self._log(f"model.hidden_sizes: {getattr(self.model, 'hidden_sizes', 'NICHT GEFUNDEN')}", 'DEBUG')
+        self._log(f"model.num_classes: {getattr(self.model, 'num_classes', 'NICHT GEFUNDEN')}", 'DEBUG')
+        self._log(f"model.dropout_rate: {getattr(self.model, 'dropout_rate', 'NICHT GEFUNDEN')}", 'DEBUG')
+        self._log(f"model.bidirectional: {getattr(self.model, 'bidirectional', 'NICHT GEFUNDEN')}", 'DEBUG')
+        self._log(f"model.use_layer_norm: {getattr(self.model, 'use_layer_norm', 'NICHT GEFUNDEN')}", 'DEBUG')
+        self._log(f"model.use_attention: {getattr(self.model, 'use_attention', 'NICHT GEFUNDEN')}", 'DEBUG')
 
         # Modell-Parameter direkt vom Modell holen (zuverlaessiger als config)
         model_info = {
@@ -419,13 +435,50 @@ class TrainingWindow(QMainWindow):
             'dim_feedforward': getattr(self.model, 'dim_feedforward', config.get('dim_feedforward')),
         }
 
+        self._log("--- Model-Info Dict ---", 'DEBUG')
+        for key, value in model_info.items():
+            self._log(f"  {key}: {value}", 'DEBUG')
+
+        # State-Dict Keys analysieren
+        state_dict = self.model.state_dict()
+        self._log(f"State-Dict Keys ({len(state_dict)}): {list(state_dict.keys())[:10]}...", 'DEBUG')
+
         self.model.save(final_path, metrics={'best_accuracy': best_val_acc}, model_info=model_info)
-        self._log(f"Modell gespeichert: {final_path}")
+        pt_size = final_path.stat().st_size / (1024 * 1024)
+        self._log(f"Modell gespeichert: {final_path} ({pt_size:.2f} MB)")
 
         # JSON speichern
         json_path = final_path.with_suffix('.json')
         with open(json_path, 'w', encoding='utf-8') as f:
             json.dump(model_info, f, indent=2, ensure_ascii=False)
+        json_size = json_path.stat().st_size / 1024
+        self._log(f"JSON gespeichert: {json_path} ({json_size:.1f} KB)", 'DEBUG')
+
+        # Modell in Session-Ordner kopieren
+        self._log("--- Kopiere in Session ---", 'DEBUG')
+        try:
+            from ..core.logger import get_logger
+            from ..core.session_manager import SessionManager
+
+            session_dir = get_logger().get_session_dir()
+            self._log(f"Session-Dir: {session_dir}", 'DEBUG')
+
+            if session_dir:
+                manager = SessionManager(session_dir)
+                dest_path = manager.save_model(final_path)
+                self._log(f"In Session kopiert: {dest_path}", 'DEBUG')
+
+                # Status auf 'trained' setzen
+                self._log("--- Setze Status auf 'trained' ---", 'DEBUG')
+                manager.set_status('trained')
+            else:
+                self._log("Keine Session-Dir verfuegbar!", 'WARNING')
+        except Exception as e:
+            import traceback
+            self._log(f"Modell konnte nicht in Session kopiert werden: {e}", 'WARNING')
+            self._log(traceback.format_exc(), 'DEBUG')
+
+        self._log("=== MODEL SAVE DONE ===", 'DEBUG')
 
     def _stop_training(self):
         """Stoppt das Training."""

@@ -1489,37 +1489,59 @@ class MainWindow(QMainWindow):
 
         try:
             session_dir = Path(session_dir)
+            self._log("=== SESSION LOAD START ===", 'DEBUG')
+            self._log(f"Session-Dir: {session_dir}", 'DEBUG')
+
             manager = SessionManager(session_dir)
 
             self._log(f"Lade Session: {session_dir.name}", 'INFO')
 
             # 1. Backtest-Daten laden
+            self._log("--- 1. Lade Backtest-Daten ---", 'DEBUG')
             backtest_data = manager.load_backtest_data()
             if backtest_data is not None:
                 self.backtest_info = {'data': backtest_data}
                 self._log(f"Backtest-Daten geladen: {len(backtest_data)} Punkte", 'SUCCESS')
+                self._log(f"Backtest Columns: {list(backtest_data.columns)}", 'DEBUG')
+            else:
+                self._log("Keine Backtest-Daten gefunden", 'DEBUG')
 
             # 2. Modell laden
+            self._log("--- 2. Lade Modell ---", 'DEBUG')
             model_path = manager.get_model_path()
+            self._log(f"Model-Path: {model_path}", 'DEBUG')
+
             if model_path:
                 import torch
                 from ..models import ModelFactory
 
+                self._log(f"Lade Checkpoint: {model_path}", 'DEBUG')
                 checkpoint = torch.load(model_path, map_location='cpu', weights_only=False)
+                self._log(f"Checkpoint Keys: {list(checkpoint.keys())}", 'DEBUG')
 
                 # Model-Info extrahieren
                 model_info = checkpoint.get('model_info', {})
                 self.model_info = model_info
+                self._log(f"Model-Info Keys: {list(model_info.keys())}", 'DEBUG')
+                for key, value in model_info.items():
+                    self._log(f"  {key}: {value}", 'DEBUG')
 
                 # hidden_sizes (neu) oder hidden_size/num_layers (alt)
                 hidden_sizes = model_info.get('hidden_sizes')
+                self._log(f"hidden_sizes aus model_info: {hidden_sizes}", 'DEBUG')
                 if hidden_sizes is None:
                     hidden_size = model_info.get('hidden_size', 128)
                     num_layers = model_info.get('num_layers', 2)
                     hidden_sizes = [hidden_size] * num_layers
+                    self._log(f"Fallback hidden_sizes: {hidden_sizes}", 'DEBUG')
 
                 # Modell rekonstruieren
                 model_name = model_info.get('model_type', 'bilstm')
+                self._log(f"Erstelle Modell: {model_name}", 'DEBUG')
+                self._log(f"  input_size: {model_info.get('input_size', 6)}", 'DEBUG')
+                self._log(f"  hidden_sizes: {hidden_sizes}", 'DEBUG')
+                self._log(f"  num_classes: {model_info.get('num_classes', 3)}", 'DEBUG')
+
                 self.model = ModelFactory.create(
                     model_name,
                     input_size=model_info.get('input_size', 6),
@@ -1535,7 +1557,22 @@ class MainWindow(QMainWindow):
                     num_encoder_layers=model_info.get('num_encoder_layers', 2),
                     dim_feedforward=model_info.get('dim_feedforward', 256)
                 )
-                self.model.load_state_dict(checkpoint['model_state_dict'])
+
+                # State-Dict Keys vergleichen
+                model_state_keys = list(self.model.state_dict().keys())
+                checkpoint_state_keys = list(checkpoint['model_state_dict'].keys())
+                self._log(f"Modell State-Dict Keys ({len(model_state_keys)}): {model_state_keys[:5]}...", 'DEBUG')
+                self._log(f"Checkpoint State-Dict Keys ({len(checkpoint_state_keys)}): {checkpoint_state_keys[:5]}...", 'DEBUG')
+
+                try:
+                    self.model.load_state_dict(checkpoint['model_state_dict'])
+                    self._log("State-Dict erfolgreich geladen", 'DEBUG')
+                except RuntimeError as e:
+                    self._log(f"Modell inkompatibel (alte Architektur): {model_path.name}", 'WARNING')
+                    self._log(f"Details: {e}", 'DEBUG')
+                    self.model = None
+                    return
+
                 self.model_path = model_path
 
                 self._log(f"Modell geladen: {model_path.name}", 'SUCCESS')
@@ -1546,13 +1583,62 @@ class MainWindow(QMainWindow):
                 self.model_folder_label.setText(f'Session: {session_dir.name}')
                 self.backtest_btn.setEnabled(True)
                 self.predict_btn.setEnabled(True)
+            else:
+                self._log("Kein Modell in Session gefunden", 'DEBUG')
 
             # 3. Config laden
+            self._log("--- 3. Lade Config ---", 'DEBUG')
             config = manager.load_config()
             if config:
                 self._log(f"Config: {len(config.get('features', []))} Features", 'DEBUG')
+                self._log(f"Config training_info: {config.get('training_info', {})}", 'DEBUG')
+            else:
+                self._log("Keine Config gefunden", 'DEBUG')
+
+            # 4. Trainingsdaten laden (fuer erneutes Training)
+            self._log("--- 4. Lade Trainingsdaten ---", 'DEBUG')
+            try:
+                training_data_raw = manager.load_training_data()
+                if training_data_raw:
+                    self._log(f"Training-Data Keys: {list(training_data_raw.keys())}", 'DEBUG')
+                    self._log(f"Sequences Shape: {training_data_raw['sequences'].shape}", 'DEBUG')
+                    self._log(f"Labels Shape: {training_data_raw['labels'].shape}", 'DEBUG')
+                    self._log(f"Features: {training_data_raw.get('features', [])}", 'DEBUG')
+
+                    # Konvertiere Session-Format (sequences/labels) zu Training-Format (X/Y)
+                    self.training_data = {
+                        'X': training_data_raw['sequences'],
+                        'Y': training_data_raw['labels']
+                    }
+                    self._log(f"Konvertiert: X Shape={self.training_data['X'].shape}, Y Shape={self.training_data['Y'].shape}", 'DEBUG')
+
+                    params = training_data_raw.get('params', {})
+                    num_classes = 3
+                    if config and 'training_info' in config:
+                        num_classes = config['training_info'].get('num_classes', 3)
+                    self._log(f"Num-Classes aus Config: {num_classes}", 'DEBUG')
+
+                    self.training_info = {
+                        'features': training_data_raw.get('features', []),
+                        'num_features': len(training_data_raw.get('features', [])),
+                        'num_classes': num_classes,
+                        'params': params
+                    }
+                    self._log(f"Training-Info erstellt: {self.training_info}", 'DEBUG')
+
+                    # Training GUI Button aktivieren
+                    self.train_gui_btn.setEnabled(True)
+                    self._log("Training GUI Button aktiviert", 'DEBUG')
+                    self._log(f"Trainingsdaten geladen: {len(training_data_raw['sequences'])} Samples", 'SUCCESS')
+                else:
+                    self._log("Keine Trainingsdaten gefunden", 'DEBUG')
+            except Exception as e:
+                import traceback
+                self._log(f"Trainingsdaten konnten nicht geladen werden: {e}", 'WARNING')
+                self._log(traceback.format_exc(), 'DEBUG')
 
             self._log(f"Session geladen: {session_dir.name}", 'SUCCESS')
+            self._log("=== SESSION LOAD DONE ===", 'DEBUG')
 
         except Exception as e:
             import traceback
@@ -1560,7 +1646,13 @@ class MainWindow(QMainWindow):
             self._log(traceback.format_exc(), 'ERROR')
 
     def _auto_load_latest_session(self):
-        """Laedt automatisch die neueste Session mit Modell."""
+        """
+        Laedt automatisch die neueste Session basierend auf Status.
+
+        Prioritaet:
+        1. 'trained' Sessions (mit Modell)
+        2. 'prepared' Sessions (mit Trainingsdaten, ohne Modell)
+        """
         from ..core.session_manager import SessionManager
 
         try:
@@ -1568,15 +1660,34 @@ class MainWindow(QMainWindow):
             self._log(f"Suche Sessions in: {self.config.paths.log_dir}", 'DEBUG')
             self._log(f"Gefundene Sessions: {len(sessions)}", 'DEBUG')
 
-            # Finde neueste Session mit Modell
+            # Zuerst nach 'trained' Sessions suchen (neueste zuerst)
             for session in sessions:
-                if session.get('has_model'):
+                status = session.get('status')
+                self._log(f"Session {session['session_name']}: status={status}", 'DEBUG')
+                if status == 'trained':
                     session_dir = session['session_dir']
-                    self._log(f"Auto-Load Session: {session['session_name']}", 'INFO')
+                    self._log(f"Auto-Load Session (trained): {session['session_name']}", 'INFO')
                     self._load_session_from_dir(session_dir)
                     return
 
-            self._log("Keine Session mit Modell gefunden", 'INFO')
+            # Falls keine 'trained' Session: nach 'prepared' suchen
+            for session in sessions:
+                status = session.get('status')
+                if status == 'prepared':
+                    session_dir = session['session_dir']
+                    self._log(f"Auto-Load Session (prepared): {session['session_name']}", 'INFO')
+                    self._load_session_from_dir(session_dir)
+                    return
+
+            # Fallback: Session mit Modell (alte Sessions ohne Status)
+            for session in sessions:
+                if session.get('has_model'):
+                    session_dir = session['session_dir']
+                    self._log(f"Auto-Load Session (legacy): {session['session_name']}", 'INFO')
+                    self._load_session_from_dir(session_dir)
+                    return
+
+            self._log("Keine ladbare Session gefunden", 'INFO')
 
         except Exception as e:
             self._log(f"Auto-Load Session fehlgeschlagen: {e}", 'WARNING')

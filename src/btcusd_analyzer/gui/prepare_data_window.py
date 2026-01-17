@@ -1754,26 +1754,50 @@ class PrepareDataWindow(QMainWindow):
             logger = get_logger()
             session_dir = logger.get_session_dir()
 
+            self._log("=== SESSION SAVE START ===", 'DEBUG')
+            self._log(f"Session-Dir: {session_dir}", 'DEBUG')
+
             if session_dir is None:
                 self._log("Session-Ordner nicht verfuegbar", 'WARNING')
                 return
 
             manager = SessionManager(session_dir)
 
+            # Debug: Input-Daten analysieren
+            self._log(f"X Type: {type(X).__name__}", 'DEBUG')
+            self._log(f"X Shape: {X.shape if hasattr(X, 'shape') else 'unknown'}", 'DEBUG')
+            self._log(f"Y Type: {type(Y).__name__}", 'DEBUG')
+            self._log(f"Y Shape: {Y.shape if hasattr(Y, 'shape') else 'unknown'}", 'DEBUG')
+            self._log(f"Features: {feature_columns}", 'DEBUG')
+            self._log(f"Backtest Shape: {backtest_data.shape}", 'DEBUG')
+            self._log(f"Training-Info: {training_info}", 'DEBUG')
+
             # 1. Trainingsdaten speichern
+            self._log("--- Speichere Trainingsdaten ---", 'DEBUG')
+            X_np = X.numpy() if hasattr(X, 'numpy') else X
+            Y_np = Y.numpy() if hasattr(Y, 'numpy') else Y
+            self._log(f"X_np dtype: {X_np.dtype}, shape: {X_np.shape}", 'DEBUG')
+            self._log(f"Y_np dtype: {Y_np.dtype}, shape: {Y_np.shape}", 'DEBUG')
+            self._log(f"Y_np unique: {list(set(Y_np.flatten()))}", 'DEBUG')
+
             manager.save_training_data(
-                sequences=X.numpy() if hasattr(X, 'numpy') else X,
-                labels=Y.numpy() if hasattr(Y, 'numpy') else Y,
+                sequences=X_np,
+                labels=Y_np,
                 features=feature_columns,
                 params=self.params.copy()
             )
             self._log(f"Trainingsdaten gespeichert: {session_dir.name}/training_data.npz")
 
             # 2. Backtest-Daten speichern
+            self._log("--- Speichere Backtest-Daten ---", 'DEBUG')
+            self._log(f"Backtest Columns: {list(backtest_data.columns)}", 'DEBUG')
+            self._log(f"Backtest Index: {type(backtest_data.index).__name__}", 'DEBUG')
+
             manager.save_backtest_data(backtest_data)
             self._log(f"Backtest-Daten gespeichert: {session_dir.name}/backtest_data.csv")
 
             # 3. Session-Konfiguration speichern
+            self._log("--- Speichere Config ---", 'DEBUG')
             config = {
                 'source_file': str(self.data_file) if hasattr(self, 'data_file') else '-',
                 'features': feature_columns,
@@ -1795,11 +1819,20 @@ class PrepareDataWindow(QMainWindow):
                     'num_points': len(backtest_data),
                 }
             }
+            self._log(f"Config Keys: {list(config.keys())}", 'DEBUG')
             manager.save_config(config)
             self._log(f"Session-Config gespeichert: {session_dir.name}/session_config.json")
 
+            # 4. Status auf 'prepared' setzen
+            self._log("--- Setze Status auf 'prepared' ---", 'DEBUG')
+            manager.set_status('prepared')
+
+            self._log("=== SESSION SAVE DONE ===", 'DEBUG')
+
         except Exception as e:
+            import traceback
             self._log(f"Session-Speicherung fehlgeschlagen: {e}", 'ERROR')
+            self._log(traceback.format_exc(), 'ERROR')
 
     # =========================================================================
     # Hilfsmethoden
