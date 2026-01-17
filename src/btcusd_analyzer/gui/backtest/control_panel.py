@@ -156,10 +156,10 @@ class ControlPanel(QWidget):
         slider_row.addWidget(QLabel("Schritte/Sek:"))
         self.speed_slider = QSlider(Qt.Orientation.Horizontal)
         self.speed_slider.setRange(1, 500)
-        self.speed_slider.setValue(10)
+        self.speed_slider.setValue(500)
         self.speed_slider.valueChanged.connect(self._on_speed_changed)
         slider_row.addWidget(self.speed_slider)
-        self.speed_label = QLabel("10")
+        self.speed_label = QLabel("500")
         self.speed_label.setStyleSheet("color: white; min-width: 30px;")
         slider_row.addWidget(self.speed_label)
         layout.addLayout(slider_row)
@@ -176,10 +176,11 @@ class ControlPanel(QWidget):
         self.debug_check.toggled.connect(self.debug_toggled.emit)
         layout.addWidget(self.debug_check)
 
-        # Signal-Invertierung
+        # Signal-Invertierung (standardmaessig aktiv)
         self.invert_check = QCheckBox("Signale invertieren (BUY<->SELL)")
         self.invert_check.setStyleSheet("color: rgb(255, 128, 255);")
         self.invert_check.setToolTip("Tauscht BUY und SELL Signale")
+        self.invert_check.setChecked(True)
         self.invert_check.toggled.connect(self.invert_toggled.emit)
         layout.addWidget(self.invert_check)
 

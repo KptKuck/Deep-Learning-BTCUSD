@@ -97,7 +97,7 @@ class BacktestWindow(QMainWindow):
 
         # Optionen
         self.debug_mode = False
-        self.invert_signals = False
+        self.invert_signals = True  # Default: Signale invertieren
 
         # Profiling
         self._profiling_enabled = False
