@@ -409,7 +409,7 @@ class SaveManager:
                 'accuracy': metrics.get('best_accuracy', 0),
                 'loss': metrics.get('best_loss', 0),
                 'epochs': metrics.get('epochs', 0),
-                'model_type': getattr(model, 'model_type', 'unknown'),
+                'model_type': getattr(model, 'name', 'unknown'),
             }
             config.training_metrics = metrics
 
@@ -622,11 +622,11 @@ class SaveManager:
 
         # Modell-Info sammeln
         model_info = {
-            'model_type': getattr(model, 'model_type', 'unknown'),
+            'model_type': getattr(model, 'name', 'unknown'),
             'input_size': getattr(model, 'input_size', 0),
             'hidden_sizes': getattr(model, 'hidden_sizes', []),
             'num_layers': getattr(model, 'num_layers', 0),
-            'dropout': getattr(model, 'dropout', 0),
+            'dropout': getattr(model, 'dropout_rate', 0),
             'num_classes': getattr(model, 'num_classes', 3),
             'best_accuracy': metrics.get('best_accuracy', 0),
             'best_loss': metrics.get('best_loss', 0),
