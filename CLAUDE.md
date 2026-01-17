@@ -66,6 +66,19 @@ Alle GUI-Fenster muessen einen numerischen Index im Titel haben:
 
 Format: `setWindowTitle("X.X - Fenstername")`
 
+### Log-Meldungen bei GUI-Oeffnung (WICHTIG)
+Log-Meldungen beim Oeffnen von GUI-Fenstern muessen den Index enthalten:
+```python
+# RICHTIG:
+self._log('Oeffne 3 - Training...', 'INFO')
+self._log('Oeffne 4.2 - Walk-Forward...', 'INFO')
+
+# FALSCH:
+self._log('Oeffne Training GUI...', 'INFO')
+self._log('Oeffne Walk-Forward Analyse...', 'INFO')
+```
+Format: `'Oeffne X.X - Fenstername...'`
+
 ### Relative Groessenangaben (WICHTIG)
 Alle GUI-Groessenangaben muessen relativ zur Bildschirmgroesse sein (in %):
 - GUIs sollen sich unabhaengig von der Bildschirmaufloesung skalieren
@@ -125,6 +138,19 @@ Der Logger (`core/logger.py`) ist jetzt **100% Queue-basiert** und Thread-safe:
 - Log-Aufrufe schreiben nur in eine Queue (lock-free)
 - Ein separater Daemon-Thread schreibt zu Console/Datei
 - Kein Deadlock-Risiko mehr mit Qt Event-Loop
+
+### DEBUG-Meldungen Format (WICHTIG)
+DEBUG-Meldungen muessen immer den Funktions-/Klassennamen enthalten:
+```python
+# RICHTIG:
+self._logger.debug(f"[SessionManager] Session geladen: {session_id}")
+self._logger.debug(f"[_load_config] Config nicht gefunden")
+
+# FALSCH:
+self._logger.debug(f"Session geladen: {session_id}")
+self._logger.debug("Config nicht gefunden")
+```
+Format: `[Klasse/Funktion] Nachricht`
 
 ### Architektur:
 ```

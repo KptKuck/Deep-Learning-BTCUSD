@@ -1347,7 +1347,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'Fehler', 'Bitte zuerst Daten laden')
             return
 
-        self._log('Oeffne Trainingsdaten-Vorbereitung...', 'INFO')
+        self._log('Oeffne 2 - Prepare Data...', 'INFO')
 
         try:
             from .prepare_data_window import PrepareDataWindow
@@ -1380,7 +1380,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'Fehler', 'Bitte zuerst Trainingsdaten vorbereiten')
             return
 
-        self._log('Oeffne Signal-Visualisierung...', 'INFO')
+        self._log('Oeffne 5 - Visualize...', 'INFO')
 
         try:
             from .visualize_data_window import VisualizeDataWindow
@@ -1431,7 +1431,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'Fehler', 'Bitte zuerst Trainingsdaten vorbereiten')
             return
 
-        self._log('Oeffne Training GUI...', 'INFO')
+        self._log('Oeffne 3 - Training...', 'INFO')
 
         try:
             from .training_window import TrainingWindow
@@ -1842,7 +1842,7 @@ class MainWindow(QMainWindow):
         if self.model is None:
             self._log('Kein Modell geladen - Backtester ohne Vorhersagen', 'WARNING')
 
-        self._log('Oeffne Backtester...', 'INFO')
+        self._log('Oeffne 4 - Backtest...', 'INFO')
 
         try:
             from .backtest_window import BacktestWindow
@@ -1872,7 +1872,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'Fehler', 'Bitte zuerst Daten laden')
             return
 
-        self._log('Oeffne Backtrader Pro...', 'INFO')
+        self._log('Oeffne 4.1 - Backtrader...', 'INFO')
 
         try:
             from .backtrader_window import BacktraderWindow
@@ -1903,7 +1903,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, 'Fehler', 'Bitte zuerst Daten laden')
             return
 
-        self._log('Oeffne Walk-Forward Analyse...', 'INFO')
+        self._log('Oeffne 4.2 - Walk-Forward...', 'INFO')
 
         try:
             from .walk_forward_window import WalkForwardWindow
@@ -1941,7 +1941,7 @@ class MainWindow(QMainWindow):
 
     def _open_trading(self):
         """Oeffnet das Trading-Fenster."""
-        self._log('Oeffne Live Trading...', 'INFO')
+        self._log('Oeffne 6 - Trading...', 'INFO')
 
         try:
             from .trading_window import TradingWindow
