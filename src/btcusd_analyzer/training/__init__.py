@@ -1,6 +1,27 @@
-"""Training Module - Datenaufbereitung fuer Training"""
+"""Training Module - Datenaufbereitung fuer Training
 
-from .labeler import DailyExtremaLabeler
+Terminologie:
+- Peak = Position im Chart (Index eines Hochs/Tiefs) -> PeakFinder
+- Label = Klassifikation fuer Training (BUY/SELL/HOLD) -> Labeler
+"""
+
+# Peak-Erkennung (Rohpositionen)
+from .peak_finder import (
+    PeakFinder,
+    PeakConfig,
+    PeakMethod,
+    PeakResult,
+)
+
+# Label-Generierung (Klassifikationen)
+from .labeler import (
+    Labeler,
+    LabelingConfig,
+    LabelingMethod,
+    LabelResult,
+    DailyExtremaLabeler,  # Legacy
+)
+
 from .sequence import (
     SequenceGenerator,
     expand_labels_lookahead,
@@ -15,11 +36,24 @@ from .auto_trainer import (
 )
 
 __all__ = [
-    'DailyExtremaLabeler',
+    # Peak-Erkennung
+    'PeakFinder',
+    'PeakConfig',
+    'PeakMethod',
+    'PeakResult',
+    # Label-Generierung
+    'Labeler',
+    'LabelingConfig',
+    'LabelingMethod',
+    'LabelResult',
+    'DailyExtremaLabeler',  # Legacy
+    # Sequenzen
     'SequenceGenerator',
-    'ZScoreNormalizer',
     'expand_labels_lookahead',
     'compute_class_weights',
+    # Normalisierung
+    'ZScoreNormalizer',
+    # Auto-Training
     'AutoTrainer',
     'AutoTrainResult',
     'AUTO_TRAINER_CONFIGS',

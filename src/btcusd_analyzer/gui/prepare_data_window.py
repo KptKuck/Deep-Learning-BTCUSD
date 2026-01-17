@@ -76,7 +76,11 @@ class PrepareDataWindow(QMainWindow):
         }
 
         # Ergebnis-Variablen
-        self.detected_peaks: Dict[str, List[int]] = {'buy_indices': [], 'sell_indices': []}
+        # Peaks sind Rohpositionen (Hochs/Tiefs), Labels sind Klassifikationen (BUY/SELL/HOLD)
+        self.detected_peaks: Dict[str, List[int]] = {
+            'high_indices': [],  # Hochpunkte (werden zu SELL-Labels)
+            'low_indices': [],   # Tiefpunkte (werden zu BUY-Labels)
+        }
         self.generated_labels: Optional[np.ndarray] = None
         self.selected_features: List[str] = []
         self.result_info: Dict[str, Any] = {}
@@ -475,16 +479,17 @@ class PrepareDataWindow(QMainWindow):
         self._peak_worker = None
         self.find_peaks_btn.setEnabled(True)
 
-        # Ergebnisse speichern
-        self.labeler = result['labeler']
+        # Ergebnisse speichern - korrekte Terminologie
+        # high_indices = Hochpunkte (werden spaeter zu SELL-Labels)
+        # low_indices = Tiefpunkte (werden spaeter zu BUY-Labels)
         self.detected_peaks = {
-            'buy_indices': result['buy_indices'],
-            'sell_indices': result['sell_indices']
+            'high_indices': result.get('high_indices', result.get('sell_indices', [])),
+            'low_indices': result.get('low_indices', result.get('buy_indices', [])),
         }
 
-        num_buy = len(self.detected_peaks['buy_indices'])
-        num_sell = len(self.detected_peaks['sell_indices'])
-        self._log(f'[_on_peaks_found] Peaks: {num_buy} BUY, {num_sell} SELL', 'DEBUG')
+        num_highs = len(self.detected_peaks['high_indices'])
+        num_lows = len(self.detected_peaks['low_indices'])
+        self._log(f'[_on_peaks_found] Peaks: {num_highs} Hochs, {num_lows} Tiefs', 'DEBUG')
 
         # Status aktualisieren
         self.peaks_valid = True
@@ -492,17 +497,18 @@ class PrepareDataWindow(QMainWindow):
         self.features_valid = False
         self.samples_valid = False
 
-        self.peaks_status.setText(f'Gefunden: {num_buy} BUY-Peaks, {num_sell} SELL-Peaks')
+        self.peaks_status.setText(f'Gefunden: {num_highs} Hochs, {num_lows} Tiefs')
         self.peaks_status.setStyleSheet('color: #33b34d;')
 
         # Chart aktualisieren
+        # Fuer Chart: Tiefs=gruen (BUY-Kandidaten), Hochs=rot (SELL-Kandidaten)
         self._log('[_on_peaks_found] Chart update...', 'DEBUG')
         close_col = 'Close' if 'Close' in self.data.columns else 'close'
         prices = np.asarray(self.data[close_col].values)
         self.peaks_chart.update_price_chart(
             prices,
-            self.detected_peaks['buy_indices'],
-            self.detected_peaks['sell_indices'],
+            self.detected_peaks['low_indices'],   # Tiefs -> gruen (BUY)
+            self.detected_peaks['high_indices'],  # Hochs -> rot (SELL)
             'Erkannte Peaks'
         )
         self._log('[_on_peaks_found] Chart update done', 'DEBUG')
@@ -512,7 +518,7 @@ class PrepareDataWindow(QMainWindow):
         self._update_tab_status()
         self._log('[_on_peaks_found] Tab update done', 'DEBUG')
 
-        self._log(f'Peaks gefunden: {num_buy} BUY, {num_sell} SELL', 'SUCCESS')
+        self._log(f'Peaks gefunden: {num_highs} Hochs, {num_lows} Tiefs', 'SUCCESS')
 
     def _on_peak_error(self, error_msg: str):
         """Callback bei Peak-Finding Fehler."""
@@ -671,23 +677,26 @@ class PrepareDataWindow(QMainWindow):
             self.current_num_classes = num_classes
 
             # Labels-Array erstellen
+            # Peaks -> Labels Umwandlung:
+            # - Tiefpunkte (low_indices) -> BUY-Labels (Kaufen am Tief)
+            # - Hochpunkte (high_indices) -> SELL-Labels (Verkaufen am Hoch)
             n = len(self.data)
             if num_classes == 3:
                 # HOLD=0, BUY=1, SELL=2
                 labels = np.zeros(n, dtype=np.int32)
-                for idx in self.detected_peaks['buy_indices']:
+                for idx in self.detected_peaks['low_indices']:  # Tiefs -> BUY
                     if 0 <= idx < n:
                         labels[idx] = 1  # BUY
-                for idx in self.detected_peaks['sell_indices']:
+                for idx in self.detected_peaks['high_indices']:  # Hochs -> SELL
                     if 0 <= idx < n:
                         labels[idx] = 2  # SELL
             else:
                 # BUY=0, SELL=1 (nur an Peak-Positionen)
                 labels = np.full(n, -1, dtype=np.int32)  # -1 = ignorieren
-                for idx in self.detected_peaks['buy_indices']:
+                for idx in self.detected_peaks['low_indices']:  # Tiefs -> BUY
                     if 0 <= idx < n:
                         labels[idx] = 0  # BUY
-                for idx in self.detected_peaks['sell_indices']:
+                for idx in self.detected_peaks['high_indices']:  # Hochs -> SELL
                     if 0 <= idx < n:
                         labels[idx] = 1  # SELL
 
@@ -1569,15 +1578,15 @@ class PrepareDataWindow(QMainWindow):
             num_classes = self.current_num_classes
 
             if num_classes == 3:
-                num_buy = len(self.detected_peaks['buy_indices'])
-                num_sell = len(self.detected_peaks['sell_indices'])
+                num_buy = len(self.detected_peaks['low_indices'])   # Tiefs -> BUY
+                num_sell = len(self.detected_peaks['high_indices'])  # Hochs -> SELL
                 if self.include_hold_cb.isChecked():
                     num_hold = int((num_buy + num_sell) * self.hold_ratio_spin.value())
                 else:
                     num_hold = 0
             else:
-                num_buy = len(self.detected_peaks['buy_indices'])
-                num_sell = len(self.detected_peaks['sell_indices'])
+                num_buy = len(self.detected_peaks['low_indices'])   # Tiefs -> BUY
+                num_sell = len(self.detected_peaks['high_indices'])  # Hochs -> SELL
                 num_hold = 0
 
             total = num_buy + num_sell + num_hold
@@ -1652,6 +1661,9 @@ class PrepareDataWindow(QMainWindow):
 
             # 3. Labels mit Lookahead erweitern (falls aktiviert)
             # Labels nur fuer Trainingsdaten verwenden
+            if self.generated_labels is None:
+                self._log("Fehler: Keine Labels generiert", 'ERROR')
+                return
             train_labels = self.generated_labels[:split_idx]
             num_classes = self.result_info.get('num_classes', 3)
 
@@ -1723,8 +1735,9 @@ class PrepareDataWindow(QMainWindow):
             training_info['lookahead_bars'] = lookahead_bars
             training_info['train_split_pct'] = train_split_pct
             # Nur Peaks im Trainingsbereich
-            training_info['buy_indices'] = [i for i in self.detected_peaks['buy_indices'] if i < split_idx]
-            training_info['sell_indices'] = [i for i in self.detected_peaks['sell_indices'] if i < split_idx]
+            # Peaks im Trainingsbereich (Terminologie: Tiefs->BUY, Hochs->SELL)
+            training_info['buy_indices'] = [i for i in self.detected_peaks['low_indices'] if i < split_idx]
+            training_info['sell_indices'] = [i for i in self.detected_peaks['high_indices'] if i < split_idx]
 
             self._generated_training_info = training_info
 
@@ -1778,8 +1791,8 @@ class PrepareDataWindow(QMainWindow):
             save_manager = SaveManager(session_dir)
 
             # Daten vorbereiten
-            X_np = self._generated_X.numpy() if hasattr(self._generated_X, 'numpy') else self._generated_X
-            Y_np = self._generated_Y.numpy() if hasattr(self._generated_Y, 'numpy') else self._generated_Y
+            X_np = self._generated_X
+            Y_np = self._generated_Y
 
             # Pruefung ob Daten existieren
             check_result = save_manager.check_save_prepared(
@@ -1816,7 +1829,7 @@ class PrepareDataWindow(QMainWindow):
                 backtest_data=self._generated_backtest_data,
                 params=self.params.copy(),
                 force=True,  # Bestaetigung bereits erfolgt
-                source_file=str(self.data_file) if hasattr(self, 'data_file') else '',
+                source_file='',
             )
 
             if result.can_save:
