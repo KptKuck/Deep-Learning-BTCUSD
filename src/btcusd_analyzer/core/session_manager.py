@@ -458,18 +458,46 @@ class SessionManager:
         """
         Aktualisiert die Session in der Datenbank.
 
+        Falls die Session noch nicht in der DB existiert, werden automatisch
+        alle verfuegbaren Basis-Infos aus dem Session-Ordner geladen.
+
         Args:
             updates: Dictionary mit zu aktualisierenden Feldern
         """
         db = self._get_session_db()
         if db:
             session_id = self.session_dir.name
-            # Immer path mitgeben, falls Session neu erstellt wird
-            updates_with_path = {
-                'path': str(self.session_dir),
-                **updates
-            }
-            db.update_session(session_id, updates_with_path)
+
+            # Pruefen ob Session bereits existiert
+            existing = db.get_session(session_id)
+
+            if existing:
+                # Session existiert - nur Updates anwenden
+                updates_with_path = {
+                    'path': str(self.session_dir),
+                    **updates
+                }
+                db.update_session(session_id, updates_with_path)
+            else:
+                # Neue Session - alle Basis-Infos sammeln
+                config = self.load_config() or {}
+                features = config.get('features', [])
+                training_info = config.get('training_info', {})
+
+                base_info = {
+                    'id': session_id,
+                    'path': str(self.session_dir),
+                    'has_training_data': self.training_data_file.exists(),
+                    'has_backtest_data': self.backtest_data_file.exists(),
+                    'has_model': self.get_model_path() is not None,
+                    'features': features,
+                    'num_features': len(features),
+                    'num_samples': training_info.get('actual_samples', 0),
+                }
+                # Updates ueberschreiben Basis-Infos
+                base_info.update(updates)
+                db.add_session(base_info)
+                self._logger.debug(f"[SessionManager] Neue Session in DB: {session_id}")
 
     def register_in_db(self, session_info: dict = None):
         """
