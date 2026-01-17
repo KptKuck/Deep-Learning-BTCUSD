@@ -236,7 +236,7 @@ class WalkForwardWindow(QMainWindow):
 
     def _init_ui(self):
         """Initialisiert die UI-Komponenten."""
-        self.setWindowTitle('Walk-Forward Analyse')
+        self.setWindowTitle('4.2 - Walk-Forward')
         self.setMinimumSize(1400, 1260)  # 40% mehr Hoehe (900 * 1.4)
 
         # Central Widget

@@ -92,7 +92,7 @@ class BacktraderWindow(QMainWindow):
 
     def _init_ui(self):
         """Initialisiert die UI-Komponenten."""
-        self.setWindowTitle('Backtrader Backtester')
+        self.setWindowTitle('4.1 - Backtrader')
         self.setMinimumSize(1200, 800)
 
         # Central Widget

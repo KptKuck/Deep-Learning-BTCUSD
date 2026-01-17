@@ -44,6 +44,28 @@ btc_analyzer_python/
   - Fehler/SELL: #cc4d33 (rot)
   - Neutral/HOLD: #808080 (grau)
 
+### Fenster-Indexierung (WICHTIG)
+Alle GUI-Fenster muessen einen numerischen Index im Titel haben:
+- Hauptfenster: ganze Zahlen (1, 2, 3, ...)
+- Unter-Dialoge: Dezimalstellen (4.1, 4.2, ...)
+
+**Aktuelle Zuordnung:**
+| Index | Fenster | Datei |
+|-------|---------|-------|
+| 1 | Main | main_window.py |
+| 1.1 | Session Manager | session_manager_window.py |
+| 2 | Prepare Data | prepare_data_window.py |
+| 3 | Training | training/training_window.py |
+| 4 | Backtest | backtest/backtest_window.py |
+| 4.1 | Backtrader | backtrader_window.py |
+| 4.2 | Walk-Forward | walk_forward_window.py |
+| 4.3 | Trade-Statistik | backtest/trade_statistics_dialog.py |
+| 4.4 | Zeitraum | backtest/timerange_dialog.py |
+| 5 | Visualize | visualize_data_window.py |
+| 6 | Trading | trading_window.py |
+
+Format: `setWindowTitle("X.X - Fenstername")`
+
 ## Git
 - Commit-Messages auf Englisch
 - Co-Authored-By Tag bei Commits

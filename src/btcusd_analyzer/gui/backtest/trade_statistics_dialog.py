@@ -29,7 +29,7 @@ class TradeStatisticsDialog(QDialog):
         self.initial_capital = initial_capital
         self.current_equity = current_equity
 
-        self.setWindowTitle("Trade-Statistik")
+        self.setWindowTitle("4.3 - Trade-Statistik")
         self.setMinimumSize(900, 700)
         self.setStyleSheet(get_stylesheet())
 

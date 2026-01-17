@@ -31,7 +31,7 @@ class TimeRangeDialog(QDialog):
     def __init__(self, parent=None, current_file: str = None,
                  current_data: pd.DataFrame = None):
         super().__init__(parent)
-        self.setWindowTitle("Zeitraum aendern")
+        self.setWindowTitle("4.4 - Zeitraum")
         self.setMinimumSize(500, 400)
         self.setModal(True)
 

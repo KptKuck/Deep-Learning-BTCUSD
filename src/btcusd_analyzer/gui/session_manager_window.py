@@ -49,8 +49,8 @@ class SessionManagerWindow(QDialog):
 
     def _init_ui(self):
         """Initialisiert die UI."""
-        self.setWindowTitle('Session Manager')
-        self.setMinimumSize(1000, 650)
+        self.setWindowTitle('1.1 Session Manager')
+        self.setMinimumSize(1100, 800)
         self.setStyleSheet('''
             QDialog {
                 background-color: #262626;
@@ -178,10 +178,10 @@ class SessionManagerWindow(QDialog):
 
         layout.addLayout(filter_layout)
 
-        # Splitter fuer Tabelle und Details
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        # Splitter fuer Tabelle und Details (vertikal)
+        splitter = QSplitter(Qt.Orientation.Vertical)
 
-        # Tabelle (links)
+        # Tabelle (oben)
         table_widget = QWidget()
         table_layout = QVBoxLayout(table_widget)
         table_layout.setContentsMargins(0, 0, 0, 0)
@@ -208,29 +208,26 @@ class SessionManagerWindow(QDialog):
 
         splitter.addWidget(table_widget)
 
-        # Details Panel (rechts)
+        # Details Panel (unten) - deutlich groesser
         details_widget = QWidget()
         details_layout = QVBoxLayout(details_widget)
-        details_layout.setContentsMargins(5, 0, 0, 0)
+        details_layout.setContentsMargins(0, 5, 0, 0)
+
+        # Details Header mit Buttons
+        details_header = QHBoxLayout()
 
         details_label = QLabel('Session Details')
         details_label.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
         details_label.setStyleSheet('color: #4de6ff;')
-        details_layout.addWidget(details_label)
+        details_header.addWidget(details_label)
 
-        self.details_text = QTextEdit()
-        self.details_text.setReadOnly(True)
-        self.details_text.setPlaceholderText('Session auswaehlen um Details anzuzeigen...')
-        details_layout.addWidget(self.details_text)
-
-        # Aktions-Buttons im Details-Panel
-        detail_btn_layout = QHBoxLayout()
+        details_header.addStretch()
 
         self.open_folder_btn = QPushButton('Ordner oeffnen')
         self.open_folder_btn.setToolTip('Oeffnet den Session-Ordner im Explorer')
         self.open_folder_btn.clicked.connect(self._open_folder)
         self.open_folder_btn.setEnabled(False)
-        detail_btn_layout.addWidget(self.open_folder_btn)
+        details_header.addWidget(self.open_folder_btn)
 
         self.delete_btn = QPushButton('Loeschen')
         self.delete_btn.setStyleSheet('''
@@ -243,16 +240,22 @@ class SessionManagerWindow(QDialog):
         ''')
         self.delete_btn.clicked.connect(self._delete_selected)
         self.delete_btn.setEnabled(False)
-        detail_btn_layout.addWidget(self.delete_btn)
+        details_header.addWidget(self.delete_btn)
 
-        details_layout.addLayout(detail_btn_layout)
+        details_layout.addLayout(details_header)
+
+        self.details_text = QTextEdit()
+        self.details_text.setReadOnly(True)
+        self.details_text.setPlaceholderText('Session auswaehlen um Details anzuzeigen...')
+        self.details_text.setMinimumHeight(200)
+        details_layout.addWidget(self.details_text)
 
         splitter.addWidget(details_widget)
 
-        # Splitter-Groessen setzen (70% Tabelle, 30% Details)
-        splitter.setSizes([700, 300])
+        # Splitter-Groessen setzen (45% Tabelle, 55% Details)
+        splitter.setSizes([350, 450])
 
-        layout.addWidget(splitter)
+        layout.addWidget(splitter, 1)  # stretch=1 damit Splitter den Platz fuellt
 
         # Buttons unten
         btn_layout = QHBoxLayout()
