@@ -8,12 +8,122 @@ import numpy as np
 
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
 from PyQt6.QtCore import Qt, QPointF, QMargins
-from PyQt6.QtGui import QColor, QPen, QBrush, QPainter, QPainterPath
+from PyQt6.QtGui import QColor, QPen, QBrush, QPainter, QWheelEvent, QMouseEvent
 from PyQt6.QtCharts import (
     QChart, QChartView, QLineSeries, QScatterSeries, QValueAxis
 )
 
 from .styles import StyleFactory, COLORS
+
+
+class InteractiveChartView(QChartView):
+    """
+    Erweiterter QChartView mit Mausrad-Zoom und Panning.
+
+    Features:
+    - Mausrad: Zoom auf beiden Achsen (Shift = nur X, Ctrl = nur Y)
+    - Linke Maustaste + Drag: Panning (Verschieben)
+    - Rechte Maustaste + Drag: Rechteck-Zoom
+    """
+
+    def __init__(self, chart: QChart, parent=None):
+        super().__init__(chart, parent)
+        self._last_mouse_pos: Optional[QPointF] = None
+        self._panning = False
+
+    def wheelEvent(self, event: QWheelEvent):
+        """Mausrad-Zoom mit Modifiern."""
+        # Zoom-Faktor berechnen
+        delta = event.angleDelta().y()
+        factor = 0.9 if delta > 0 else 1.1  # Zoom in/out
+
+        # Modifier pruefen
+        modifiers = event.modifiers()
+        zoom_x = True
+        zoom_y = True
+
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            zoom_y = False  # Nur X-Achse
+        elif modifiers & Qt.KeyboardModifier.ControlModifier:
+            zoom_x = False  # Nur Y-Achse
+
+        # Zoom um Mausposition
+        chart = self.chart()
+        if chart:
+            # Mausposition in Chart-Koordinaten
+            mouse_pos = event.position()
+            chart_pos = chart.mapToValue(mouse_pos)
+
+            for axis in chart.axes():
+                if isinstance(axis, QValueAxis):
+                    is_x_axis = axis.alignment() == Qt.AlignmentFlag.AlignBottom
+                    if (is_x_axis and zoom_x) or (not is_x_axis and zoom_y):
+                        # Zoom um den Punkt unter der Maus
+                        axis_min = axis.min()
+                        axis_max = axis.max()
+                        center = chart_pos.x() if is_x_axis else chart_pos.y()
+
+                        # Neuen Bereich berechnen
+                        left = center - (center - axis_min) * factor
+                        right = center + (axis_max - center) * factor
+                        axis.setRange(left, right)
+
+        event.accept()
+
+    def mousePressEvent(self, event: QMouseEvent):
+        """Startet Panning bei linker Maustaste."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._panning = True
+            self._last_mouse_pos = event.position()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+        elif event.button() == Qt.MouseButton.RightButton:
+            # Rechteck-Zoom mit rechter Maustaste
+            super().mousePressEvent(event)
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        """Panning bei gedruckter linker Maustaste."""
+        if self._panning and self._last_mouse_pos is not None:
+            chart = self.chart()
+            if chart:
+                # Delta berechnen
+                current_pos = event.position()
+                delta = current_pos - self._last_mouse_pos
+
+                # In Chart-Koordinaten umrechnen
+                for axis in chart.axes():
+                    if isinstance(axis, QValueAxis):
+                        is_x_axis = axis.alignment() == Qt.AlignmentFlag.AlignBottom
+                        axis_range = axis.max() - axis.min()
+
+                        # Pixel zu Wert-Verhaeltnis
+                        if is_x_axis:
+                            plot_area = chart.plotArea()
+                            pixels = plot_area.width()
+                            value_delta = -delta.x() * axis_range / pixels
+                        else:
+                            plot_area = chart.plotArea()
+                            pixels = plot_area.height()
+                            value_delta = delta.y() * axis_range / pixels
+
+                        axis.setRange(axis.min() + value_delta, axis.max() + value_delta)
+
+                self._last_mouse_pos = current_pos
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        """Beendet Panning."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._panning = False
+            self._last_mouse_pos = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
 
 
 class PeaksChartWidget(QWidget):
@@ -64,10 +174,9 @@ class PeaksChartWidget(QWidget):
         # Achsen erstellen
         self._create_axes()
 
-        # ChartView mit Zoom-Unterstuetzung
-        self.chart_view = QChartView(self.chart)
+        # ChartView mit interaktivem Zoom und Panning
+        self.chart_view = InteractiveChartView(self.chart)
         self.chart_view.setRenderHint(QPainter.RenderHint.Antialiasing)
-        self.chart_view.setRubberBand(QChartView.RubberBand.RectangleRubberBand)
         self.chart_view.setBackgroundBrush(QBrush(QColor(COLORS['bg_primary'])))
 
         # Zoom-Kontrollen
@@ -175,11 +284,31 @@ class PeaksChartWidget(QWidget):
         zoom_y_out.clicked.connect(lambda: self._zoom_axis('y', 1.25))
         layout.addWidget(zoom_y_out)
 
+        # Pan-Buttons
+        layout.addWidget(QLabel('Pan:'))
+
+        pan_left = QPushButton('<')
+        pan_left.setFixedWidth(30)
+        pan_left.setStyleSheet(self._button_style('#555555'))
+        pan_left.clicked.connect(lambda: self._pan_axis('x', -0.2))
+        layout.addWidget(pan_left)
+
+        pan_right = QPushButton('>')
+        pan_right.setFixedWidth(30)
+        pan_right.setStyleSheet(self._button_style('#555555'))
+        pan_right.clicked.connect(lambda: self._pan_axis('x', 0.2))
+        layout.addWidget(pan_right)
+
         # Reset
         reset_btn = QPushButton('Reset')
         reset_btn.setStyleSheet(self._button_style('#666666'))
         reset_btn.clicked.connect(self._reset_zoom)
         layout.addWidget(reset_btn)
+
+        # Hinweis
+        hint_label = QLabel('Mausrad=Zoom, Drag=Pan')
+        hint_label.setStyleSheet('color: #888888; font-size: 10px;')
+        layout.addWidget(hint_label)
 
         layout.addStretch()
 
@@ -274,6 +403,19 @@ class PeaksChartWidget(QWidget):
             center = (y_min + y_max) / 2
             height = (y_max - y_min) * factor
             self.y_axis.setRange(center - height / 2, center + height / 2)
+
+    def _pan_axis(self, axis: str, fraction: float):
+        """Verschiebt eine Achse um einen Bruchteil des sichtbaren Bereichs."""
+        if axis == 'x':
+            x_min = self.x_axis.min()
+            x_max = self.x_axis.max()
+            delta = (x_max - x_min) * fraction
+            self.x_axis.setRange(x_min + delta, x_max + delta)
+        else:
+            y_min = self.y_axis.min()
+            y_max = self.y_axis.max()
+            delta = (y_max - y_min) * fraction
+            self.y_axis.setRange(y_min + delta, y_max + delta)
 
     def _reset_zoom(self):
         """Setzt den Zoom zurueck auf Original-Bereiche."""
