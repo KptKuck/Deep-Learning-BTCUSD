@@ -100,7 +100,7 @@ class MainWindow(QMainWindow):
 
         # Logger Einstellungen
         self.logger_mode = 'both'  # 'window', 'both', 'file'
-        self.log_level = 5  # 1-5 (ERROR bis TRACE)
+        self.log_level = 3  # 1-5 (ERROR bis TRACE), Default: INFO
         self.enable_timing = False
         self._gui_handler = None
         self._log_entries: list[tuple[str, str, str]] = []  # (timestamp, level, message)
@@ -933,7 +933,7 @@ class MainWindow(QMainWindow):
 
         self.logger_level_combo = QComboBox()
         self.logger_level_combo.addItems(['ERROR', 'WARNING', 'INFO', 'DEBUG', 'TRACE'])
-        self.logger_level_combo.setCurrentIndex(4)  # Default: TRACE
+        self.logger_level_combo.setCurrentIndex(2)  # Default: INFO
         self.logger_level_combo.setFixedWidth(90)
         self.logger_level_combo.setToolTip('Log-Level: Filtert die Anzeige (alle Meldungen bleiben gespeichert)')
         self.logger_level_combo.currentIndexChanged.connect(self._update_logger_level)
