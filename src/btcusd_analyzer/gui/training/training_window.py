@@ -272,7 +272,10 @@ class TrainingWindow(QMainWindow):
         from PyQt6.QtWidgets import QApplication
 
         training_start = datetime.now()
-        self._log("=== Synchrones Training gestartet ===")
+        model_name = self.model.name if self.model else 'Unknown'
+        epochs = config['epochs']
+        lr = config['learning_rate']
+        self._log(f"Start: {model_name}, {epochs} Epochen, LR={lr}")
         self._stop_requested = False
 
         try:
@@ -364,23 +367,40 @@ class TrainingWindow(QMainWindow):
                 val_acc = 100.0 * val_correct / val_total
                 avg_val_loss = val_loss / len(self.val_loader)
 
+                # LR-Aenderung tracken
+                old_lr = optimizer.param_groups[0]['lr']
                 scheduler.step(avg_val_loss)
+                new_lr = optimizer.param_groups[0]['lr']
+                if new_lr < old_lr:
+                    self._log(f"LR reduziert: {old_lr:.6f} -> {new_lr:.6f}")
 
                 # UI Update
                 self.viz_panel.update_epoch(epoch, avg_train_loss, train_acc/100, avg_val_loss, val_acc/100, epochs)
-                self._log(f"Epoch {epoch}: Loss={avg_train_loss:.4f}, Acc={train_acc:.1f}%, Val Acc={val_acc:.1f}%")
+                self._log(f"Epoch {epoch}: Loss={avg_train_loss:.4f}, Acc={train_acc:.1f}%, Val Acc={val_acc:.1f}%", level='DEBUG')
                 QApplication.processEvents()
 
-                # Early Stopping
-                if val_acc > best_val_acc:
+                # Early Stopping Check
+                is_new_best = val_acc > best_val_acc
+                if is_new_best:
                     best_val_acc = val_acc
                     patience_counter = 0
+                    self._log(f"Neues Optimum bei Epoche {epoch}: Val Acc {val_acc:.1f}%")
                 else:
                     patience_counter += 1
 
+                # Meilenstein alle 25 Epochen (oder 10 bei kurzen Trainings)
+                milestone = 10 if epochs <= 50 else 25
+                if epoch % milestone == 0 and not is_new_best:
+                    self._log(f"Epoche {epoch}/{epochs}: Val Acc {val_acc:.1f}% (beste: {best_val_acc:.1f}%)")
+
                 if config.get('early_stopping', True) and patience_counter >= patience:
-                    self._log(f"Early Stopping nach {epoch} Epochen")
+                    self._log(f"Early Stop bei Epoche {epoch} (Patience: {patience})")
                     break
+
+            # Zusammenfassung
+            duration = (datetime.now() - training_start).total_seconds()
+            minutes, seconds = divmod(int(duration), 60)
+            self._log(f"Ergebnis: {best_val_acc:.1f}% Val Acc, {epoch} Epochen, {minutes}:{seconds:02d} min")
 
             # Modell fuer Speichern vorbereiten (kein Auto-Save mehr!)
             self._prepare_model_for_save(config, best_val_acc, epoch, avg_val_loss, training_start)
@@ -551,7 +571,7 @@ class TrainingWindow(QMainWindow):
         """Callback nach jeder Epoche."""
         total_epochs = self.config_panel.epochs_spin.value()
         self.viz_panel.update_epoch(epoch, train_loss, train_acc/100, val_loss, val_acc/100, total_epochs)
-        self._log(f"Epoch {epoch}: Loss={train_loss:.4f}, Acc={train_acc:.1f}%, Val Acc={val_acc:.1f}%")
+        self._log(f"Epoch {epoch}: Loss={train_loss:.4f}, Acc={train_acc:.1f}%, Val Acc={val_acc:.1f}%", level='DEBUG')
 
     def _on_training_finished(self, results: dict):
         """Callback wenn Training beendet."""
