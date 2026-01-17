@@ -120,7 +120,21 @@ da die Datei durch Linter/IDE zwischenzeitlich modifiziert werden kann.
 
 ## Logging
 - Logger (`core/logger.py`) ist **Queue-basiert** und Thread-safe
-- DEBUG-Format: `[Klasse/Funktion] Nachricht`
-  ```python
-  self._logger.debug(f"[SessionManager] Session geladen: {session_id}")
-  ```
+- Format: `[Klasse/Funktion] Nachricht`
+- Log-Level:
+  - **DEBUG**: Detaillierte technische Informationen
+    ```python
+    self._logger.debug(f"[SessionManager] Session geladen: {session_id}")
+    ```
+  - **INFO**: Allgemeine Statusmeldungen
+    ```python
+    self._logger.info(f"[Training] Epoche {epoch} gestartet")
+    ```
+  - **WARNING**: Potentielle Probleme, Ausfuehrung wird fortgesetzt
+    ```python
+    self._logger.warning(f"[Processor] NaN-Werte gefunden: {count}")
+    ```
+  - **ERROR**: Fehler, die behandelt werden muessen
+    ```python
+    self._logger.error(f"[DataLoader] Datei nicht gefunden: {path}")
+    ```
