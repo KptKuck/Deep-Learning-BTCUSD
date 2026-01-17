@@ -143,9 +143,10 @@ class SessionManagerWindow(QDialog):
         self.stats_prepared = QLabel('Prepared: -')
         self.stats_avg_acc = QLabel('Avg Accuracy: -')
         self.stats_max_acc = QLabel('Max Accuracy: -')
+        self.stats_storage = QLabel('Speicher: -')
 
         for label in [self.stats_total, self.stats_trained, self.stats_prepared,
-                      self.stats_avg_acc, self.stats_max_acc]:
+                      self.stats_avg_acc, self.stats_max_acc, self.stats_storage]:
             label.setStyleSheet('color: #aaa; padding: 5px 15px;')
             stats_layout.addWidget(label)
 
@@ -186,9 +187,9 @@ class SessionManagerWindow(QDialog):
         table_layout.setContentsMargins(0, 0, 0, 0)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(6)
+        self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels([
-            'Session', 'Status', 'Features', 'Samples', 'Accuracy', 'Erstellt'
+            'Session', 'Status', 'Features', 'Samples', 'Accuracy', 'Groesse', 'Erstellt'
         ])
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -198,6 +199,7 @@ class SessionManagerWindow(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
         self.table.doubleClicked.connect(self._on_double_click)
@@ -285,6 +287,49 @@ class SessionManagerWindow(QDialog):
 
         layout.addLayout(btn_layout)
 
+    def _get_folder_size(self, path: str) -> int:
+        """
+        Berechnet die Groesse eines Ordners in Bytes.
+
+        Args:
+            path: Pfad zum Ordner
+
+        Returns:
+            Groesse in Bytes, 0 bei Fehler
+        """
+        try:
+            folder = Path(path)
+            if not folder.exists():
+                return 0
+            total = 0
+            for f in folder.rglob('*'):
+                if f.is_file():
+                    total += f.stat().st_size
+            return total
+        except Exception:
+            return 0
+
+    def _format_size(self, size_bytes: int) -> str:
+        """
+        Formatiert Bytes in lesbare Groesse.
+
+        Args:
+            size_bytes: Groesse in Bytes
+
+        Returns:
+            Formatierter String (z.B. "12.5 MB")
+        """
+        if size_bytes == 0:
+            return '-'
+        elif size_bytes < 1024:
+            return f'{size_bytes} B'
+        elif size_bytes < 1024 * 1024:
+            return f'{size_bytes / 1024:.1f} KB'
+        elif size_bytes < 1024 * 1024 * 1024:
+            return f'{size_bytes / (1024 * 1024):.1f} MB'
+        else:
+            return f'{size_bytes / (1024 * 1024 * 1024):.2f} GB'
+
     def _load_sessions(self):
         """Laedt alle Sessions aus der DB."""
         # Filter ermitteln
@@ -362,6 +407,18 @@ class SessionManagerWindow(QDialog):
                 acc_item.setForeground(QColor('#e6b333'))
             self.table.setItem(row, 4, acc_item)
 
+            # Groesse
+            session_path = session.get('path', '')
+            folder_size = self._get_folder_size(session_path)
+            size_text = self._format_size(folder_size)
+            size_item = QTableWidgetItem(size_text)
+            size_item.setFlags(size_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            size_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            # Grosse Sessions (>50MB) orange markieren
+            if folder_size > 50 * 1024 * 1024:
+                size_item.setForeground(QColor('#e6b333'))
+            self.table.setItem(row, 5, size_item)
+
             # Erstellt
             created = session.get('created_at', '')
             if created:
@@ -369,7 +426,7 @@ class SessionManagerWindow(QDialog):
             created_item = QTableWidgetItem(created)
             created_item.setFlags(created_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             created_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 5, created_item)
+            self.table.setItem(row, 6, created_item)
 
         if not sessions:
             self.table.setRowCount(1)
@@ -403,6 +460,22 @@ class SessionManagerWindow(QDialog):
         else:
             self.stats_max_acc.setText('Max Accuracy: -')
             self.stats_max_acc.setStyleSheet('color: #aaa; padding: 5px 15px;')
+
+        # Gesamtspeicher berechnen
+        total_storage = 0
+        all_sessions = self.db.list_sessions()
+        for session in all_sessions:
+            session_path = session.get('path', '')
+            if session_path:
+                total_storage += self._get_folder_size(session_path)
+
+        if total_storage > 0:
+            storage_color = '#e6b333' if total_storage > 500 * 1024 * 1024 else '#aaa'
+            self.stats_storage.setText(f'Speicher: {self._format_size(total_storage)}')
+            self.stats_storage.setStyleSheet(f'color: {storage_color}; padding: 5px 15px;')
+        else:
+            self.stats_storage.setText('Speicher: -')
+            self.stats_storage.setStyleSheet('color: #aaa; padding: 5px 15px;')
 
     def _on_filter_changed(self):
         """Wird aufgerufen wenn Filter geaendert wird."""
@@ -465,6 +538,15 @@ class SessionManagerWindow(QDialog):
         details.append(f"  Training-Daten: {'Ja' if session.get('has_training_data') else 'Nein'}")
         details.append(f"  Backtest-Daten: {'Ja' if session.get('has_backtest_data') else 'Nein'}")
         details.append(f"  Modell: {'Ja' if session.get('has_model') else 'Nein'}")
+
+        # Speicherplatz
+        session_path = session.get('path', '')
+        folder_size = self._get_folder_size(session_path)
+        if folder_size > 0:
+            details.append("")
+            details.append(f"<b style='color: #4de6ff;'>Speicher:</b>")
+            size_color = '#e6b333' if folder_size > 50 * 1024 * 1024 else '#aaa'
+            details.append(f"  Ordnergroesse: <span style='color: {size_color};'>{self._format_size(folder_size)}</span>")
 
         # Zeitstempel
         details.append("")
