@@ -598,14 +598,31 @@ class ConfigPanel(QWidget):
             return
 
         try:
-            # Speicher via PyTorch
-            allocated = torch.cuda.memory_allocated(0) / (1024 ** 3)
-            total = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
-            free = total - allocated
-            percent = int((allocated / total) * 100)
+            # Speicher: NVML bevorzugen (zeigt echten VRAM-Verbrauch)
+            if self._nvml_initialized and self._nvml_handle and pynvml is not None:
+                try:
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", category=FutureWarning)
+                        mem_info = pynvml.nvmlDeviceGetMemoryInfo(self._nvml_handle)
+                        used = mem_info.used / (1024 ** 3)
+                        total = mem_info.total / (1024 ** 3)
+                        free = mem_info.free / (1024 ** 3)
+                        percent = int((used / total) * 100)
+                except Exception:
+                    # Fallback auf PyTorch
+                    used = torch.cuda.memory_reserved(0) / (1024 ** 3)
+                    total = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+                    free = total - used
+                    percent = int((used / total) * 100)
+            else:
+                # Fallback auf PyTorch (memory_reserved statt memory_allocated)
+                used = torch.cuda.memory_reserved(0) / (1024 ** 3)
+                total = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+                free = total - used
+                percent = int((used / total) * 100)
 
             self.gpu_memory_bar.setValue(percent)
-            self.gpu_used_label.setText(f"Belegt: {allocated:.2f} GB")
+            self.gpu_used_label.setText(f"Belegt: {used:.2f} GB")
             self.gpu_free_label.setText(f"Frei: {free:.2f} GB")
 
             # Auslastung via NVML

@@ -106,6 +106,12 @@ class MainWindow(QMainWindow):
         self._log_entries: list[tuple[str, str, str]] = []  # (timestamp, level, message)
         self._max_log_entries = 2000  # Maximum Eintraege im Speicher
 
+        # Error/Warning Counter fuer Statusbar
+        self._error_count = 0
+        self._warning_count = 0
+        self._error_blink_timer: Optional[QTimer] = None
+        self._error_blink_state = False
+
         # UI initialisieren
         self._init_ui()
         self._connect_signals()
@@ -991,6 +997,14 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel('Bereit')
         self.status_bar.addWidget(self.status_label, 1)
 
+        # Error/Warning Indikator (klickbar zum Zuruecksetzen)
+        self.error_indicator = QLabel()
+        self.error_indicator.setToolTip('Klicken zum Zuruecksetzen')
+        self.error_indicator.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.error_indicator.mousePressEvent = lambda _: self._reset_error_counter()
+        self._update_error_indicator()
+        self.status_bar.addPermanentWidget(self.error_indicator)
+
         self.gpu_indicator = QLabel()
         self.status_bar.addPermanentWidget(self.gpu_indicator)
 
@@ -1145,6 +1159,9 @@ class MainWindow(QMainWindow):
 
         # Zaehler aktualisieren
         self._update_log_count()
+
+        # Error/Warning Counter aktualisieren
+        self._increment_error_counter(level)
 
         # NUR an den echten Logger weiterleiten, wenn der Aufruf NICHT vom GUILogHandler kommt
         # (sonst wurde die Meldung bereits geloggt und wuerde doppelt erscheinen)
@@ -1723,6 +1740,13 @@ class MainWindow(QMainWindow):
                     }
                     self._log(f"Training-Info erstellt: {self.training_info}", 'DEBUG')
 
+                    # Features in model_info einfuegen (wichtig fuer Backtest)
+                    if self.model_info and 'features' not in self.model_info:
+                        self.model_info['features'] = self.training_info['features']
+                        self.model_info['lookback_size'] = params.get('lookback', 60)
+                        self.model_info['lookforward_size'] = params.get('lookforward', 5)
+                        self._log(f"Features zu model_info hinzugefuegt: {len(self.training_info['features'])} Features", 'DEBUG')
+
                     # Training GUI Button aktivieren
                     self.train_gui_btn.setEnabled(True)
                     self._log("Training GUI Button aktiviert", 'DEBUG')
@@ -2106,6 +2130,74 @@ class MainWindow(QMainWindow):
                 font-size: {self._log_font_size}pt;
             }}
         ''')
+
+    def _update_error_indicator(self):
+        """Aktualisiert die Error/Warning-Anzeige in der Statusbar."""
+        if self._error_count > 0 or self._warning_count > 0:
+            parts = []
+            if self._error_count > 0:
+                parts.append(f'E: {self._error_count}')
+            if self._warning_count > 0:
+                parts.append(f'W: {self._warning_count}')
+            text = ' | '.join(parts)
+
+            # Blink-Effekt: Hintergrund wechselt
+            if self._error_blink_state and self._error_count > 0:
+                style = 'color: white; background-color: #cc4d33; padding: 2px 8px; font-weight: bold;'
+            elif self._error_blink_state and self._warning_count > 0:
+                style = 'color: white; background-color: #e6b333; padding: 2px 8px; font-weight: bold;'
+            else:
+                if self._error_count > 0:
+                    style = 'color: #cc4d33; padding: 2px 8px; font-weight: bold;'
+                else:
+                    style = 'color: #e6b333; padding: 2px 8px; font-weight: bold;'
+
+            self.error_indicator.setText(text)
+            self.error_indicator.setStyleSheet(style)
+            self.error_indicator.setVisible(True)
+        else:
+            self.error_indicator.setVisible(False)
+
+    def _start_error_blink(self):
+        """Startet den Blink-Effekt fuer neue Errors/Warnings."""
+        if self._error_blink_timer is None:
+            self._error_blink_timer = QTimer(self)
+            self._error_blink_timer.timeout.connect(self._toggle_error_blink)
+        self._error_blink_state = True
+        self._error_blink_timer.start(500)  # 500ms Intervall
+        # Nach 3 Sekunden stoppen
+        QTimer.singleShot(3000, self._stop_error_blink)
+
+    def _toggle_error_blink(self):
+        """Wechselt den Blink-Zustand."""
+        self._error_blink_state = not self._error_blink_state
+        self._update_error_indicator()
+
+    def _stop_error_blink(self):
+        """Stoppt den Blink-Effekt."""
+        if self._error_blink_timer:
+            self._error_blink_timer.stop()
+        self._error_blink_state = False
+        self._update_error_indicator()
+
+    def _reset_error_counter(self):
+        """Setzt die Error/Warning-Zaehler zurueck."""
+        self._error_count = 0
+        self._warning_count = 0
+        self._stop_error_blink()
+        self._update_error_indicator()
+        self.status_label.setText('Zaehler zurueckgesetzt')
+
+    def _increment_error_counter(self, level: str):
+        """Erhoeht den Counter bei Error/Warning."""
+        if level == 'ERROR' or level == 'CRITICAL':
+            self._error_count += 1
+            self._start_error_blink()
+            self._update_error_indicator()
+        elif level == 'WARNING':
+            self._warning_count += 1
+            self._start_error_blink()
+            self._update_error_indicator()
 
     def _update_gpu_status(self):
         """Aktualisiert den GPU-Status."""
