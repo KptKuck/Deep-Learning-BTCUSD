@@ -19,24 +19,26 @@ class SessionDatabase:
 
     Speichert Metadaten wie Status, Accuracy, Features in einer JSON-Datei.
     Ermoeglicht schnelles Auflisten und Filtern von Sessions.
+
+    Die sessions.json liegt direkt im sessions/ Ordner (oder im uebergebenen Verzeichnis).
     """
 
-    SCHEMA_VERSION = "1.0"
+    SCHEMA_VERSION = "1.1"  # Aktualisiert fuer sessions/ Struktur
     DB_FILENAME = "sessions.json"
 
-    def __init__(self, data_dir: Path):
+    def __init__(self, sessions_dir: Path):
         """
         Initialisiert die SessionDatabase.
 
         Args:
-            data_dir: Pfad zum data-Verzeichnis (dort wird sessions.json gespeichert)
+            sessions_dir: Pfad zum sessions-Verzeichnis (dort wird sessions.json gespeichert)
         """
         self._logger = get_logger()
-        self.data_dir = Path(data_dir)
-        self.db_path = self.data_dir / self.DB_FILENAME
+        self.sessions_dir = Path(sessions_dir)
+        self.db_path = self.sessions_dir / self.DB_FILENAME
 
         # Verzeichnis erstellen falls noetig
-        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.sessions_dir.mkdir(parents=True, exist_ok=True)
 
         self._ensure_db_exists()
         self._logger.debug(f"[SessionDB] Initialisiert: {self.db_path}")
@@ -88,7 +90,7 @@ class SessionDatabase:
         data = self._load()
 
         # Session-ID generieren falls nicht vorhanden
-        session_id = session_info.get('id')
+        session_id: str = session_info.get('id', '')
         if not session_id and 'path' in session_info:
             session_id = Path(session_info['path']).name
         if not session_id:
@@ -151,7 +153,7 @@ class SessionDatabase:
                 return session
         return None
 
-    def list_sessions(self, status: str = None) -> List[dict]:
+    def list_sessions(self, status: Optional[str] = None) -> List[dict]:
         """
         Listet alle Sessions, optional gefiltert nach Status.
 
@@ -267,6 +269,91 @@ class SessionDatabase:
                     self._logger.warning(f"[SessionDB] Migration fehlgeschlagen fuer {item.name}: {e}")
 
         self._logger.info(f"[SessionDB] Migration abgeschlossen: {migrated_count} Sessions")
+        return migrated_count
+
+    def migrate_to_sessions_dir(self, log_dir: Path, copy_files: bool = True) -> int:
+        """
+        Migriert bestehende Sessions von log/ nach sessions/.
+
+        Kopiert (oder verschiebt) Session-Ordner von log/session-* nach sessions/
+        und aktualisiert die Pfade in der DB.
+
+        Args:
+            log_dir: Pfad zum alten Log-Verzeichnis
+            copy_files: True = Dateien kopieren, False = nur DB aktualisieren
+
+        Returns:
+            Anzahl der migrierten Sessions
+        """
+        import shutil
+        from .session_manager import SessionManager
+
+        log_dir = Path(log_dir)
+        if not log_dir.exists():
+            self._logger.debug(f"[SessionDB] Log-Dir existiert nicht: {log_dir}")
+            return 0
+
+        migrated_count = 0
+        self._logger.info(f"[SessionDB] Migriere Sessions von {log_dir} nach {self.sessions_dir}")
+
+        for item in sorted(log_dir.iterdir(), reverse=True):
+            if item.is_dir() and item.name.startswith('session-'):
+                new_path = self.sessions_dir / item.name
+
+                # Schon im neuen Ordner?
+                if new_path.exists():
+                    self._logger.debug(f"[SessionDB] Ueberspringe (existiert bereits): {item.name}")
+                    continue
+
+                try:
+                    # Session-Info sammeln
+                    manager = SessionManager(item)
+                    summary = manager.get_summary()
+
+                    # Nur Sessions mit Daten migrieren
+                    if not (summary.get('has_training_data') or summary.get('has_model')):
+                        continue
+
+                    if copy_files:
+                        # Ordner kopieren
+                        shutil.copytree(item, new_path)
+                        self._logger.debug(f"[SessionDB] Kopiert: {item.name}")
+
+                    # Config laden
+                    config = manager.load_config() or {}
+
+                    # DB aktualisieren mit neuem Pfad
+                    session_info = {
+                        'id': item.name,
+                        'path': str(new_path),  # Neuer Pfad!
+                        'status': summary.get('status') or (
+                            'trained' if summary.get('has_model') else 'prepared'
+                        ),
+                        'model_version': 'migrated',
+                        'model_accuracy': summary.get('model_accuracy', 0),
+                        'has_training_data': summary.get('has_training_data', False),
+                        'has_backtest_data': summary.get('has_backtest_data', False),
+                        'has_model': summary.get('has_model', False),
+                        'features': config.get('features', []),
+                        'num_features': len(config.get('features', [])),
+                    }
+
+                    if 'training_info' in config:
+                        session_info['num_samples'] = config['training_info'].get(
+                            'actual_samples', 0
+                        )
+
+                    self.add_session(session_info)
+                    migrated_count += 1
+
+                except Exception as e:
+                    self._logger.warning(
+                        f"[SessionDB] Migration fehlgeschlagen fuer {item.name}: {e}"
+                    )
+
+        self._logger.info(
+            f"[SessionDB] Migration nach sessions/ abgeschlossen: {migrated_count} Sessions"
+        )
         return migrated_count
 
     def get_statistics(self) -> dict:

@@ -1,12 +1,30 @@
 """
 SessionManager - Verwaltet Session-Daten fuer Reproduzierbarkeit
 
+DEPRECATED: Diese Klasse wird durch SaveManager ersetzt!
+============================================================
+Ab Version 2.0 bitte SaveManager aus core/save_manager.py verwenden:
+
+    from btcusd_analyzer.core.save_manager import SaveManager
+
+    # Neue Session erstellen
+    manager = SaveManager.create_session(sessions_root)
+
+    # Bestehende Session oeffnen
+    manager = SaveManager.from_session_dir(session_dir)
+
+Der alte SessionManager bleibt fuer Rueckwaertskompatibilitaet
+und zum Laden bestehender Sessions erhalten.
+============================================================
+
 Speichert alle relevanten Daten einer Session:
 - Trainingsdaten (Sequenzen, Labels)
 - Backtest-Daten
 - Modelle
 - Konfiguration
 """
+
+import warnings
 
 import json
 import shutil
@@ -22,6 +40,11 @@ from btcusd_analyzer.core.logger import get_logger
 
 class SessionManager:
     """
+    DEPRECATED: Verwende SaveManager stattdessen!
+
+    Diese Klasse bleibt fuer Rueckwaertskompatibilitaet und
+    zum Laden bestehender Sessions erhalten.
+
     Verwaltet Session-Daten fuer spaetere Reproduzierbarkeit.
 
     Session-Ordner Struktur:
@@ -31,9 +54,22 @@ class SessionManager:
             ├── backtest_data.csv        # Reservierte Backtest-Daten
             ├── model_*.pt               # Trainiertes Modell
             └── model_*.json             # Modell-Plakette
+
+    NEUE STRUKTUR (sessions/):
+        sessions/session-YYYY-MM-DD_HHhMMmSSs/
+            ├── session_config.json      # Single Source of Truth
+            ├── training_data.npz        # Sequenzen + Labels
+            ├── backtest_data.csv        # Backtest-Daten
+            ├── model.pt                 # Trainiertes Modell
+            └── model.json               # Modell-Metadaten
     """
 
     def __init__(self, session_dir: Path):
+        warnings.warn(
+            "SessionManager ist deprecated. Verwende SaveManager stattdessen.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         """
         Initialisiert den SessionManager.
 
@@ -439,17 +475,17 @@ class SessionManager:
         """
         Gibt die SessionDatabase zurueck (lazy loading).
 
-        Ermittelt das data-Verzeichnis aus dem Session-Pfad.
+        Verwendet das sessions-Verzeichnis aus der Config.
         """
         try:
             from .session_database import SessionDatabase
+            from .config import Config
 
-            # data-Verzeichnis ermitteln: session_dir ist in log/, data ist daneben
-            # z.B. log/session-xxx -> data/sessions.json
-            project_dir = self.session_dir.parent.parent
-            data_dir = project_dir / 'data'
+            # sessions-Verzeichnis aus Config holen (nicht aus Pfad ableiten!)
+            config = Config()
+            sessions_dir = config.paths.get_sessions_root()
 
-            return SessionDatabase(data_dir)
+            return SessionDatabase(sessions_dir)
         except Exception as e:
             self._logger.debug(f"[SessionManager] SessionDatabase nicht verfuegbar: {e}")
             return None
@@ -499,7 +535,7 @@ class SessionManager:
                 db.add_session(base_info)
                 self._logger.debug(f"[SessionManager] Neue Session in DB: {session_id}")
 
-    def register_in_db(self, session_info: dict = None):
+    def register_in_db(self, session_info: Optional[dict] = None):
         """
         Registriert diese Session in der Datenbank.
 
@@ -530,21 +566,22 @@ class SessionManager:
         Fuehrt bei Bedarf automatisch Migration durch.
 
         Args:
-            log_dir: Pfad zum Log-Verzeichnis
+            log_dir: Pfad zum Log-Verzeichnis (wird fuer Migration verwendet)
 
         Returns:
             Liste von Session-Summaries
         """
         from .session_database import SessionDatabase
+        from .config import Config
 
         log_dir = Path(log_dir)
 
-        # data-Verzeichnis ermitteln
-        project_dir = log_dir.parent
-        data_dir = project_dir / 'data'
+        # sessions-Verzeichnis aus Config holen
+        config = Config()
+        sessions_dir = config.paths.get_sessions_root()
 
         try:
-            db = SessionDatabase(data_dir)
+            db = SessionDatabase(sessions_dir)
 
             # Pruefen ob DB leer ist -> Migration
             sessions = db.list_sessions()
@@ -593,7 +630,7 @@ class SessionManager:
     # Session-Validierung
     # =========================================================================
 
-    def validate_session(self, status: str = None) -> Dict[str, Any]:
+    def validate_session(self, status: Optional[str] = None) -> Dict[str, Any]:
         """
         Validiert die Vollstaendigkeit der Session fuer ein erneutes Laden.
 

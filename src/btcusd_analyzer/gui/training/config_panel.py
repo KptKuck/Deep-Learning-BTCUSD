@@ -478,6 +478,13 @@ class ConfigPanel(QWidget):
         self.stop_btn.setEnabled(False)
         btn_layout.addWidget(self.stop_btn)
 
+        # Speichern-Button (getrennt vom Training)
+        self.save_btn = QPushButton("Session speichern")
+        self.save_btn.setStyleSheet(f"background-color: {COLORS['info']}; font-weight: bold;")
+        self.save_btn.setEnabled(False)  # Erst nach Training aktivieren
+        self.save_btn.setToolTip("Speichert das trainierte Modell in der Session")
+        btn_layout.addWidget(self.save_btn)
+
         layout.addLayout(btn_layout)
 
     def _connect_signals(self):
@@ -516,10 +523,12 @@ class ConfigPanel(QWidget):
         model_name = self.model_combo.currentText()
         presets = ModelFactory.get_presets(model_name)
 
-        if preset_name == 'Custom' or preset_name not in presets or presets[preset_name] is None:
+        if preset_name == 'Custom' or preset_name not in presets:
             return
 
         params = presets[preset_name]
+        if params is None:
+            return
 
         # LSTM/GRU Presets
         if 'hidden_sizes' in params:
@@ -604,9 +613,9 @@ class ConfigPanel(QWidget):
                     with warnings.catch_warnings():
                         warnings.filterwarnings("ignore", category=FutureWarning)
                         mem_info = pynvml.nvmlDeviceGetMemoryInfo(self._nvml_handle)
-                        used = mem_info.used / (1024 ** 3)
-                        total = mem_info.total / (1024 ** 3)
-                        free = mem_info.free / (1024 ** 3)
+                        used = int(mem_info.used) / (1024 ** 3)
+                        total = int(mem_info.total) / (1024 ** 3)
+                        free = int(mem_info.free) / (1024 ** 3)
                         percent = int((used / total) * 100)
                 except Exception:
                     # Fallback auf PyTorch
@@ -622,16 +631,18 @@ class ConfigPanel(QWidget):
                 percent = int((used / total) * 100)
 
             self.gpu_memory_bar.setValue(percent)
-            self.gpu_used_label.setText(f"Belegt: {used:.2f} GB")
-            self.gpu_free_label.setText(f"Frei: {free:.2f} GB")
+            if self.gpu_used_label is not None:
+                self.gpu_used_label.setText(f"Belegt: {used:.2f} GB")
+            if self.gpu_free_label is not None:
+                self.gpu_free_label.setText(f"Frei: {free:.2f} GB")
 
             # Auslastung via NVML
-            if self._nvml_initialized and self._nvml_handle and self.gpu_util_bar:
+            if self._nvml_initialized and self._nvml_handle and self.gpu_util_bar and pynvml is not None:
                 try:
                     with warnings.catch_warnings():
                         warnings.filterwarnings("ignore", category=FutureWarning)
                         util = pynvml.nvmlDeviceGetUtilizationRates(self._nvml_handle)
-                        self.gpu_util_bar.setValue(util.gpu)
+                        self.gpu_util_bar.setValue(int(util.gpu))
                 except Exception:
                     self.gpu_util_bar.setValue(0)
         except Exception:

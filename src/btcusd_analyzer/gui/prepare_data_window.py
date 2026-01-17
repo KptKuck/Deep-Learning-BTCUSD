@@ -30,6 +30,8 @@ from .widgets import (
     LabelGeneratorWorker,
     FeatureCache,
 )
+from .save_confirm_dialog import SaveConfirmDialog, ask_save_confirmation
+from ..core.save_manager import SaveManager, OverwriteAction, SaveCheckResult
 
 
 # =============================================================================
@@ -496,7 +498,7 @@ class PrepareDataWindow(QMainWindow):
         # Chart aktualisieren
         self._log('[_on_peaks_found] Chart update...', 'DEBUG')
         close_col = 'Close' if 'Close' in self.data.columns else 'close'
-        prices = self.data[close_col].values
+        prices = np.asarray(self.data[close_col].values)
         self.peaks_chart.update_price_chart(
             prices,
             self.detected_peaks['buy_indices'],
@@ -717,7 +719,7 @@ class PrepareDataWindow(QMainWindow):
 
             # Chart aktualisieren
             close_col = 'Close' if 'Close' in self.data.columns else 'close'
-            prices = self.data[close_col].values
+            prices = np.asarray(self.data[close_col].values)
             self.labels_chart.update_labels_chart(prices, labels, num_classes, 'Labels')
 
             # Tabs aktualisieren
@@ -1041,7 +1043,9 @@ class PrepareDataWindow(QMainWindow):
         ''')
         self.features_table.setAlternatingRowColors(True)
         self.features_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.features_table.verticalHeader().setVisible(False)
+        v_header = self.features_table.verticalHeader()
+        if v_header is not None:
+            v_header.setVisible(False)
         # Keine feste Hoehe mehr - fuellt den gesamten Sub-Tab aus
 
         layout.addWidget(self.features_table, 1)  # stretch=1 fuer volle Hoehe
@@ -1150,12 +1154,12 @@ class PrepareDataWindow(QMainWindow):
                 self.features_table.setItem(row, col, item)
 
         # Spaltenbreiten anpassen
-        self.features_table.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Fixed)
-        self.features_table.setColumnWidth(0, 60)
-        for col in range(1, len(columns)):
-            self.features_table.horizontalHeader().setSectionResizeMode(
-                col, QHeaderView.ResizeMode.Stretch)
+        h_header = self.features_table.horizontalHeader()
+        if h_header is not None:
+            h_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+            self.features_table.setColumnWidth(0, 60)
+            for col in range(1, len(columns)):
+                h_header.setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
 
     def _on_feature_changed(self):
         """Wird aufgerufen wenn sich die Feature-Auswahl aendert."""
@@ -1472,13 +1476,23 @@ class PrepareDataWindow(QMainWindow):
         layout.addWidget(self.preview_btn)
 
         # Generieren Button
-        self.generate_btn = QPushButton('Daten generieren && Schliessen')
+        self.generate_btn = QPushButton('Daten generieren')
         self.generate_btn.setFont(QFont('Segoe UI', 12, QFont.Weight.Bold))
         self.generate_btn.setFixedHeight(45)
-        self.generate_btn.setStyleSheet(self._button_style((0.2, 0.7, 0.3)))
+        self.generate_btn.setStyleSheet(self._button_style((0.3, 0.6, 0.9)))
         self.generate_btn.setEnabled(False)
-        self.generate_btn.clicked.connect(self._generate_and_close)
+        self.generate_btn.clicked.connect(self._generate_samples)
         layout.addWidget(self.generate_btn)
+
+        # Speichern Button (getrennt vom Generieren)
+        self.save_btn = QPushButton('Session speichern')
+        self.save_btn.setFont(QFont('Segoe UI', 12, QFont.Weight.Bold))
+        self.save_btn.setFixedHeight(45)
+        self.save_btn.setStyleSheet(self._button_style((0.2, 0.7, 0.3)))
+        self.save_btn.setEnabled(False)
+        self.save_btn.setToolTip('Speichert die generierten Daten in der Session')
+        self.save_btn.clicked.connect(self._on_save_clicked)
+        layout.addWidget(self.save_btn)
 
         # Status
         self.samples_status = QLabel('Vorschau berechnen um fortzufahren')
@@ -1593,8 +1607,8 @@ class PrepareDataWindow(QMainWindow):
             self.samples_status.setText(f'Fehler: {e}')
             self.samples_status.setStyleSheet('color: #cc4d33;')
 
-    def _generate_and_close(self):
-        """Generiert die Trainingsdaten und schliesst das Fenster."""
+    def _generate_samples(self):
+        """Generiert die Trainingsdaten (ohne zu speichern)."""
         if not self.samples_valid:
             return
 
@@ -1693,13 +1707,12 @@ class PrepareDataWindow(QMainWindow):
             class_weights = compute_class_weights(Y, num_classes=num_classes)
             self._log(f"Class Weights: {class_weights.numpy()}", 'DEBUG')
 
-            # 6. Training-Daten zusammenstellen
-            training_data = {
-                'X': X,
-                'Y': Y,
-                'params': self.params.copy(),
-                'class_weights': class_weights,
-            }
+            # 6. Training-Daten zusammenstellen (im Speicher halten)
+            self._generated_X = X
+            self._generated_Y = Y
+            self._generated_class_weights = class_weights
+            self._generated_backtest_data = backtest_data
+            self._generated_feature_columns = feature_columns
 
             training_info = self.result_info.copy()
             training_info['params'] = self.params.copy()
@@ -1713,28 +1726,22 @@ class PrepareDataWindow(QMainWindow):
             training_info['buy_indices'] = [i for i in self.detected_peaks['buy_indices'] if i < split_idx]
             training_info['sell_indices'] = [i for i in self.detected_peaks['sell_indices'] if i < split_idx]
 
-            # 7. Backtest-Daten zusammenstellen
-            backtest_info = {
-                'data': backtest_data,
-                'start_idx': split_idx,
-                'num_points': len(backtest_data),
-                'features': self.selected_features.copy(),
-                'lookback': lookback,
-                'num_classes': num_classes,
-            }
-
-            # Signal senden (mit Backtest-Daten)
-            self.data_prepared.emit(training_data, training_info, backtest_info)
+            self._generated_training_info = training_info
 
             self._log(f"Trainingsdaten generiert: {len(X)} Sequenzen, "
                       f"{len(feature_columns)} Features, Lookback={lookback}", 'SUCCESS')
             self._log(f"Backtest-Daten reserviert: {len(backtest_data)} Datenpunkte "
                       f"(nicht im Training verwendet)", 'SUCCESS')
 
-            # Session-Daten speichern
-            self._save_session_data(X, Y, feature_columns, backtest_data, training_info)
+            # Status aktualisieren
+            self.samples_status.setText(
+                f'Generiert: {len(X)} Samples - Jetzt speichern!'
+            )
+            self.samples_status.setStyleSheet('color: #33b34d;')
 
-            self.close()
+            # Speichern-Button aktivieren
+            self.save_btn.setEnabled(True)
+            self._unsaved_changes = True
 
         except Exception as e:
             self.samples_status.setText(f'Fehler: {e}')
@@ -1742,120 +1749,114 @@ class PrepareDataWindow(QMainWindow):
             self._log(f'Fehler bei Datengenerierung: {e}', 'ERROR')
 
     # =========================================================================
-    # Session-Speicherung
+    # Session-Speicherung (mit SaveManager)
     # =========================================================================
 
-    def _save_session_data(self, X, Y, feature_columns, backtest_data, training_info):
-        """Speichert alle Session-Daten fuer spaetere Reproduzierbarkeit."""
-        try:
-            from ..core.logger import get_logger
-            from ..core.session_manager import SessionManager
+    def _on_save_clicked(self):
+        """Handler fuer den Speichern-Button - verwendet SaveManager."""
+        if not hasattr(self, '_generated_X') or self._generated_X is None:
+            self.samples_status.setText('Erst Daten generieren!')
+            self.samples_status.setStyleSheet('color: #cc4d33;')
+            return
 
+        try:
+            from pathlib import Path
+            from ..core.config import Config
+            from ..core.logger import get_logger
+
+            # Session-Dir ermitteln
             logger = get_logger()
             session_dir = logger.get_session_dir()
 
-            self._log("=== SESSION SAVE START ===", 'DEBUG')
-            self._log(f"Session-Dir: {session_dir}", 'DEBUG')
-
             if session_dir is None:
-                self._log("Session-Ordner nicht verfuegbar", 'WARNING')
-                return
+                # Neue Session im sessions/ Ordner erstellen
+                config = Config()
+                session_dir = config.paths.create_new_session()
+                self._log(f"Neue Session erstellt: {session_dir.name}", 'INFO')
 
-            manager = SessionManager(session_dir)
+            # SaveManager initialisieren
+            save_manager = SaveManager(session_dir)
 
-            # Debug: Input-Daten analysieren
-            self._log(f"X Type: {type(X).__name__}", 'DEBUG')
-            self._log(f"X Shape: {X.shape if hasattr(X, 'shape') else 'unknown'}", 'DEBUG')
-            self._log(f"Y Type: {type(Y).__name__}", 'DEBUG')
-            self._log(f"Y Shape: {Y.shape if hasattr(Y, 'shape') else 'unknown'}", 'DEBUG')
-            self._log(f"Features: {feature_columns}", 'DEBUG')
-            self._log(f"Backtest Shape: {backtest_data.shape}", 'DEBUG')
-            self._log(f"Training-Info: {training_info}", 'DEBUG')
+            # Daten vorbereiten
+            X_np = self._generated_X.numpy() if hasattr(self._generated_X, 'numpy') else self._generated_X
+            Y_np = self._generated_Y.numpy() if hasattr(self._generated_Y, 'numpy') else self._generated_Y
 
-            # 1. Trainingsdaten speichern
-            self._log("--- Speichere Trainingsdaten ---", 'DEBUG')
-            X_np = X.numpy() if hasattr(X, 'numpy') else X
-            Y_np = Y.numpy() if hasattr(Y, 'numpy') else Y
-            self._log(f"X_np dtype: {X_np.dtype}, shape: {X_np.shape}", 'DEBUG')
-            self._log(f"Y_np dtype: {Y_np.dtype}, shape: {Y_np.shape}", 'DEBUG')
-            self._log(f"Y_np unique: {list(set(Y_np.flatten()))}", 'DEBUG')
-
-            manager.save_training_data(
+            # Pruefung ob Daten existieren
+            check_result = save_manager.check_save_prepared(
                 sequences=X_np,
                 labels=Y_np,
-                features=feature_columns,
-                params=self.params.copy()
+                features=self._generated_feature_columns
             )
-            self._log(f"Trainingsdaten gespeichert: {session_dir.name}/training_data.npz")
 
-            # 2. Backtest-Daten speichern
-            self._log("--- Speichere Backtest-Daten ---", 'DEBUG')
-            self._log(f"Backtest Columns: {list(backtest_data.columns)}", 'DEBUG')
-            self._log(f"Backtest Index: {type(backtest_data.index).__name__}", 'DEBUG')
+            # Bei bestehenden Daten: Nachfrage
+            if check_result.needs_confirmation:
+                action = ask_save_confirmation(check_result, self)
 
-            manager.save_backtest_data(backtest_data)
-            self._log(f"Backtest-Daten gespeichert: {session_dir.name}/backtest_data.csv")
+                if action == OverwriteAction.CANCEL:
+                    self._log("Speichern abgebrochen", 'INFO')
+                    return
 
-            # 3. Session-Konfiguration speichern
-            self._log("--- Speichere Config ---", 'DEBUG')
-            config = {
-                'source_file': str(self.data_file) if hasattr(self, 'data_file') else '-',
-                'features': feature_columns,
-                'params': self.params.copy(),
-                'peak_detection': {
-                    'method': getattr(self, '_current_peak_method', 'unknown'),
-                    'distance': self.detected_peaks.get('distance', 0) if self.detected_peaks else 0,
-                    'prominence': float(self.detected_peaks.get('prominence', 0)) if self.detected_peaks else 0,
-                    'num_buy_peaks': len(self.detected_peaks.get('buy_indices', [])) if self.detected_peaks else 0,
-                    'num_sell_peaks': len(self.detected_peaks.get('sell_indices', [])) if self.detected_peaks else 0,
-                },
-                'training_info': {
-                    'num_classes': training_info.get('num_classes', 3),
-                    'actual_samples': training_info.get('actual_samples', 0),
-                    'lookahead_bars': training_info.get('lookahead_bars', 0),
-                    'train_split_pct': training_info.get('train_split_pct', 80),
-                },
-                'backtest_info': {
-                    'num_points': len(backtest_data),
+                if action == OverwriteAction.NEW_SESSION:
+                    # Neue Session erstellen
+                    config = Config()
+                    session_dir = config.paths.create_new_session()
+                    save_manager = SaveManager(session_dir)
+                    self._log(f"Neue Session erstellt: {session_dir.name}", 'INFO')
+
+            # Speichern mit force=True (Benutzer hat bestaetigt)
+            self.samples_status.setText('Speichere Session...')
+            self.samples_status.setStyleSheet('color: #4da8da;')
+
+            training_info = self._generated_training_info
+
+            result = save_manager.save_prepared(
+                sequences=X_np,
+                labels=Y_np,
+                features=self._generated_feature_columns,
+                backtest_data=self._generated_backtest_data,
+                params=self.params.copy(),
+                force=True,  # Bestaetigung bereits erfolgt
+                source_file=str(self.data_file) if hasattr(self, 'data_file') else '',
+            )
+
+            if result.can_save:
+                self._log(f"Session gespeichert: {session_dir.name}", 'SUCCESS')
+                self.samples_status.setText(f'Gespeichert: {session_dir.name}')
+                self.samples_status.setStyleSheet('color: #33b34d;')
+
+                # Signal senden fuer MainWindow
+                training_data = {
+                    'X': self._generated_X,
+                    'Y': self._generated_Y,
+                    'params': self.params.copy(),
+                    'class_weights': self._generated_class_weights,
                 }
-            }
-            self._log(f"Config Keys: {list(config.keys())}", 'DEBUG')
-            manager.save_config(config)
-            self._log(f"Session-Config gespeichert: {session_dir.name}/session_config.json")
+                backtest_info = {
+                    'data': self._generated_backtest_data,
+                    'start_idx': training_info.get('train_split_pct', 80) * len(self.data) // 100,
+                    'num_points': len(self._generated_backtest_data),
+                    'features': self.selected_features.copy(),
+                    'lookback': self.params['lookback'],
+                    'num_classes': training_info.get('num_classes', 3),
+                }
+                self.data_prepared.emit(training_data, training_info, backtest_info)
 
-            # 4. Status auf 'prepared' setzen und in DB registrieren
-            self._log("--- Setze Status auf 'prepared' ---", 'DEBUG')
-            manager.set_status('prepared')
+                self._unsaved_changes = False
+                self.save_btn.setEnabled(False)
 
-            # 5. Session in DB registrieren mit allen Metadaten
-            self._log("--- Registriere in SessionDB ---", 'DEBUG')
-            manager.register_in_db({
-                'status': 'prepared',
-                'features': feature_columns,
-                'num_features': len(feature_columns),
-                'num_samples': training_info.get('actual_samples', 0),
-                'has_training_data': True,
-                'has_backtest_data': True,
-                'has_model': False,
-            })
-
-            # 6. Session-Validierung
-            self._log("--- Validiere Session ---", 'DEBUG')
-            validation = manager.validate_session(status='prepared')
-            if validation['valid']:
-                if validation['warnings']:
-                    self._log(f"Session OK mit Warnungen: {validation['warnings']}", 'DEBUG')
-                else:
-                    self._log("Session vollstaendig - erneutes Laden moeglich", 'DEBUG')
+                # Fenster schliessen
+                self.close()
             else:
-                self._log(f"Session unvollstaendig! Fehlend: {validation['missing']}", 'WARNING')
-
-            self._log("=== SESSION SAVE DONE ===", 'DEBUG')
+                self._log(f"Speichern fehlgeschlagen: {result.warnings}", 'ERROR')
+                self.samples_status.setText('Speichern fehlgeschlagen!')
+                self.samples_status.setStyleSheet('color: #cc4d33;')
 
         except Exception as e:
             import traceback
             self._log(f"Session-Speicherung fehlgeschlagen: {e}", 'ERROR')
-            self._log(traceback.format_exc(), 'ERROR')
+            self._log(traceback.format_exc(), 'DEBUG')
+            self.samples_status.setText(f'Fehler: {e}')
+            self.samples_status.setStyleSheet('color: #cc4d33;')
 
     # =========================================================================
     # Hilfsmethoden

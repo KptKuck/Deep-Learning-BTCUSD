@@ -11,7 +11,10 @@ Hierarchie:
     │   ├── ModelNotFoundError (Modell nicht gefunden)
     │   └── ModelLoadError (Ladefehler)
     ├── ConfigError (Konfigurationsfehler)
-    └── TradingError (Trading-Fehler)
+    ├── TradingError (Trading-Fehler)
+    │   ├── APIError (API-Fehler)
+    │   └── InsufficientFundsError (Kapitalfehler)
+    └── SaveError (Speicherfehler)
 """
 
 from typing import List, Optional
@@ -179,3 +182,23 @@ class APIError(TradingError):
 class InsufficientFundsError(TradingError):
     """Wird geworfen wenn nicht genuegend Kapital vorhanden ist."""
     pass
+
+
+# =============================================================================
+# Speicherfehler
+# =============================================================================
+
+class SaveError(BTCAnalyzerError):
+    """
+    Wird geworfen bei Fehlern waehrend des Speicherns.
+
+    Beispiele:
+    - Transaktion fehlgeschlagen
+    - Validierung fehlgeschlagen
+    - Rollback erforderlich
+    """
+
+    def __init__(self, message: str, operation: Optional[str] = None,
+                 details: Optional[str] = None):
+        super().__init__(message, details)
+        self.operation = operation

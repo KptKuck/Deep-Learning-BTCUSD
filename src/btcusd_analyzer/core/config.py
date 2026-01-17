@@ -19,19 +19,47 @@ class PathConfig:
     results_dir: Path = field(default_factory=lambda: Path.cwd() / 'results')
     log_dir: Path = field(default_factory=lambda: Path.cwd() / 'log')
     models_dir: Path = field(default_factory=lambda: Path.cwd() / 'models')
+    sessions_dir: Path = field(default_factory=lambda: Path.cwd() / 'sessions')
 
     def __post_init__(self):
         """Erstellt Verzeichnisse falls nicht vorhanden."""
-        for path in [self.data_dir, self.results_dir, self.log_dir, self.models_dir]:
+        for path in [self.data_dir, self.results_dir, self.log_dir,
+                     self.models_dir, self.sessions_dir]:
             path.mkdir(parents=True, exist_ok=True)
 
     def get_session_dir(self, prefix: str = '') -> Path:
-        """Erstellt Session-Verzeichnis mit Zeitstempel."""
+        """
+        Erstellt Session-Verzeichnis mit Zeitstempel.
+
+        DEPRECATED: Verwende create_new_session() stattdessen.
+        """
         timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         session_name = f'{prefix}_{timestamp}' if prefix else timestamp
         session_dir = self.results_dir / session_name
         session_dir.mkdir(parents=True, exist_ok=True)
         return session_dir
+
+    def create_new_session(self) -> Path:
+        """
+        Erstellt neuen Session-Ordner im sessions/ Verzeichnis.
+
+        Returns:
+            Pfad zum neuen Session-Ordner
+        """
+        timestamp = datetime.now().strftime('%Y-%m-%d_%Hh%Mm%Ss')
+        session_name = f'session-{timestamp}'
+        session_dir = self.sessions_dir / session_name
+        session_dir.mkdir(parents=True, exist_ok=True)
+        return session_dir
+
+    def get_sessions_root(self) -> Path:
+        """
+        Gibt den Root-Ordner fuer alle Sessions zurueck.
+
+        Returns:
+            Pfad zum sessions/ Ordner
+        """
+        return self.sessions_dir
 
 
 @dataclass
@@ -178,7 +206,8 @@ class Config:
             data_dir=base / 'data',
             results_dir=base / 'results',
             log_dir=base / 'log',
-            models_dir=base / 'models'
+            models_dir=base / 'models',
+            sessions_dir=base / 'sessions'
         )
         self.training = TrainingConfig()
         self.backtest = BacktestConfig()

@@ -24,11 +24,13 @@ import torch
 import numpy as np
 
 from ..styles import get_stylesheet, COLORS
+from ..save_confirm_dialog import SaveConfirmDialog, ask_save_confirmation
 from .config_panel import ConfigPanel
 from .visualization_panel import VisualizationPanel
 from .auto_trainer_widget import AutoTrainerWidget
 from .training_worker import TrainingWorker
 from ...models.factory import ModelFactory
+from ...core.save_manager import SaveManager, OverwriteAction, SaveCheckResult
 
 
 class TrainingWindow(QMainWindow):
@@ -73,6 +75,10 @@ class TrainingWindow(QMainWindow):
         self.training_data = None
         self.training_info = None
 
+        # Speicher-Status
+        self._unsaved_model = False
+        self._trained_model_info = None  # Modell-Infos nach Training
+
         # Device
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -116,6 +122,10 @@ class TrainingWindow(QMainWindow):
         self.config_panel.stop_training.connect(self._stop_training)
         self.config_panel.start_auto_training.connect(self._run_auto_training)
 
+        # Speichern-Button (NEU: manuelles Speichern statt Auto-Save)
+        if hasattr(self.config_panel, 'save_btn'):
+            self.config_panel.save_btn.clicked.connect(self._on_save_clicked)
+
         # GPU Test Button (falls vorhanden)
         if self.config_panel.gpu_test_btn:
             self.config_panel.gpu_test_btn.clicked.connect(self._run_gpu_test)
@@ -126,7 +136,8 @@ class TrainingWindow(QMainWindow):
 
     def _log(self, message: str, level: str = 'INFO'):
         """Loggt eine Nachricht."""
-        caller_frame = inspect.currentframe().f_back
+        current_frame = inspect.currentframe()
+        caller_frame = current_frame.f_back if current_frame else None
         caller_name = caller_frame.f_code.co_name if caller_frame else 'unknown'
         formatted_message = f'{caller_name}() - {message}'
 
@@ -204,6 +215,7 @@ class TrainingWindow(QMainWindow):
 
         # Modell erstellen
         try:
+            assert self.train_loader is not None
             model_config = self.config_panel.get_model_config()
             sample = next(iter(self.train_loader))
             input_size = sample[0].shape[-1]
@@ -264,6 +276,7 @@ class TrainingWindow(QMainWindow):
         self._stop_requested = False
 
         try:
+            assert self.model is not None
             if self.device.type == 'cuda':
                 torch.cuda.empty_cache()
                 self.model = self.model.to(self.device)
@@ -299,6 +312,7 @@ class TrainingWindow(QMainWindow):
                     break
 
                 # Training
+                assert self.train_loader is not None
                 self.model.train()
                 train_loss = 0.0
                 train_correct = 0
@@ -328,6 +342,7 @@ class TrainingWindow(QMainWindow):
                 avg_train_loss = train_loss / len(self.train_loader)
 
                 # Validierung
+                assert self.val_loader is not None
                 self.model.eval()
                 val_loss = 0.0
                 val_correct = 0
@@ -367,9 +382,8 @@ class TrainingWindow(QMainWindow):
                     self._log(f"Early Stopping nach {epoch} Epochen")
                     break
 
-            # Modell speichern
-            if config.get('save_best', True):
-                self._save_model(config, best_val_acc, epoch, avg_val_loss, training_start)
+            # Modell fuer Speichern vorbereiten (kein Auto-Save mehr!)
+            self._prepare_model_for_save(config, best_val_acc, epoch, avg_val_loss, training_start)
 
             self._on_training_finished({
                 'best_accuracy': best_val_acc,
@@ -395,44 +409,26 @@ class TrainingWindow(QMainWindow):
                 torch.cuda.empty_cache()
             gc.collect()
 
-    def _save_model(self, config: dict, best_val_acc: float, epoch: int, avg_val_loss: float, training_start: datetime):
-        """Speichert das trainierte Modell."""
-        self._log("=== MODEL SAVE START ===", 'DEBUG')
-
-        save_path = Path(config.get('save_path', 'models'))
-        save_path.mkdir(parents=True, exist_ok=True)
-        self._log(f"Save-Path: {save_path}", 'DEBUG')
-
+    def _prepare_model_for_save(self, config: dict, best_val_acc: float, epoch: int,
+                                  avg_val_loss: float, training_start: datetime):
+        """Bereitet das Modell fuer das Speichern vor (ohne automatisch zu speichern)."""
+        assert self.model is not None
         model_name = self.model.name.lower().replace(' ', '_')
         timestamp = datetime.now().strftime('%Y%m%d_%H%M')
-        final_path = save_path / f'{model_name}_{timestamp}_acc{best_val_acc:.1f}.pt'
-        self._log(f"Model-Name: {model_name}", 'DEBUG')
-        self._log(f"Final-Path: {final_path}", 'DEBUG')
-
         training_duration = (datetime.now() - training_start).total_seconds()
 
-        # Debug: Modell-Attribute auslesen
-        self._log("--- Lese Modell-Attribute ---", 'DEBUG')
-        self._log(f"model.name: {self.model.name}", 'DEBUG')
-        self._log(f"model.input_size: {getattr(self.model, 'input_size', 'NICHT GEFUNDEN')}", 'DEBUG')
-        self._log(f"model.hidden_sizes: {getattr(self.model, 'hidden_sizes', 'NICHT GEFUNDEN')}", 'DEBUG')
-        self._log(f"model.num_classes: {getattr(self.model, 'num_classes', 'NICHT GEFUNDEN')}", 'DEBUG')
-        self._log(f"model.dropout_rate: {getattr(self.model, 'dropout_rate', 'NICHT GEFUNDEN')}", 'DEBUG')
-        self._log(f"model.bidirectional: {getattr(self.model, 'bidirectional', 'NICHT GEFUNDEN')}", 'DEBUG')
-        self._log(f"model.use_layer_norm: {getattr(self.model, 'use_layer_norm', 'NICHT GEFUNDEN')}", 'DEBUG')
-        self._log(f"model.use_attention: {getattr(self.model, 'use_attention', 'NICHT GEFUNDEN')}", 'DEBUG')
-
-        # Modell-Parameter direkt vom Modell holen (zuverlaessiger als config)
+        # Modell-Parameter direkt vom Modell holen
         model_info = {
             'model_type': model_name,
             'trained_at': timestamp,
             'training_duration_sec': round(training_duration, 1),
             'input_size': getattr(self.model, 'input_size', None),
-            'num_classes': getattr(self.model, 'num_classes', self.training_info.get('num_classes', 3) if self.training_info else 3),
+            'num_classes': getattr(self.model, 'num_classes',
+                                   self.training_info.get('num_classes', 3) if self.training_info else 3),
             'epochs_trained': epoch,
             'best_accuracy': round(best_val_acc, 2),
             'final_val_loss': round(avg_val_loss, 4),
-            # BiLSTM/LSTM Parameter direkt vom Modell
+            # BiLSTM/LSTM Parameter
             'hidden_sizes': getattr(self.model, 'hidden_sizes', config.get('hidden_sizes')),
             'dropout': getattr(self.model, 'dropout_rate', config.get('dropout')),
             'use_layer_norm': getattr(self.model, 'use_layer_norm', config.get('use_layer_norm', False)),
@@ -446,130 +442,102 @@ class TrainingWindow(QMainWindow):
             'dim_feedforward': getattr(self.model, 'dim_feedforward', config.get('dim_feedforward')),
         }
 
-        self._log("--- Model-Info Dict ---", 'DEBUG')
-        for key, value in model_info.items():
-            self._log(f"  {key}: {value}", 'DEBUG')
+        # Fuer spaeteres Speichern merken
+        self._trained_model_info = model_info
+        self._unsaved_model = True
 
-        # State-Dict Keys analysieren
-        state_dict = self.model.state_dict()
-        self._log(f"State-Dict Keys ({len(state_dict)}): {list(state_dict.keys())[:10]}...", 'DEBUG')
+        self._log(f"Modell bereit: {model_name} - Acc: {best_val_acc:.1f}%")
+        self._log("Klicken Sie 'Session speichern' um das Modell zu sichern!", 'WARNING')
 
-        self.model.save(final_path, metrics={'best_accuracy': best_val_acc}, model_info=model_info)
-        pt_size = final_path.stat().st_size / (1024 * 1024)
-        self._log(f"Modell gespeichert: {final_path} ({pt_size:.2f} MB)")
+        # ConfigPanel aktualisieren (falls Speichern-Button vorhanden)
+        if hasattr(self.config_panel, 'save_btn'):
+            self.config_panel.save_btn.setEnabled(True)
 
-        # JSON speichern
-        json_path = final_path.with_suffix('.json')
-        with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump(model_info, f, indent=2, ensure_ascii=False)
-        json_size = json_path.stat().st_size / 1024
-        self._log(f"JSON gespeichert: {json_path} ({json_size:.1f} KB)", 'DEBUG')
+    def _on_save_clicked(self):
+        """Handler fuer den Speichern-Button - verwendet SaveManager."""
+        if not self._unsaved_model or self.model is None:
+            QMessageBox.warning(self, "Fehler", "Kein trainiertes Modell vorhanden!")
+            return
 
-        # Modell in Session-Ordner kopieren
-        self._log("--- Kopiere in Session ---", 'DEBUG')
         try:
+            from ...core.config import Config
             from ...core.logger import get_logger
-            from ...core.session_manager import SessionManager
 
-            session_dir = get_logger().get_session_dir()
-            self._log(f"Session-Dir: {session_dir}", 'DEBUG')
+            # Session-Dir ermitteln
+            logger = get_logger()
+            session_dir = logger.get_session_dir()
 
-            if session_dir:
-                manager = SessionManager(session_dir)
-                dest_path = manager.save_model(final_path)
-                self._log(f"In Session kopiert: {dest_path}", 'DEBUG')
+            if session_dir is None:
+                # Neue Session erstellen
+                config = Config()
+                session_dir = config.paths.create_new_session()
+                self._log(f"Neue Session erstellt: {session_dir.name}", 'INFO')
 
-                # Status auf 'trained' setzen
-                self._log("--- Setze Status auf 'trained' ---", 'DEBUG')
-                manager.set_status('trained')
+            # SaveManager initialisieren
+            save_manager = SaveManager(session_dir)
 
-                # Trainingsdaten in Session speichern (falls noch nicht vorhanden)
-                self._log("--- Pruefe Trainingsdaten ---", 'DEBUG')
-                training_data_path = session_dir / 'training_data.npz'
-                if not training_data_path.exists() and self.training_data is not None:
-                    self._log("Trainingsdaten nicht in Session - speichere...", 'DEBUG')
-                    try:
-                        import numpy as np
-                        # training_data hat X/Y Format, konvertiere zu sequences/labels
-                        X = self.training_data.get('X')
-                        Y = self.training_data.get('Y')
-                        if X is not None and Y is not None:
-                            features = self.training_info.get('features', []) if self.training_info else []
-                            params = self.training_info.get('params', {}) if self.training_info else {}
-                            manager.save_training_data(
-                                sequences=X,
-                                labels=Y,
-                                features=features,
-                                params=params
-                            )
-                            self._log(f"Trainingsdaten gespeichert: {X.shape[0]} Samples", 'DEBUG')
-                    except Exception as e:
-                        self._log(f"Trainingsdaten konnten nicht gespeichert werden: {e}", 'WARNING')
-                else:
-                    self._log(f"Trainingsdaten bereits vorhanden: {training_data_path.exists()}", 'DEBUG')
+            # Metriken zusammenstellen
+            metrics = {
+                'best_accuracy': self._trained_model_info.get('best_accuracy', 0) if self._trained_model_info else 0,
+                'best_loss': self._trained_model_info.get('final_val_loss', 0) if self._trained_model_info else 0,
+                'epochs': self._trained_model_info.get('epochs_trained', 0) if self._trained_model_info else 0,
+            }
 
-                # Config mit Features und training_info aktualisieren
-                self._log("--- Aktualisiere Config ---", 'DEBUG')
-                if self.training_info:
-                    features = self.training_info.get('features', [])
-                    config_update = {}
-                    if features:
-                        config_update['features'] = features
-                    # training_info in config speichern
-                    config_update['training_info'] = {
-                        'num_classes': self.training_info.get('num_classes', 2),
-                        'actual_samples': self.training_info.get('actual_samples', 0),
-                        'lookahead_bars': self.training_info.get('params', {}).get('lookforward', 5),
-                        'train_split_pct': self.training_info.get('params', {}).get('train_test_split', 80),
-                    }
-                    if config_update:
-                        manager.save_config(config_update)
-                        self._log(f"Config aktualisiert: {len(features)} Features", 'DEBUG')
+            # Pruefung ob Modell existiert
+            check_result = save_manager.check_save_trained(self.model, metrics)
 
-                # Session-DB aktualisieren mit Modell-Infos
-                self._log("--- Aktualisiere SessionDB ---", 'DEBUG')
-                update_data = {
-                    'status': 'trained',
-                    'has_model': True,
-                    'has_training_data': True,
-                    'model_accuracy': model_info.get('best_accuracy', 0),
-                    'model_version': 'bilstm_v1',
-                    'model_type': model_info.get('model_type', 'bilstm'),
-                }
-                # Features und Samples aus training_info hinzufuegen (falls vorhanden)
-                if self.training_info:
-                    features = self.training_info.get('features', [])
-                    if features:
-                        update_data['features'] = features
-                        update_data['num_features'] = len(features)
-                    num_samples = self.training_info.get('actual_samples', 0)
-                    if not num_samples and self.training_data:
-                        # Fallback: Samples aus training_data
-                        X = self.training_data.get('X')
-                        if X is not None:
-                            num_samples = X.shape[0]
-                    if num_samples:
-                        update_data['num_samples'] = num_samples
-                manager._update_session_db(update_data)
+            if not check_result.can_save:
+                QMessageBox.warning(
+                    self, "Fehler",
+                    f"Speichern nicht moeglich:\n{', '.join(check_result.warnings)}"
+                )
+                return
 
-                # Session-Validierung: Pruefen ob erneutes Laden moeglich ist
-                self._log("--- Validiere Session ---", 'DEBUG')
-                validation = manager.validate_session(status='trained')
-                if validation['valid']:
-                    if validation['warnings']:
-                        self._log(f"Session OK mit Warnungen: {validation['warnings']}", 'DEBUG')
-                    else:
-                        self._log("Session vollstaendig - erneutes Laden moeglich", 'DEBUG')
-                else:
-                    self._log(f"Session unvollstaendig! Fehlend: {validation['missing']}", 'WARNING')
+            # Bei bestehendem Modell: Nachfrage
+            if check_result.needs_confirmation:
+                action = ask_save_confirmation(check_result, self)
+
+                if action == OverwriteAction.CANCEL:
+                    self._log("Speichern abgebrochen", 'INFO')
+                    return
+
+                if action == OverwriteAction.NEW_SESSION:
+                    # Neue Session erstellen
+                    config = Config()
+                    session_dir = config.paths.create_new_session()
+                    save_manager = SaveManager(session_dir)
+                    self._log(f"Neue Session erstellt: {session_dir.name}", 'INFO')
+
+            # Speichern
+            self._log("Speichere Modell...")
+
+            result = save_manager.save_trained(
+                model=self.model,
+                metrics=metrics,
+                force=True  # Bestaetigung bereits erfolgt
+            )
+
+            if result.can_save:
+                self._log(f"Modell gespeichert: {session_dir.name}", 'SUCCESS')
+                self._unsaved_model = False
+
+                # Speichern-Button deaktivieren
+                if hasattr(self.config_panel, 'save_btn'):
+                    self.config_panel.save_btn.setEnabled(False)
+
+                QMessageBox.information(
+                    self, "Gespeichert",
+                    f"Modell gespeichert in:\n{session_dir.name}"
+                )
             else:
-                self._log("Keine Session-Dir verfuegbar!", 'WARNING')
+                self._log(f"Speichern fehlgeschlagen: {result.warnings}", 'ERROR')
+                QMessageBox.warning(self, "Fehler", "Speichern fehlgeschlagen!")
+
         except Exception as e:
             import traceback
-            self._log(f"Modell konnte nicht in Session kopiert werden: {e}", 'WARNING')
+            self._log(f"Speichern fehlgeschlagen: {e}", 'ERROR')
             self._log(traceback.format_exc(), 'DEBUG')
-
-        self._log("=== MODEL SAVE DONE ===", 'DEBUG')
+            QMessageBox.critical(self, "Fehler", f"Speichern fehlgeschlagen:\n{e}")
 
     def _stop_training(self):
         """Stoppt das Training."""
@@ -627,6 +595,7 @@ class TrainingWindow(QMainWindow):
         self._log(f"Erstelle DataLoader mit Batch-Size {batch_size}...")
         self.prepare_data_loaders(self.training_data, batch_size=batch_size)
 
+        assert self.train_loader is not None
         sample = next(iter(self.train_loader))
         input_size = sample[0].shape[-1]
         num_classes = self.training_info.get('num_classes', 3) if self.training_info else 3
@@ -637,6 +606,7 @@ class TrainingWindow(QMainWindow):
         self.timer.start(1000)
 
         try:
+            assert self.train_loader is not None and self.val_loader is not None
             auto_trainer = AutoTrainer(
                 train_loader=self.train_loader,
                 val_loader=self.val_loader,
@@ -683,6 +653,7 @@ class TrainingWindow(QMainWindow):
     def _adopt_auto_model(self, result):
         """Uebernimmt ein Modell aus dem Auto-Training."""
         try:
+            assert self.train_loader is not None
             sample = next(iter(self.train_loader))
             input_size = sample[0].shape[-1]
             num_classes = self.training_info.get('num_classes', 3) if self.training_info else 3
@@ -714,8 +685,9 @@ class TrainingWindow(QMainWindow):
             return
 
         self._log("=== GPU Test gestartet ===")
-        self.config_panel.gpu_test_btn.setEnabled(False)
-        self.config_panel.gpu_test_btn.setText("Test laeuft...")
+        if self.config_panel.gpu_test_btn:
+            self.config_panel.gpu_test_btn.setEnabled(False)
+            self.config_panel.gpu_test_btn.setText("Test laeuft...")
 
         try:
             torch.cuda.empty_cache()
@@ -761,8 +733,9 @@ class TrainingWindow(QMainWindow):
             QMessageBox.critical(self, "GPU Test Fehler", str(e))
 
         finally:
-            self.config_panel.gpu_test_btn.setEnabled(True)
-            self.config_panel.gpu_test_btn.setText("GPU Test")
+            if self.config_panel.gpu_test_btn:
+                self.config_panel.gpu_test_btn.setEnabled(True)
+                self.config_panel.gpu_test_btn.setText("GPU Test")
             torch.cuda.empty_cache()
 
     def closeEvent(self, event):

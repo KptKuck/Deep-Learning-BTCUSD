@@ -35,11 +35,11 @@ class SessionManagerWindow(QDialog):
     # Signal wenn eine Session geladen werden soll
     session_load_requested = pyqtSignal(str)  # session_path
 
-    def __init__(self, data_dir: Path, log_dir: Path, parent=None, current_session: str = None):
+    def __init__(self, sessions_dir: Path, log_dir: Path, parent=None, current_session: str = None):
         super().__init__(parent)
-        self.data_dir = Path(data_dir)
+        self.sessions_dir = Path(sessions_dir)
         self.log_dir = Path(log_dir)
-        self.db = SessionDatabase(self.data_dir)
+        self.db = SessionDatabase(self.sessions_dir)
         self.current_session = current_session  # Aktuell geladene Session
         self.selected_session_path: Optional[str] = None  # Fuer Rueckgabe
 

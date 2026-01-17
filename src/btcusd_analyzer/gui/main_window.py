@@ -1770,43 +1770,53 @@ class MainWindow(QMainWindow):
         """
         Laedt automatisch die neueste Session basierend auf Status.
 
+        Verwendet SessionDatabase fuer einheitliche Session-Verwaltung.
+
         Prioritaet:
         1. 'trained' Sessions (mit Modell)
         2. 'prepared' Sessions (mit Trainingsdaten, ohne Modell)
         """
-        from ..core.session_manager import SessionManager
+        from ..core.session_database import SessionDatabase
+        from pathlib import Path
 
         try:
-            sessions = SessionManager.list_sessions(self.config.paths.log_dir)
-            self._log(f"Suche Sessions in: {self.config.paths.log_dir}", 'DEBUG')
-            self._log(f"Gefundene Sessions: {len(sessions)}", 'DEBUG')
+            db = SessionDatabase(self.config.paths.sessions_dir)
+            self._log(f"Suche Sessions in: {self.config.paths.sessions_dir}", 'DEBUG')
 
             # Zuerst nach 'trained' Sessions suchen (neueste zuerst)
-            for session in sessions:
-                status = session.get('status')
-                self._log(f"Session {session['session_name']}: status={status}", 'DEBUG')
-                if status == 'trained':
-                    session_dir = session['session_dir']
-                    self._log(f"Auto-Load Session (trained): {session['session_name']}", 'INFO')
-                    self._load_session_from_dir(session_dir)
+            trained_sessions = db.list_sessions(status='trained')
+            self._log(f"Gefundene trained Sessions: {len(trained_sessions)}", 'DEBUG')
+
+            for session in trained_sessions:
+                session_path = session.get('path')
+                session_id = session.get('id', 'unknown')
+                if session_path and Path(session_path).exists():
+                    self._log(f"Auto-Load Session (trained): {session_id}", 'INFO')
+                    self._load_session_from_dir(Path(session_path))
                     return
 
             # Falls keine 'trained' Session: nach 'prepared' suchen
-            for session in sessions:
-                status = session.get('status')
-                if status == 'prepared':
-                    session_dir = session['session_dir']
-                    self._log(f"Auto-Load Session (prepared): {session['session_name']}", 'INFO')
-                    self._load_session_from_dir(session_dir)
+            prepared_sessions = db.list_sessions(status='prepared')
+            self._log(f"Gefundene prepared Sessions: {len(prepared_sessions)}", 'DEBUG')
+
+            for session in prepared_sessions:
+                session_path = session.get('path')
+                session_id = session.get('id', 'unknown')
+                if session_path and Path(session_path).exists():
+                    self._log(f"Auto-Load Session (prepared): {session_id}", 'INFO')
+                    self._load_session_from_dir(Path(session_path))
                     return
 
-            # Fallback: Session mit Modell (alte Sessions ohne Status)
-            for session in sessions:
+            # Fallback: Alle Sessions pruefen (fuer Legacy-Kompatibilitaet)
+            all_sessions = db.list_sessions()
+            for session in all_sessions:
                 if session.get('has_model'):
-                    session_dir = session['session_dir']
-                    self._log(f"Auto-Load Session (legacy): {session['session_name']}", 'INFO')
-                    self._load_session_from_dir(session_dir)
-                    return
+                    session_path = session.get('path')
+                    session_id = session.get('id', 'unknown')
+                    if session_path and Path(session_path).exists():
+                        self._log(f"Auto-Load Session (legacy): {session_id}", 'INFO')
+                        self._load_session_from_dir(Path(session_path))
+                        return
 
             self._log("Keine ladbare Session gefunden", 'INFO')
 
@@ -1992,7 +2002,7 @@ class MainWindow(QMainWindow):
                 current_session = self._current_session_name
 
             dialog = SessionManagerWindow(
-                data_dir=self.config.paths.data_dir,
+                sessions_dir=self.config.paths.sessions_dir,
                 log_dir=self.config.paths.log_dir,
                 parent=self,
                 current_session=current_session

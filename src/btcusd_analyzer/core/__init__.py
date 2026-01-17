@@ -1,4 +1,4 @@
-"""Core Module - Konfiguration, Logging und Exceptions"""
+"""Core Module - Konfiguration, Logging, Session-Management und Exceptions"""
 
 from .config import Config
 from .logger import Logger, get_logger
@@ -15,12 +15,21 @@ from .exceptions import (
     TradingError,
     APIError,
     InsufficientFundsError,
+    SaveError,
 )
+from .save_manager import SaveManager, SaveCheckResult, SessionConfig, OverwriteAction
+from .session_database import SessionDatabase
 
 __all__ = [
     'Config',
     'Logger',
     'get_logger',
+    # Session-Management
+    'SaveManager',
+    'SaveCheckResult',
+    'SessionConfig',
+    'OverwriteAction',
+    'SessionDatabase',
     # Exceptions
     'BTCAnalyzerError',
     'DataError',
@@ -34,4 +43,5 @@ __all__ = [
     'TradingError',
     'APIError',
     'InsufficientFundsError',
+    'SaveError',
 ]
