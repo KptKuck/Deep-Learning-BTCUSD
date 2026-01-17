@@ -232,7 +232,15 @@ class BacktestWindow(QMainWindow):
                 self._log(f"Fallback auf OHLC-Features", 'WARNING')
 
             feature_data = processed[feature_cols].values.astype(np.float32)
-            feature_data = np.nan_to_num(feature_data, nan=0.0)
+
+            # NaN-Zeilen entfernen (entstehen durch Indikatoren mit Lookback-Periode)
+            nan_mask = ~np.isnan(feature_data).any(axis=1)
+            nan_count = np.sum(~nan_mask)
+            if nan_count > 0:
+                feature_data = feature_data[nan_mask]
+                # Daten entsprechend kuerzen (wichtig fuer Backtest-Synchronisation)
+                self.data = self.data.iloc[nan_mask].reset_index(drop=True)
+                self._log(f"{nan_count} Zeilen mit NaN entfernt (Indikator-Warmup)", 'INFO')
 
             normalizer = ZScoreNormalizer()
             feature_data = normalizer.fit_transform(feature_data)

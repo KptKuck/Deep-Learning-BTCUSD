@@ -1400,17 +1400,19 @@ class PrepareDataWindow(QMainWindow):
 
             features = processed_df[feature_columns].values.astype(np.float32)
 
-            # NaN-Werte behandeln (durch 0 ersetzen oder interpolieren)
-            if np.isnan(features).any():
-                features = np.nan_to_num(features, nan=0.0)
-                self._log("NaN-Werte in Features durch 0 ersetzt", 'WARNING')
-
-            # 3. Labels mit Lookahead erweitern (falls aktiviert)
-            # Labels nur fuer Trainingsdaten verwenden
+            # 3. Labels nur fuer Trainingsdaten verwenden
             if self.generated_labels is None:
                 self._log("Fehler: Keine Labels generiert", 'ERROR')
                 return
             train_labels = self.generated_labels[:split_idx]
+
+            # NaN-Zeilen entfernen (entstehen durch Indikatoren mit Lookback-Periode)
+            nan_mask = ~np.isnan(features).any(axis=1)
+            nan_count = np.sum(~nan_mask)
+            if nan_count > 0:
+                features = features[nan_mask]
+                train_labels = train_labels[nan_mask]
+                self._log(f"{nan_count} Zeilen mit NaN entfernt (Indikator-Warmup)", 'INFO')
             num_classes = self.result_info.get('num_classes', 3)
 
             # Lookahead aus UI holen
