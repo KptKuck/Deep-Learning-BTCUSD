@@ -49,22 +49,6 @@ Alle GUI-Fenster muessen einen numerischen Index im Titel haben:
 - Hauptfenster: ganze Zahlen (1, 2, 3, ...)
 - Unter-Dialoge: Dezimalstellen (4.1, 4.2, ...)
 
-**Aktuelle Zuordnung:**
-| Index | Fenster | Datei |
-|-------|---------|-------|
-| 1 | Main | main_window.py |
-| 1.1 | Session Manager | session_manager_window.py |
-| 2 | Prepare Data | prepare_data_window.py |
-| 3 | Training | training/training_window.py |
-| 4 | Backtest | backtest/backtest_window.py |
-| 4.1 | Backtrader | backtrader_window.py |
-| 4.2 | Walk-Forward | walk_forward_window.py |
-| 4.3 | Trade-Statistik | backtest/trade_statistics_dialog.py |
-| 4.4 | Zeitraum | backtest/timerange_dialog.py |
-| 4.5 | Profiling | profiling_dialog.py |
-| 5 | Visualize | visualize_data_window.py |
-| 6 | Trading | trading_window.py |
-
 Format: `setWindowTitle("X.X - Fenstername")`
 
 ### Log-Meldungen bei GUI-Oeffnung (WICHTIG)
@@ -134,48 +118,9 @@ da die Datei durch Linter/IDE zwischenzeitlich modifiziert werden kann.
 - Kompakte Antworten bevorzugt
 - Nur relevante Dateien modifizieren
 
-## Threading/Logging - WICHTIG
-Der Logger (`core/logger.py`) ist jetzt **100% Queue-basiert** und Thread-safe:
-- Log-Aufrufe schreiben nur in eine Queue (lock-free)
-- Ein separater Daemon-Thread schreibt zu Console/Datei
-- Kein Deadlock-Risiko mehr mit Qt Event-Loop
-
-### DEBUG-Meldungen Format (WICHTIG)
-DEBUG-Meldungen muessen immer den Funktions-/Klassennamen enthalten:
-```python
-# RICHTIG:
-self._logger.debug(f"[SessionManager] Session geladen: {session_id}")
-self._logger.debug(f"[_load_config] Config nicht gefunden")
-
-# FALSCH:
-self._logger.debug(f"Session geladen: {session_id}")
-self._logger.debug("Config nicht gefunden")
-```
-Format: `[Klasse/Funktion] Nachricht`
-
-### Architektur:
-```
-[Main-Thread] --> logger.debug() --> Queue --> [LogWriter-Thread] --> Console/File
-[Worker-Thread] --> logger.debug() --> Queue --> [LogWriter-Thread] --> Console/File
-```
-
-### Module die den Logger verwenden:
-- `core/logger.py` - Queue-basierter Logger mit colorlog
-- `backtester/walk_forward.py` - verwendet `_CallbackLogger` (fuer detaillierte Kontrolle)
-- `data/processor.py` - verwendet `get_logger()` direkt (Thread-safe)
-- `training/labeler.py` - verwendet `get_logger()` direkt (Thread-safe)
-- `gui/walk_forward_window.py` - `WalkForwardWorker.log_message` Signal
-
-### Pattern fuer neue Worker (optional, fuer feine Kontrolle):
-```python
-class MyWorker(QThread):
-    log_message = pyqtSignal(str, str)  # level, message
-
-    def run(self):
-        # Option 1: Direkt loggen (Thread-safe dank Queue)
-        from ..core.logger import get_logger
-        get_logger().debug("Nachricht")
-
-        # Option 2: Via Signal (fuer GUI-Updates)
-        self.log_message.emit("debug", "Nachricht")
-```
+## Logging
+- Logger (`core/logger.py`) ist **Queue-basiert** und Thread-safe
+- DEBUG-Format: `[Klasse/Funktion] Nachricht`
+  ```python
+  self._logger.debug(f"[SessionManager] Session geladen: {session_id}")
+  ```
