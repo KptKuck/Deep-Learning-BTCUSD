@@ -7,17 +7,17 @@ fuehrt Backtests mit Backtrader durch.
 
 from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Any
-import logging
 
 import numpy as np
 import pandas as pd
 import backtrader as bt
 
+from ..core.logger import get_logger
 from ..data.processor import FeatureProcessor
 from ..training.normalizer import ZScoreNormalizer
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger()
 
 
 # =============================================================================
@@ -312,7 +312,7 @@ class BacktraderEngine:
             sequences.append(seq)
 
         if not sequences:
-            logger.warning("Keine Sequenzen erstellt - zu wenig Daten")
+            logger.warning("[BacktraderEngine] Keine Sequenzen erstellt - zu wenig Daten")
             return df
 
         sequences = np.array(sequences)
@@ -338,7 +338,7 @@ class BacktraderEngine:
         signal_start = lookback
         df.iloc[signal_start:signal_start + len(predictions), df.columns.get_loc('signal')] = predictions
 
-        logger.info(f"Modell-Signale berechnet: {len(predictions)} Vorhersagen")
+        logger.info(f"[BacktraderEngine] Modell-Signale berechnet: {len(predictions)} Vorhersagen")
         return df
 
     def run_backtest(self,
@@ -401,7 +401,7 @@ class BacktraderEngine:
         self.cerebro.addanalyzer(bt.analyzers.SQN, _name='sqn')
 
         # Backtest ausfuehren
-        logger.info(f"Starte Backtest mit {initial_capital:.2f} Startkapital")
+        logger.info(f"[BacktraderEngine] Starte Backtest mit {initial_capital:.2f} Startkapital")
         self.results = self.cerebro.run()
 
         # Ergebnisse extrahieren
@@ -471,7 +471,7 @@ class BacktraderEngine:
             # Vereinfachte Berechnung: Return / MaxDD
             result.calmar_ratio = result.total_return_pct / result.max_drawdown_pct
 
-        logger.info(f"Backtest abgeschlossen: Return {result.total_return_pct:.2f}%, "
+        logger.info(f"[BacktraderEngine] Backtest abgeschlossen: Return {result.total_return_pct:.2f}%, "
                    f"Sharpe {result.sharpe_ratio:.2f}, Trades {result.total_trades}")
 
         return result

@@ -46,6 +46,9 @@ class CNNClassifier(BaseModel):
         """
         super().__init__(name='CNNClassifier')
 
+        self._log_debug(f"__init__() - input_size={input_size}, num_filters={num_filters}, "
+                       f"kernel_size={kernel_size}, num_layers={num_conv_layers}, num_classes={num_classes}")
+
         self.input_size = input_size
         self.num_filters = num_filters
         self.kernel_size = kernel_size
@@ -83,6 +86,11 @@ class CNNClassifier(BaseModel):
 
         # Fully Connected
         self.fc = nn.Linear(in_channels, num_classes)
+
+        # Log Parameter-Anzahl
+        num_params = sum(p.numel() for p in self.parameters())
+        self._log_debug(f"__init__() - Modell erstellt: {num_params:,} Parameter, "
+                       f"final_channels={in_channels}, output={num_classes}")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

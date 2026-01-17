@@ -69,7 +69,7 @@ class InternalBacktester(BacktesterInterface):
         Returns:
             BacktestResult mit allen Trades und Metriken
         """
-        self.logger.info('Starte Backtest...')
+        self.logger.info('[InternalBacktester] Starte Backtest...')
 
         # Signale konvertieren
         if signals.dtype in ['int64', 'int32', 'float64']:
@@ -140,7 +140,7 @@ class InternalBacktester(BacktesterInterface):
             initial_capital=initial_capital
         )
 
-        self.logger.success(f'Backtest abgeschlossen: {len(trades)} Trades, '
+        self.logger.success(f'[InternalBacktester] Backtest abgeschlossen: {len(trades)} Trades, '
                            f'Return: {result.total_return_pct:.2f}%')
 
         return result
@@ -228,7 +228,7 @@ class InternalBacktester(BacktesterInterface):
             result = self.run(split_data, split_signals, initial_capital)
             results.append(result)
 
-            self.logger.debug(f'Split {i + 1}/{n_splits}: '
+            self.logger.debug(f'[InternalBacktester] Split {i + 1}/{n_splits}: '
                              f'{result.num_trades} Trades, '
                              f'Return: {result.total_return_pct:.2f}%')
 

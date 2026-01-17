@@ -95,16 +95,6 @@ self.resize(window_width, window_height)
 - Paket installieren: `pip install -e .`
 - PyTorch mit CUDA 12.8: `pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128`
 
-## Bash-Befehle (WICHTIG)
-Windows-Pfade immer in Anfuehrungszeichen setzen, KEIN `/d` Flag verwenden:
-```bash
-# RICHTIG:
-cd "c:\Work\MatLab\btc_analyzer_python" && git status
-
-# FALSCH (funktioniert nicht):
-cd /d c:\Work\MatLab\btc_analyzer_python && git status
-```
-
 ## Edit-Befehle (WICHTIG)
 Vor jedem `Edit` immer zuerst `Read` ausfuehren (nicht nur `Grep`),
 da die Datei durch Linter/IDE zwischenzeitlich modifiziert werden kann.

@@ -123,8 +123,8 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(get_stylesheet())
 
         # Logging
-        self.logger.info('BTCUSD Analyzer GUI gestartet')
-        self.logger.info(f'Log-Datei: {self.logger.get_log_file_path()}')
+        self.logger.info('[MainWindow] BTCUSD Analyzer GUI gestartet')
+        self.logger.info(f'[MainWindow] Log-Datei: {self.logger.get_log_file_path()}')
 
         # Auto-Load deaktiviert - Session wird ueber Session Manager geladen
         # QTimer.singleShot(100, self._auto_load_last_data)
@@ -2407,5 +2407,5 @@ class MainWindow(QMainWindow):
         if self._gui_handler:
             self.logger._logger.removeHandler(self._gui_handler)
             self._gui_handler = None
-        self.logger.info('BTCUSD Analyzer beendet')
+        self.logger.info('[MainWindow] BTCUSD Analyzer beendet')
         event.accept()

@@ -142,11 +142,11 @@ class APIConfig:
                 )
 
             self._loaded = True
-            self.logger.debug(f'API-Konfiguration geladen von {self.env_path}')
+            self.logger.debug(f'[APIConfig] API-Konfiguration geladen von {self.env_path}')
             return True
 
         except Exception as e:
-            self.logger.error(f'Fehler beim Laden der API-Konfiguration: {e}')
+            self.logger.error(f'[APIConfig] Fehler beim Laden der API-Konfiguration: {e}')
             return False
 
     def save(self) -> bool:
@@ -171,11 +171,11 @@ class APIConfig:
                 set_key(str(self.env_path), keys['api_key'], creds.api_key)
                 set_key(str(self.env_path), keys['api_secret'], creds.api_secret)
 
-            self.logger.success(f'API-Konfiguration gespeichert: {self.env_path}')
+            self.logger.success(f'[APIConfig] API-Konfiguration gespeichert: {self.env_path}')
             return True
 
         except Exception as e:
-            self.logger.error(f'Fehler beim Speichern der API-Konfiguration: {e}')
+            self.logger.error(f'[APIConfig] Fehler beim Speichern der API-Konfiguration: {e}')
             return False
 
     def get_credentials(self, mode: TradingMode) -> APICredentials:
@@ -213,15 +213,15 @@ class APIConfig:
         creds = APICredentials(api_key=api_key, api_secret=api_secret)
 
         if not creds.validate():
-            self.logger.warning(f'Ungueltige Credentials fuer {mode.value}')
+            self.logger.warning(f'[APIConfig] Ungueltige Credentials fuer {mode.value}')
             return False
 
         self._credentials[mode] = creds
 
         if mode == TradingMode.LIVE:
-            self.logger.warning('LIVE API-Keys konfiguriert - Vorsicht!')
+            self.logger.warning('[APIConfig] LIVE API-Keys konfiguriert - Vorsicht!')
         else:
-            self.logger.info('Testnet API-Keys konfiguriert')
+            self.logger.info('[APIConfig] Testnet API-Keys konfiguriert')
 
         return True
 
@@ -261,7 +261,7 @@ class APIConfig:
             mode: Trading-Modus
         """
         self._credentials[mode] = APICredentials()
-        self.logger.info(f'Credentials geloescht: {mode.value}')
+        self.logger.info(f'[APIConfig] Credentials geloescht: {mode.value}')
 
     def export_status(self, filepath: Path) -> bool:
         """
@@ -279,7 +279,7 @@ class APIConfig:
                 json.dump(status, f, indent=2)
             return True
         except Exception as e:
-            self.logger.error(f'Export fehlgeschlagen: {e}')
+            self.logger.error(f'[APIConfig] Export fehlgeschlagen: {e}')
             return False
 
 
