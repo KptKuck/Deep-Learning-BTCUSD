@@ -1839,6 +1839,17 @@ class PrepareDataWindow(QMainWindow):
                 'has_model': False,
             })
 
+            # 6. Session-Validierung
+            self._log("--- Validiere Session ---", 'DEBUG')
+            validation = manager.validate_session(status='prepared')
+            if validation['valid']:
+                if validation['warnings']:
+                    self._log(f"Session OK mit Warnungen: {validation['warnings']}", 'DEBUG')
+                else:
+                    self._log("Session vollstaendig - erneutes Laden moeglich", 'DEBUG')
+            else:
+                self._log(f"Session unvollstaendig! Fehlend: {validation['missing']}", 'WARNING')
+
             self._log("=== SESSION SAVE DONE ===", 'DEBUG')
 
         except Exception as e:
