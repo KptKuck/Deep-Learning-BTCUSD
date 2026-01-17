@@ -61,7 +61,7 @@ Alle GUI-Fenster muessen einen numerischen Index im Titel haben:
 | 4.2 | Walk-Forward | walk_forward_window.py |
 | 4.3 | Trade-Statistik | backtest/trade_statistics_dialog.py |
 | 4.4 | Zeitraum | backtest/timerange_dialog.py |
-| 4.5 | Profiling | backtest/profiling_dialog.py |
+| 4.5 | Profiling | profiling_dialog.py |
 | 5 | Visualize | visualize_data_window.py |
 | 6 | Trading | trading_window.py |
 

@@ -24,7 +24,7 @@ from .stats_panel import StatsPanel
 from .chart_panel import ChartPanel
 from .trade_statistics_dialog import TradeStatisticsDialog
 from .timerange_dialog import TimeRangeDialog
-from .profiling_dialog import ProfilingDialog
+from ..profiling_dialog import ProfilingDialog
 from ..styles import get_stylesheet
 
 
