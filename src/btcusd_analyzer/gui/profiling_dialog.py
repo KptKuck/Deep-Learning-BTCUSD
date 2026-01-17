@@ -9,6 +9,9 @@ Features:
 
 import pstats
 import io
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -16,7 +19,7 @@ from datetime import datetime
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QPushButton, QLabel, QHeaderView, QFileDialog, QApplication,
-    QAbstractItemView, QGroupBox
+    QAbstractItemView, QGroupBox, QMessageBox
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QFont
@@ -152,8 +155,33 @@ class ProfilingDialog(QDialog):
         # Buttons
         btn_layout = QHBoxLayout()
 
+        # snakeviz Button (primaer)
+        self.snakeviz_btn = QPushButton("snakeviz starten")
+        self.snakeviz_btn.setToolTip("Oeffnet interaktive Visualisierung im Browser")
+        self.snakeviz_btn.setStyleSheet('''
+            QPushButton {
+                background-color: #2a7a3a;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #3a8a4a;
+            }
+            QPushButton:disabled {
+                background-color: #4a4a4a;
+                color: #808080;
+            }
+        ''')
+        self.snakeviz_btn.clicked.connect(self._start_snakeviz)
+        btn_layout.addWidget(self.snakeviz_btn)
+
+        # snakeviz Verfuegbarkeit pruefen
+        self._snakeviz_available = shutil.which('snakeviz') is not None
+        if not self._snakeviz_available:
+            self.snakeviz_btn.setEnabled(False)
+            self.snakeviz_btn.setToolTip("snakeviz nicht installiert (pip install snakeviz)")
+
         self.export_btn = QPushButton("Als .prof exportieren")
-        self.export_btn.setToolTip("Speichert Profiling-Daten fuer snakeviz, etc.")
+        self.export_btn.setToolTip("Speichert Profiling-Daten fuer externe Tools")
         self.export_btn.clicked.connect(self._export_prof)
         btn_layout.addWidget(self.export_btn)
 
@@ -163,11 +191,11 @@ class ProfilingDialog(QDialog):
 
         btn_layout.addStretch()
 
-        self.snakeviz_hint = QLabel(
-            "Tipp: pip install snakeviz && snakeviz datei.prof"
-        )
-        self.snakeviz_hint.setStyleSheet("color: #808080; font-size: 9px;")
-        btn_layout.addWidget(self.snakeviz_hint)
+        # Hinweis nur wenn snakeviz nicht installiert
+        if not self._snakeviz_available:
+            self.snakeviz_hint = QLabel("pip install snakeviz")
+            self.snakeviz_hint.setStyleSheet("color: #e6b333; font-size: 9px;")
+            btn_layout.addWidget(self.snakeviz_hint)
 
         btn_layout.addStretch()
 
@@ -314,3 +342,42 @@ class ProfilingDialog(QDialog):
 
             if self.parent():
                 self.parent()._log(f"Profiling-Text exportiert: {filepath}", 'SUCCESS')
+
+    def _start_snakeviz(self):
+        """Startet snakeviz mit den Profiling-Daten im Browser."""
+        if not self.profiler:
+            return
+
+        try:
+            # Temporaere .prof Datei erstellen
+            temp_dir = Path(tempfile.gettempdir())
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            temp_file = temp_dir / f"btc_profile_{timestamp}.prof"
+
+            # Profiling-Daten speichern
+            self.profiler.dump_stats(str(temp_file))
+
+            # snakeviz im Hintergrund starten (oeffnet Browser)
+            subprocess.Popen(
+                ['snakeviz', str(temp_file)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+            )
+
+            if self.parent() and hasattr(self.parent(), '_log'):
+                self.parent()._log(f"snakeviz gestartet: {temp_file}", 'SUCCESS')
+
+        except FileNotFoundError:
+            QMessageBox.warning(
+                self,
+                "snakeviz nicht gefunden",
+                "snakeviz ist nicht installiert.\n\n"
+                "Installation: pip install snakeviz"
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Fehler",
+                f"Konnte snakeviz nicht starten:\n{e}"
+            )
