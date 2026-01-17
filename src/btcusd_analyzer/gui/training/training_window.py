@@ -457,8 +457,8 @@ class TrainingWindow(QMainWindow):
         # Modell in Session-Ordner kopieren
         self._log("--- Kopiere in Session ---", 'DEBUG')
         try:
-            from ..core.logger import get_logger
-            from ..core.session_manager import SessionManager
+            from ...core.logger import get_logger
+            from ...core.session_manager import SessionManager
 
             session_dir = get_logger().get_session_dir()
             self._log(f"Session-Dir: {session_dir}", 'DEBUG')
