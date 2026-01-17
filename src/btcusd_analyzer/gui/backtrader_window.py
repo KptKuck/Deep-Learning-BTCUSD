@@ -70,8 +70,8 @@ class BacktraderWindow(QMainWindow):
     - Export-Funktionen
     """
 
-    def __init__(self, data: pd.DataFrame = None, model=None,
-                 model_info: Dict = None, signals: pd.Series = None,
+    def __init__(self, data: Optional[pd.DataFrame] = None, model=None,
+                 model_info: Optional[Dict] = None, signals: Optional[pd.Series] = None,
                  parent=None):
         super().__init__(parent)
 
@@ -387,7 +387,9 @@ class BacktraderWindow(QMainWindow):
             'Entry Datum', 'Exit Datum', 'Richtung', 'Entry Preis',
             'Exit Preis', 'P/L', 'P/L %'
         ])
-        self.trades_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header = self.trades_table.horizontalHeader()
+        if header is not None:
+            header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.trades_table.setAlternatingRowColors(True)
 
         layout.addWidget(self.trades_table)
@@ -426,8 +428,8 @@ class BacktraderWindow(QMainWindow):
         else:
             self.data_model_label.setText("Modell: Nicht geladen")
 
-    def set_data(self, data: pd.DataFrame, model=None, model_info: Dict = None,
-                 signals: pd.Series = None):
+    def set_data(self, data: pd.DataFrame, model=None, model_info: Optional[Dict] = None,
+                 signals: Optional[pd.Series] = None):
         """Setzt Daten und Modell fuer Backtest."""
         self.data = data
         self.model = model

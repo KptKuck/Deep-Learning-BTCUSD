@@ -15,7 +15,7 @@ def main():
 
     # Logger initialisieren
     from btcusd_analyzer.core.logger import get_logger
-    logger = get_logger('btcusd_analyzer', log_dir=base_dir / 'log')
+    logger = get_logger('btcusd_analyzer', log_dir=str(base_dir / 'log'))
     logger.info('BTCUSD Analyzer gestartet')
     logger.info(f'Log-Datei: {logger.get_log_file_path()}')
 
