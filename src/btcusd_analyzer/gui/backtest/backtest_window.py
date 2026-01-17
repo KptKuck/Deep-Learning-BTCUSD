@@ -290,6 +290,12 @@ class BacktestWindow(QMainWindow):
             self._speed_update_timer.stop()
             self._speed_update_timer = None
 
+        # Profiling stoppen und Bericht ausgeben (auch bei manuellem Stopp)
+        if self._profiling_enabled and self._profiler:
+            self._profiler.disable()
+            self._output_profiling_report()
+            self._profiler = None
+
         self.control_panel.set_running_state(False)
         self.control_panel.set_actual_speed("Gestoppt")
         self._update_charts()
