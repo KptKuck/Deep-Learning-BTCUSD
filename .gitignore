@@ -99,5 +99,6 @@ nul
 *.key
 credentials.json
 /data/
-docs/
+docs/*
+!docs/plans/
 sessions/
