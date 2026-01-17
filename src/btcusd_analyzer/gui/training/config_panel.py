@@ -15,6 +15,20 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 
 import torch
 
+# GPU Monitoring (optional) - nvidia-ml-py bevorzugt, pynvml als Fallback
+import warnings
+PYNVML_AVAILABLE = False
+pynvml = None
+try:
+    # nvidia-ml-py direkt importieren (neuer Name)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=FutureWarning)
+        import pynvml as _pynvml
+        pynvml = _pynvml
+        PYNVML_AVAILABLE = True
+except ImportError:
+    pass
+
 from ..styles import COLORS
 from ...models.factory import (
     ModelFactory, LSTM_PRESETS, TRANSFORMER_PRESETS, CNN_PRESETS, PATCHTST_PRESETS
@@ -345,8 +359,22 @@ class ConfigPanel(QWidget):
         self.device_label.setStyleSheet(f"color: {color}; font-size: 10px;")
         grid.addWidget(self.device_label, 1, 0, 1, 2)
 
-        # GPU Memory
+        # GPU Memory + Utilization
         if torch.cuda.is_available():
+            # NVML initialisieren fuer GPU-Auslastung
+            self._nvml_initialized = False
+            self._nvml_handle = None
+            if PYNVML_AVAILABLE and pynvml is not None:
+                try:
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", category=FutureWarning)
+                        pynvml.nvmlInit()
+                        self._nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+                        self._nvml_initialized = True
+                except Exception:
+                    pass
+
+            # GPU Memory Bar
             self.gpu_memory_bar = QProgressBar()
             self.gpu_memory_bar.setMinimum(0)
             self.gpu_memory_bar.setMaximum(100)
@@ -366,21 +394,36 @@ class ConfigPanel(QWidget):
             mem_layout.addWidget(self.gpu_free_label)
             grid.addLayout(mem_layout, 3, 0, 1, 2)
 
+            # GPU Utilization (Auslastung)
+            grid.addWidget(QLabel("Auslastung:"), 4, 0)
+            self.gpu_util_bar = QProgressBar()
+            self.gpu_util_bar.setMinimum(0)
+            self.gpu_util_bar.setMaximum(100)
+            self.gpu_util_bar.setValue(0)
+            self.gpu_util_bar.setTextVisible(True)
+            self.gpu_util_bar.setFormat("%p%")
+            self.gpu_util_bar.setMaximumHeight(18)
+            self.gpu_util_bar.setToolTip("GPU-Rechenauslastung (benoetigt pynvml)")
+            grid.addWidget(self.gpu_util_bar, 4, 1)
+
             # GPU Memory Timer
             self.gpu_timer = QTimer()
-            self.gpu_timer.timeout.connect(self._update_gpu_memory)
-            self.gpu_timer.start(1000)
-            self._update_gpu_memory()
+            self.gpu_timer.timeout.connect(self._update_gpu_stats)
+            self.gpu_timer.start(500)  # 500ms fuer fluessigerere Anzeige
+            self._update_gpu_stats()
 
             # GPU Test Button
             self.gpu_test_btn = QPushButton("GPU Test")
             self.gpu_test_btn.setToolTip("Testet GPU-Training mit synthetischen Daten")
-            grid.addWidget(self.gpu_test_btn, 4, 0, 1, 2)
+            grid.addWidget(self.gpu_test_btn, 5, 0, 1, 2)
         else:
             self.gpu_memory_bar = None
             self.gpu_used_label = None
             self.gpu_free_label = None
+            self.gpu_util_bar = None
             self.gpu_test_btn = None
+            self._nvml_initialized = False
+            self._nvml_handle = None
 
         layout.addWidget(group)
 
@@ -549,12 +592,13 @@ class ConfigPanel(QWidget):
         if path:
             self.save_path_label.setText(path)
 
-    def _update_gpu_memory(self):
-        """Aktualisiert GPU-Speicheranzeige."""
+    def _update_gpu_stats(self):
+        """Aktualisiert GPU-Speicher und Auslastung."""
         if not torch.cuda.is_available() or self.gpu_memory_bar is None:
             return
 
         try:
+            # Speicher via PyTorch
             allocated = torch.cuda.memory_allocated(0) / (1024 ** 3)
             total = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
             free = total - allocated
@@ -563,8 +607,28 @@ class ConfigPanel(QWidget):
             self.gpu_memory_bar.setValue(percent)
             self.gpu_used_label.setText(f"Belegt: {allocated:.2f} GB")
             self.gpu_free_label.setText(f"Frei: {free:.2f} GB")
+
+            # Auslastung via NVML
+            if self._nvml_initialized and self._nvml_handle and self.gpu_util_bar:
+                try:
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", category=FutureWarning)
+                        util = pynvml.nvmlDeviceGetUtilizationRates(self._nvml_handle)
+                        self.gpu_util_bar.setValue(util.gpu)
+                except Exception:
+                    self.gpu_util_bar.setValue(0)
         except Exception:
             pass
+
+    def __del__(self):
+        """Destruktor - NVML sauber beenden."""
+        if hasattr(self, '_nvml_initialized') and self._nvml_initialized and pynvml is not None:
+            try:
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", category=FutureWarning)
+                    pynvml.nvmlShutdown()
+            except Exception:
+                pass
 
     def get_device(self) -> torch.device:
         """Gibt das ausgewaehlte Device zurueck."""

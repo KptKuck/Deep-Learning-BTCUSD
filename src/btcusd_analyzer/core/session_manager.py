@@ -464,7 +464,12 @@ class SessionManager:
         db = self._get_session_db()
         if db:
             session_id = self.session_dir.name
-            db.update_session(session_id, updates)
+            # Immer path mitgeben, falls Session neu erstellt wird
+            updates_with_path = {
+                'path': str(self.session_dir),
+                **updates
+            }
+            db.update_session(session_id, updates_with_path)
 
     def register_in_db(self, session_info: dict = None):
         """

@@ -52,6 +52,9 @@ backtesting = [
     "backtrader>=1.9.78",
     "backtesting>=0.3.3",
 ]
+gpu = [
+    "pynvml>=11.5.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
