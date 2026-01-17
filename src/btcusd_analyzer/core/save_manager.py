@@ -369,7 +369,8 @@ class SaveManager:
         model: torch.nn.Module,
         metrics: Dict[str, Any],
         optimizer: Optional[torch.optim.Optimizer] = None,
-        force: bool = False
+        force: bool = False,
+        model_info: Optional[Dict[str, Any]] = None
     ) -> SaveCheckResult:
         """
         Speichert trainiertes Modell.
@@ -379,6 +380,7 @@ class SaveManager:
             metrics: Training-Metriken (accuracy, loss, etc.)
             optimizer: Optional der Optimizer (fuer Resume)
             force: True = Ueberschreiben ohne Nachfrage
+            model_info: Optional erweiterte Modell-Informationen (Architektur, Hyperparameter)
 
         Returns:
             SaveCheckResult
@@ -405,12 +407,17 @@ class SaveManager:
 
             config.status = 'trained'
             config.updated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            config.model_info = {
-                'accuracy': metrics.get('best_accuracy', 0),
-                'loss': metrics.get('best_loss', 0),
-                'epochs': metrics.get('epochs', 0),
-                'model_type': getattr(model, 'name', 'unknown'),
-            }
+
+            # Erweiterte model_info verwenden falls vorhanden, sonst Fallback
+            if model_info:
+                config.model_info = model_info
+            else:
+                config.model_info = {
+                    'accuracy': metrics.get('best_accuracy', 0),
+                    'loss': metrics.get('best_loss', 0),
+                    'epochs': metrics.get('epochs', 0),
+                    'model_type': getattr(model, 'name', 'unknown'),
+                }
             config.training_metrics = metrics
 
             self._save_config(config)

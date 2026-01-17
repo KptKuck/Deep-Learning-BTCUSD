@@ -541,7 +541,8 @@ class TrainingWindow(QMainWindow):
             result = save_manager.save_trained(
                 model=self.model,
                 metrics=metrics,
-                force=True  # Bestaetigung bereits erfolgt
+                force=True,  # Bestaetigung bereits erfolgt
+                model_info=self._trained_model_info  # Erweiterte Modell-Infos
             )
 
             if result.can_save:

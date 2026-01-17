@@ -18,6 +18,7 @@ import pandas as pd
 import numpy as np
 
 from .chart_widget import ChartWidget
+from .peaks_chart_widget import PeaksChartWidget
 from .styles import StyleFactory, COLORS
 from .widgets import (
     FeatureDefinition,
@@ -229,8 +230,8 @@ class PrepareDataWindow(QMainWindow):
         params_widget = self._create_find_peaks_params()
         splitter.addWidget(params_widget)
 
-        # Rechte Seite: Chart
-        self.peaks_chart = ChartWidget('Peaks')
+        # Rechte Seite: Chart (PyQtChart)
+        self.peaks_chart = PeaksChartWidget('Peaks')
         splitter.addWidget(self.peaks_chart)
 
         # Splitter-Proportionen
@@ -524,14 +525,14 @@ class PrepareDataWindow(QMainWindow):
         self.peaks_status.setStyleSheet('color: #33b34d;')
 
         # Chart aktualisieren
-        # Fuer Chart: Tiefs=gruen (BUY-Kandidaten), Hochs=rot (SELL-Kandidaten)
+        # Fuer Chart: Tiefs=gruen (Low-Peaks), Hochs=rot (High-Peaks)
         self._log('[_on_peaks_found] Chart update...', 'DEBUG')
         close_col = 'Close' if 'Close' in self.data.columns else 'close'
         prices = np.asarray(self.data[close_col].values)
-        self.peaks_chart.update_price_chart(
+        self.peaks_chart.update_peaks_chart(
             prices,
-            self.detected_peaks['low_indices'],   # Tiefs -> gruen (BUY)
-            self.detected_peaks['high_indices'],  # Hochs -> rot (SELL)
+            self.detected_peaks['low_indices'],   # Low-Peaks (gruen)
+            self.detected_peaks['high_indices'],  # High-Peaks (rot)
             'Erkannte Peaks'
         )
         self._log('[_on_peaks_found] Chart update done', 'DEBUG')
