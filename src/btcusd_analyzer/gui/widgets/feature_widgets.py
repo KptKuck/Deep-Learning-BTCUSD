@@ -7,10 +7,36 @@ from typing import Dict, Any, List, Tuple
 
 from PyQt6.QtWidgets import (
     QGroupBox, QVBoxLayout, QHBoxLayout, QCheckBox, QSpinBox,
-    QLabel, QFrame, QWidget, QPushButton, QSizePolicy
+    QLabel, QFrame, QWidget, QPushButton, QSizePolicy, QGridLayout
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QSize
 from PyQt6.QtGui import QFont
+
+
+# Kompakte Styles fuer Feature-Widgets
+COMPACT_CHECKBOX_STYLE = """
+    QCheckBox {
+        font-size: 10px;
+        spacing: 2px;
+        padding: 1px 3px;
+    }
+    QCheckBox::indicator {
+        width: 12px;
+        height: 12px;
+    }
+"""
+
+COMPACT_SPINBOX_STYLE = """
+    QSpinBox {
+        background-color: #3a3a3a;
+        border: 1px solid #555;
+        border-radius: 2px;
+        color: white;
+        padding: 1px;
+        font-size: 10px;
+        max-width: 45px;
+    }
+"""
 
 
 # =============================================================================
@@ -96,13 +122,13 @@ FEATURE_REGISTRY: Dict[str, List[FeatureDefinition]] = {
     ],
 }
 
-# Kategorie-Anzeigenamen und Farben
+# Kategorie-Anzeigenamen und Farben (kompaktere Namen)
 CATEGORY_CONFIG = {
-    'price': {'name': 'Preis-Features', 'color': '#4da8da'},
-    'technical': {'name': 'Technische Indikatoren', 'color': '#b19cd9'},
+    'price': {'name': 'Preis', 'color': '#4da8da'},
+    'technical': {'name': 'Technisch', 'color': '#b19cd9'},
     'volatility': {'name': 'Volatilitaet', 'color': '#ff9966'},
     'volume': {'name': 'Volumen', 'color': '#7fe6b3'},
-    'time': {'name': 'Zeit-Features', 'color': '#e6b333'},
+    'time': {'name': 'Zeit', 'color': '#e6b333'},
 }
 
 
@@ -129,19 +155,19 @@ class FeatureCategoryWidget(QWidget):
         self._init_ui()
 
     def _init_ui(self):
-        """Initialisiert die UI-Komponenten."""
+        """Initialisiert die UI-Komponenten (kompaktes Layout)."""
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Header-Button (immer sichtbar)
+        # Header-Button (immer sichtbar) - kompakter
         self.header_btn = QPushButton()
         self.header_btn.setCheckable(True)
         self.header_btn.setChecked(False)
         self.header_btn.clicked.connect(self._toggle_collapse)
         self._update_header_text()
         self.header_btn.setStyleSheet(self._get_header_style())
-        self.header_btn.setFixedHeight(36)
+        self.header_btn.setFixedHeight(28)  # Kompakter: 28 statt 36
         main_layout.addWidget(self.header_btn)
 
         # Content-Container (aufklappbar)
@@ -151,32 +177,74 @@ class FeatureCategoryWidget(QWidget):
                 background-color: #2a2a2a;
                 border: 1px solid #333;
                 border-top: none;
-                border-bottom-left-radius: 5px;
-                border-bottom-right-radius: 5px;
+                border-bottom-left-radius: 4px;
+                border-bottom-right-radius: 4px;
             }}
         ''')
 
         content_layout = QVBoxLayout(self.content_widget)
-        content_layout.setSpacing(4)
-        content_layout.setContentsMargins(8, 8, 8, 8)
+        content_layout.setSpacing(2)  # Kompakter: 2 statt 4
+        content_layout.setContentsMargins(4, 4, 4, 4)  # Kompakter: 4 statt 8
 
-        # "Alle" Checkbox
-        self.all_checkbox = QCheckBox('Alle auswaehlen')
-        self.all_checkbox.setStyleSheet('color: white; font-weight: bold;')
+        # Obere Zeile: "Alle" Checkbox (kompakt, inline)
+        top_row = QHBoxLayout()
+        top_row.setSpacing(4)
+
+        self.all_checkbox = QCheckBox('Alle')
+        self.all_checkbox.setStyleSheet('color: white; font-weight: bold; font-size: 10px;')
         self.all_checkbox.stateChanged.connect(self._on_all_toggled)
-        content_layout.addWidget(self.all_checkbox)
+        top_row.addWidget(self.all_checkbox)
 
-        # Trennlinie
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setStyleSheet('background-color: #444;')
-        line.setFixedHeight(1)
-        content_layout.addWidget(line)
+        # Trennstrich
+        separator = QLabel('|')
+        separator.setStyleSheet('color: #555; font-size: 10px;')
+        top_row.addWidget(separator)
 
-        # Features
+        # Feature-Checkboxen in Grid-Layout (4 pro Zeile)
+        self.features_grid = QGridLayout()
+        self.features_grid.setSpacing(3)
+        self.features_grid.setContentsMargins(0, 0, 0, 0)
+
+        # Features mit Parametern separat
+        features_with_params = []
+        features_without_params = []
+
         for feat_def in self.features:
-            feat_widget = self._create_feature_row(feat_def)
-            content_layout.addLayout(feat_widget)
+            if feat_def.params:
+                features_with_params.append(feat_def)
+            else:
+                features_without_params.append(feat_def)
+
+        # Einfache Features in Grid (4 pro Zeile)
+        col = 0
+        row = 0
+        max_cols = 4
+
+        for feat_def in features_without_params:
+            cb = self._create_compact_checkbox(feat_def)
+            self.features_grid.addWidget(cb, row, col)
+            col += 1
+            if col >= max_cols:
+                col = 0
+                row += 1
+
+        # Layout zusammenbauen
+        top_row.addLayout(self.features_grid)
+        top_row.addStretch()
+        content_layout.addLayout(top_row)
+
+        # Features mit Parametern in separaten Zeilen (kompakter)
+        if features_with_params:
+            params_layout = QHBoxLayout()
+            params_layout.setSpacing(8)
+            params_layout.setContentsMargins(0, 2, 0, 0)
+
+            for feat_def in features_with_params:
+                feat_widget = self._create_compact_param_widget(feat_def)
+                params_layout.addWidget(feat_widget)
+
+            params_layout.addStretch()
+            content_layout.addLayout(params_layout)
 
         main_layout.addWidget(self.content_widget)
 
@@ -202,17 +270,17 @@ class FeatureCategoryWidget(QWidget):
         self.header_btn.setText(f"  {arrow}  {self.category_name}  [{selected}/{total}]")
 
     def _get_header_style(self) -> str:
-        """Gibt das Header-Button Stylesheet zurueck."""
+        """Gibt das Header-Button Stylesheet zurueck (kompakter)."""
         return f'''
             QPushButton {{
                 background-color: #333;
                 color: {self.color};
                 border: 1px solid #444;
-                border-radius: 5px;
+                border-radius: 4px;
                 text-align: left;
-                padding-left: 10px;
+                padding-left: 8px;
                 font-weight: bold;
-                font-size: 11px;
+                font-size: 10px;
             }}
             QPushButton:hover {{
                 background-color: #3a3a3a;
@@ -224,6 +292,57 @@ class FeatureCategoryWidget(QWidget):
                 border-bottom-right-radius: 0px;
             }}
         '''
+
+    def _create_compact_checkbox(self, feat_def: FeatureDefinition) -> QCheckBox:
+        """Erstellt eine kompakte Checkbox ohne Parameter."""
+        cb = QCheckBox(feat_def.name)  # Kurzer Name statt display_name
+        cb.setChecked(feat_def.default_enabled)
+        cb.setStyleSheet(COMPACT_CHECKBOX_STYLE + ' QCheckBox { color: white; }')
+        cb.stateChanged.connect(self._on_feature_toggled)
+
+        # Widget-Daten speichern
+        self.feature_widgets[feat_def.name] = {'checkbox': cb, 'params': {}}
+
+        return cb
+
+    def _create_compact_param_widget(self, feat_def: FeatureDefinition) -> QWidget:
+        """Erstellt ein kompaktes Widget fuer Feature mit Parametern."""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+
+        # Checkbox
+        cb = QCheckBox(feat_def.name)
+        cb.setChecked(feat_def.default_enabled)
+        cb.setStyleSheet(COMPACT_CHECKBOX_STYLE + ' QCheckBox { color: white; }')
+        cb.stateChanged.connect(self._on_feature_toggled)
+        layout.addWidget(cb)
+
+        widget_data: Dict[str, Any] = {'checkbox': cb, 'params': {}}
+
+        # Parameter inline: [SMA] [20]
+        for param_name, default_val in feat_def.params.items():
+            spin = QSpinBox()
+            spin.setStyleSheet(COMPACT_SPINBOX_STYLE)
+            spin.setFixedWidth(45)
+
+            if param_name in feat_def.param_ranges:
+                min_val, max_val, step = feat_def.param_ranges[param_name]
+                spin.setRange(int(min_val), int(max_val))
+                spin.setSingleStep(int(step))
+            else:
+                spin.setRange(1, 500)
+
+            spin.setValue(int(default_val))
+            spin.valueChanged.connect(self._on_param_changed)
+            layout.addWidget(spin)
+
+            widget_data['params'][param_name] = spin
+
+        self.feature_widgets[feat_def.name] = widget_data
+
+        return widget
 
     def _create_feature_row(self, feat_def: FeatureDefinition) -> QHBoxLayout:
         """Erstellt eine Zeile fuer ein Feature mit Checkbox und optionalen Parametern."""

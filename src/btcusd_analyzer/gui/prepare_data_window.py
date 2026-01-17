@@ -19,6 +19,7 @@ import numpy as np
 
 from .chart_widget import ChartWidget
 from .peaks_chart_widget import PeaksChartWidget
+from .features_chart_widget import FeaturesChartWidget
 from .styles import StyleFactory, COLORS
 from .widgets import (
     FeatureDefinition,
@@ -782,8 +783,17 @@ class PrepareDataWindow(QMainWindow):
         layout.addWidget(splitter)
 
         # Charts ZUERST erstellen (werden von _create_features_params referenziert)
-        self.features_chart = ChartWidget('Features (Uebersicht)')
-        self.features_detail_chart = ChartWidget('Features (Detail)')
+        # PyQtChart-basierte FeaturesChartWidgets mit Zoom, Pan und Crosshair
+        self.features_chart = FeaturesChartWidget('Features (Uebersicht)')
+        self.features_detail_chart = FeaturesChartWidget('Features (Detail)')
+
+        # Crosshair-Synchronisation zwischen Uebersicht und Detail
+        self.features_chart.crosshairMoved.connect(
+            self.features_detail_chart.set_crosshair_position
+        )
+        self.features_detail_chart.crosshairMoved.connect(
+            self.features_chart.set_crosshair_position
+        )
 
         # Linke Seite: Parameter
         params_widget = self._create_features_params()
