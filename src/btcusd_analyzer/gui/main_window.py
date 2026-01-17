@@ -1596,6 +1596,8 @@ class MainWindow(QMainWindow):
             backtest_data = manager.load_backtest_data()
             if backtest_data is not None:
                 self.backtest_info = {'data': backtest_data}
+                # Auch self.data setzen, damit Backtester und andere GUIs funktionieren
+                self.data = backtest_data
                 self._log(f"Backtest-Daten geladen: {len(backtest_data)} Punkte", 'SUCCESS')
                 self._log(f"Backtest Columns: {list(backtest_data.columns)}", 'DEBUG')
             else:
