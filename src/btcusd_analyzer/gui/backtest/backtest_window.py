@@ -11,6 +11,8 @@ import time
 import cProfile
 import pstats
 import io
+from pathlib import Path
+from datetime import datetime
 from typing import Optional, Dict, List
 
 from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QSplitter, QApplication
@@ -658,33 +660,50 @@ class BacktestWindow(QMainWindow):
         if not self._profiler:
             return
 
+        # Profiling automatisch in profile/ Ordner speichern
+        profile_path = self._save_profiling_to_file()
+
         self._log("Profiling abgeschlossen - oeffne Ergebnisse...", 'INFO')
 
         # Profiling-Dialog oeffnen
         dialog = ProfilingDialog(self._profiler, self, "Backtest Profiling")
         dialog.exec()
 
-        # Kurze Zusammenfassung ins Log
-        stats = pstats.Stats(self._profiler)
-        stats.strip_dirs()
+    def _save_profiling_to_file(self) -> Optional[Path]:
+        """Speichert Profiling-Daten automatisch in profile/ Ordner."""
+        if not self._profiler:
+            return None
 
-        backtest_funcs = []
-        for (filename, line, func), (cc, nc, tt, ct, callers) in stats.stats.items():
-            if 'backtest' in filename.lower() or 'chart' in filename.lower():
-                backtest_funcs.append({
-                    'name': func,
-                    'calls': nc,
-                    'cumulative_time': ct
-                })
+        try:
+            # Projekt-Root ermitteln (4 Ebenen hoch von backtest_window.py)
+            project_root = Path(__file__).parent.parent.parent.parent.parent
+            profile_dir = project_root / "profile"
+            profile_dir.mkdir(exist_ok=True)
 
-        backtest_funcs.sort(key=lambda x: x['cumulative_time'], reverse=True)
+            # Timestamp fuer Dateinamen
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            prof_file = profile_dir / f"backtest_{timestamp}.prof"
+            txt_file = profile_dir / f"backtest_{timestamp}.txt"
 
-        self._log("=== Profiling Top 5 ===")
-        for i, func in enumerate(backtest_funcs[:5], 1):
-            self._log(
-                f"{i}. {func['name']}: {func['calls']} Aufrufe, "
-                f"{func['cumulative_time']*1000:.1f}ms"
-            )
+            # .prof Datei speichern (fuer snakeviz)
+            self._profiler.dump_stats(str(prof_file))
+
+            # .txt Datei speichern (lesbar)
+            stream = io.StringIO()
+            stats = pstats.Stats(self._profiler, stream=stream)
+            stats.strip_dirs()
+            stats.sort_stats('cumulative')
+            stats.print_stats(100)
+
+            with open(txt_file, 'w', encoding='utf-8') as f:
+                f.write(stream.getvalue())
+
+            self._log(f"Profiling gespeichert: {prof_file.name}", 'SUCCESS')
+            return prof_file
+
+        except Exception as e:
+            self._log(f"Profiling-Speichern fehlgeschlagen: {e}", 'WARNING')
+            return None
 
     def _show_trade_statistics(self):
         """Zeigt den Trade-Statistik Dialog."""

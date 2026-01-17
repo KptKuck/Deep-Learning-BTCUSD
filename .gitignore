@@ -78,6 +78,9 @@ venv.bak/
 *.log
 log/
 
+# Profiling
+profile/
+
 # Data (zu gross fuer Git)
 Daten_csv/
 Results/
