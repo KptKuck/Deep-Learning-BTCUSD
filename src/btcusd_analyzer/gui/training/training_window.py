@@ -16,7 +16,7 @@ import json
 import inspect
 
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QHBoxLayout, QSplitter, QMessageBox
+    QMainWindow, QWidget, QHBoxLayout, QSplitter, QMessageBox, QApplication
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 
@@ -47,7 +47,18 @@ class TrainingWindow(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("3 - Training")
-        self.setMinimumSize(1200, 800)
+
+        # Relative Fenstergroesse (95% Hoehe, 85% Breite)
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_rect = screen.availableGeometry()
+            window_width = int(screen_rect.width() * 0.85)
+            window_height = int(screen_rect.height() * 0.95)
+        else:
+            window_width, window_height = 1200, 800
+
+        self.setMinimumSize(1000, 700)
+        self.resize(window_width, window_height)
         self._parent = parent
 
         # State

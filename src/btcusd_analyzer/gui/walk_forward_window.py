@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QCheckBox, QTableWidget, QTableWidgetItem, QHeaderView,
     QSplitter, QTextEdit, QProgressBar, QFileDialog, QMessageBox,
     QTabWidget, QComboBox, QRadioButton, QButtonGroup, QScrollArea,
-    QFrame, QDateEdit, QToolButton, QSizePolicy
+    QFrame, QDateEdit, QToolButton, QSizePolicy, QApplication
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QDate, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont
@@ -237,7 +237,18 @@ class WalkForwardWindow(QMainWindow):
     def _init_ui(self):
         """Initialisiert die UI-Komponenten."""
         self.setWindowTitle('4.2 - Walk-Forward')
-        self.setMinimumSize(1400, 1260)  # 40% mehr Hoehe (900 * 1.4)
+
+        # Relative Fenstergroesse (95% Hoehe, 90% Breite)
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_rect = screen.availableGeometry()
+            window_width = int(screen_rect.width() * 0.90)
+            window_height = int(screen_rect.height() * 0.95)
+        else:
+            window_width, window_height = 1400, 900
+
+        self.setMinimumSize(1200, 800)
+        self.resize(window_width, window_height)
 
         # Central Widget
         central = QWidget()

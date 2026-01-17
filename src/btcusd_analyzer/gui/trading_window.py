@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QGroupBox, QLabel, QPushButton, QComboBox, QSpinBox, QDoubleSpinBox,
     QProgressBar, QTextEdit, QSplitter, QMessageBox, QCheckBox,
     QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
-    QScrollArea, QFrame, QDialog, QDialogButtonBox
+    QScrollArea, QFrame, QDialog, QDialogButtonBox, QApplication
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QColor
@@ -180,7 +180,18 @@ class TradingWindow(QMainWindow):
         self._parent = parent
 
         self.setWindowTitle(f"6 - Trading ({mode.value.upper()})")
-        self.setMinimumSize(1100, 750)
+
+        # Relative Fenstergroesse (85% Hoehe, 75% Breite)
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_rect = screen.availableGeometry()
+            window_width = int(screen_rect.width() * 0.75)
+            window_height = int(screen_rect.height() * 0.85)
+        else:
+            window_width, window_height = 1100, 750
+
+        self.setMinimumSize(900, 650)
+        self.resize(window_width, window_height)
 
         # Live-Modus Warnung
         if mode == TradingMode.LIVE:

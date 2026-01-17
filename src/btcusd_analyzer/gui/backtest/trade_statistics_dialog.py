@@ -7,7 +7,7 @@ from typing import List, Optional
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QWidget,
     QGroupBox, QLabel, QPushButton, QTabWidget, QTableWidget, QTableWidgetItem,
-    QHeaderView, QFileDialog
+    QHeaderView, QFileDialog, QApplication
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
@@ -30,7 +30,18 @@ class TradeStatisticsDialog(QDialog):
         self.current_equity = current_equity
 
         self.setWindowTitle("4.3 - Trade-Statistik")
-        self.setMinimumSize(900, 700)
+
+        # Relative Fenstergroesse (80% Hoehe, 60% Breite)
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_rect = screen.availableGeometry()
+            window_width = int(screen_rect.width() * 0.60)
+            window_height = int(screen_rect.height() * 0.80)
+        else:
+            window_width, window_height = 900, 700
+
+        self.setMinimumSize(800, 600)
+        self.resize(window_width, window_height)
         self.setStyleSheet(get_stylesheet())
 
         self._setup_ui()

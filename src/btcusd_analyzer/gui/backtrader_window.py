@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QGroupBox, QDoubleSpinBox, QSpinBox,
     QCheckBox, QTableWidget, QTableWidgetItem, QHeaderView,
     QSplitter, QTextEdit, QProgressBar, QFileDialog, QMessageBox,
-    QTabWidget
+    QTabWidget, QApplication
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -93,7 +93,18 @@ class BacktraderWindow(QMainWindow):
     def _init_ui(self):
         """Initialisiert die UI-Komponenten."""
         self.setWindowTitle('4.1 - Backtrader')
-        self.setMinimumSize(1200, 800)
+
+        # Relative Fenstergroesse (95% Hoehe, 85% Breite)
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_rect = screen.availableGeometry()
+            window_width = int(screen_rect.width() * 0.85)
+            window_height = int(screen_rect.height() * 0.95)
+        else:
+            window_width, window_height = 1200, 800
+
+        self.setMinimumSize(1000, 700)
+        self.resize(window_width, window_height)
 
         # Central Widget
         central = QWidget()

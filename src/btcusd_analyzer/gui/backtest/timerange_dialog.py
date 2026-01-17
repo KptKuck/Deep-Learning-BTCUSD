@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
     QGroupBox, QLabel, QPushButton, QDateTimeEdit,
-    QFileDialog, QComboBox, QMessageBox, QWidget
+    QFileDialog, QComboBox, QMessageBox, QWidget, QApplication
 )
 from PyQt6.QtCore import Qt, QDateTime
 from PyQt6.QtGui import QFont
@@ -32,7 +32,18 @@ class TimeRangeDialog(QDialog):
                  current_data: pd.DataFrame = None):
         super().__init__(parent)
         self.setWindowTitle("4.4 - Zeitraum")
-        self.setMinimumSize(500, 400)
+
+        # Relative Fenstergroesse (50% Hoehe, 35% Breite)
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_rect = screen.availableGeometry()
+            window_width = int(screen_rect.width() * 0.35)
+            window_height = int(screen_rect.height() * 0.50)
+        else:
+            window_width, window_height = 500, 400
+
+        self.setMinimumSize(450, 350)
+        self.resize(window_width, window_height)
         self.setModal(True)
 
         # Aktuelle Werte

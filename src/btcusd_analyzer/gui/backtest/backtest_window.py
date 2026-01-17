@@ -13,7 +13,7 @@ import pstats
 import io
 from typing import Optional, Dict, List
 
-from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QSplitter
+from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QSplitter, QApplication
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 
 import pandas as pd
@@ -45,7 +45,18 @@ class BacktestWindow(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("4 - Backtest")
-        self.setMinimumSize(1200, 800)
+
+        # Relative Fenstergroesse (95% Hoehe, 90% Breite)
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_rect = screen.availableGeometry()
+            window_width = int(screen_rect.width() * 0.90)
+            window_height = int(screen_rect.height() * 0.95)
+        else:
+            window_width, window_height = 1200, 800
+
+        self.setMinimumSize(1000, 700)
+        self.resize(window_width, window_height)
         self._parent = parent
 
         # Daten

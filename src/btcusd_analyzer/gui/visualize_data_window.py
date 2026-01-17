@@ -7,7 +7,7 @@ from typing import Optional, Dict, Any, List
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QLabel, QPushButton, QGroupBox, QScrollArea, QFrame, QSplitter
+    QLabel, QPushButton, QGroupBox, QScrollArea, QFrame, QSplitter, QApplication
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -88,7 +88,18 @@ class VisualizeDataWindow(QMainWindow):
     def _init_ui(self):
         """Initialisiert die UI-Komponenten."""
         self.setWindowTitle('5 - Visualize')
-        self.setMinimumSize(1400, 900)
+
+        # Relative Fenstergroesse (95% Hoehe, 90% Breite)
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_rect = screen.availableGeometry()
+            window_width = int(screen_rect.width() * 0.90)
+            window_height = int(screen_rect.height() * 0.95)
+        else:
+            window_width, window_height = 1400, 900
+
+        self.setMinimumSize(1200, 800)
+        self.resize(window_width, window_height)
         self.setStyleSheet(self._get_stylesheet())
 
         # Central Widget
