@@ -24,6 +24,7 @@ from .stats_panel import StatsPanel
 from .chart_panel import ChartPanel
 from .trade_statistics_dialog import TradeStatisticsDialog
 from .timerange_dialog import TimeRangeDialog
+from .profiling_dialog import ProfilingDialog
 from ..styles import get_stylesheet
 
 
@@ -653,67 +654,33 @@ class BacktestWindow(QMainWindow):
         self._log(f"Profiling {state}", 'INFO')
 
     def _output_profiling_report(self):
-        """Gibt den Profiling-Bericht aus."""
+        """Gibt den Profiling-Bericht aus und zeigt Dialog."""
         if not self._profiler:
             return
 
-        # String-Buffer fuer Bericht
-        stream = io.StringIO()
+        self._log("Profiling abgeschlossen - oeffne Ergebnisse...", 'INFO')
 
-        # Statistiken sortiert nach kumulative Zeit
-        stats = pstats.Stats(self._profiler, stream=stream)
+        # Profiling-Dialog oeffnen
+        dialog = ProfilingDialog(self._profiler, self, "Backtest Profiling")
+        dialog.exec()
+
+        # Kurze Zusammenfassung ins Log
+        stats = pstats.Stats(self._profiler)
         stats.strip_dirs()
-        stats.sort_stats('cumulative')
 
-        # Header
-        stream.write("\n" + "=" * 80 + "\n")
-        stream.write("PROFILING BERICHT - Backtest\n")
-        stream.write("=" * 80 + "\n\n")
-
-        # Top 30 Funktionen nach kumulative Zeit
-        stream.write("Top 30 Funktionen (nach kumulativer Zeit):\n")
-        stream.write("-" * 80 + "\n")
-        stats.print_stats(30)
-
-        # Nur Backtest-relevante Funktionen
-        stream.write("\n" + "-" * 80 + "\n")
-        stream.write("Backtest-spezifische Funktionen:\n")
-        stream.write("-" * 80 + "\n")
-        stats.print_stats('backtest')
-
-        # Bericht ausgeben
-        report = stream.getvalue()
-
-        # In Log-Datei schreiben
-        try:
-            from ...core.logger import get_logger
-            logger = get_logger()
-            for line in report.split('\n'):
-                if line.strip():
-                    logger.info(line)
-        except Exception:
-            pass
-
-        # Zusammenfassung extrahieren und loggen
-        self._log("=== Profiling Bericht ===")
-
-        stats_dict = stats.stats
         backtest_funcs = []
-
-        for (filename, line, func), (cc, nc, tt, ct, callers) in stats_dict.items():
+        for (filename, line, func), (cc, nc, tt, ct, callers) in stats.stats.items():
             if 'backtest' in filename.lower() or 'chart' in filename.lower():
                 backtest_funcs.append({
                     'name': func,
                     'calls': nc,
-                    'total_time': tt,
                     'cumulative_time': ct
                 })
 
-        # Sortiere nach kumulativer Zeit
         backtest_funcs.sort(key=lambda x: x['cumulative_time'], reverse=True)
 
-        # Zeige Top 10 im Log
-        for i, func in enumerate(backtest_funcs[:10], 1):
+        self._log("=== Profiling Top 5 ===")
+        for i, func in enumerate(backtest_funcs[:5], 1):
             self._log(
                 f"{i}. {func['name']}: {func['calls']} Aufrufe, "
                 f"{func['cumulative_time']*1000:.1f}ms"
