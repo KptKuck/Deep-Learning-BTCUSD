@@ -120,9 +120,9 @@ class MainWindow(QMainWindow):
         self.logger.info('BTCUSD Analyzer GUI gestartet')
         self.logger.info(f'Log-Datei: {self.logger.get_log_file_path()}')
 
-        # Auto-Load letzte Daten und Session
-        QTimer.singleShot(100, self._auto_load_last_data)
-        QTimer.singleShot(200, self._auto_load_latest_session)
+        # Auto-Load deaktiviert - Session wird ueber Session Manager geladen
+        # QTimer.singleShot(100, self._auto_load_last_data)
+        # QTimer.singleShot(200, self._auto_load_latest_session)
 
     def _init_ui(self):
         """Initialisiert die UI-Komponenten."""
@@ -662,13 +662,13 @@ class MainWindow(QMainWindow):
         self.backtest_btn.clicked.connect(self._open_backtester)
         btn_row2.addWidget(self.backtest_btn)
 
-        self.load_session_btn = QPushButton('Session')
-        self.load_session_btn.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
-        self.load_session_btn.setFixedHeight(26)
-        self.load_session_btn.setStyleSheet(self._button_style((0.3, 0.6, 0.8)))
-        self.load_session_btn.setToolTip('Session-Ordner laden (Daten + Modell)')
-        self.load_session_btn.clicked.connect(self._load_session)
-        btn_row2.addWidget(self.load_session_btn)
+        self.session_manager_btn = QPushButton('Sessions')
+        self.session_manager_btn.setFont(QFont('Segoe UI', 9, QFont.Weight.Bold))
+        self.session_manager_btn.setFixedHeight(26)
+        self.session_manager_btn.setStyleSheet(self._button_style((0.3, 0.6, 0.8)))
+        self.session_manager_btn.setToolTip('Session Manager oeffnen')
+        self.session_manager_btn.clicked.connect(self._open_session_manager)
+        btn_row2.addWidget(self.session_manager_btn)
 
         layout.addLayout(btn_row2)
 
@@ -1574,24 +1574,6 @@ class MainWindow(QMainWindow):
         else:
             self._log('Kein vorheriges Modell gefunden', 'WARNING')
 
-    def _load_session(self):
-        """Laedt eine komplette Session (Daten + Modell)."""
-        from PyQt6.QtWidgets import QFileDialog
-        from .session_loader_dialog import SessionLoaderDialog
-        from ..core.session_manager import SessionManager
-
-        # Debug: Sessions auflisten
-        log_dir = self.config.paths.log_dir
-        self._log(f"Suche Sessions in: {log_dir}", 'DEBUG')
-        sessions = SessionManager.list_sessions(log_dir)
-        self._log(f"Gefundene Sessions: {len(sessions)}", 'DEBUG')
-
-        dialog = SessionLoaderDialog(log_dir, parent=self)
-        if dialog.exec():
-            session_dir = dialog.get_selected_session()
-            if session_dir:
-                self._load_session_from_dir(session_dir)
-
     def _load_session_from_dir(self, session_dir):
         """Laedt Session-Daten aus einem Ordner."""
         from pathlib import Path
@@ -1601,6 +1583,9 @@ class MainWindow(QMainWindow):
             session_dir = Path(session_dir)
             self._log("=== SESSION LOAD START ===", 'DEBUG')
             self._log(f"Session-Dir: {session_dir}", 'DEBUG')
+
+            # Aktuelle Session merken (fuer Session Manager)
+            self._current_session_name = session_dir.name
 
             manager = SessionManager(session_dir)
 
@@ -1848,10 +1833,6 @@ class MainWindow(QMainWindow):
 
     def _open_backtester(self):
         """Oeffnet das Backtester-Fenster."""
-        # Auto-Load: Neueste Session laden wenn kein Modell/Backtest-Daten vorhanden
-        if self.model is None or self.backtest_info is None:
-            self._auto_load_latest_session()
-
         # Pruefen ob Daten vorhanden
         if self.data is None:
             QMessageBox.warning(self, 'Fehler', 'Bitte zuerst Daten laden')
@@ -1886,10 +1867,6 @@ class MainWindow(QMainWindow):
 
     def _open_backtrader(self):
         """Oeffnet das Backtrader Pro Fenster."""
-        # Auto-Load: Neueste Session laden wenn kein Modell vorhanden
-        if self.model is None:
-            self._auto_load_latest_session()
-
         # Pruefen ob Daten vorhanden
         if self.data is None:
             QMessageBox.warning(self, 'Fehler', 'Bitte zuerst Daten laden')
@@ -1921,10 +1898,6 @@ class MainWindow(QMainWindow):
 
     def _open_walk_forward(self):
         """Oeffnet das Walk-Forward Analyse Fenster."""
-        # Auto-Load: Neueste Session laden wenn kein Modell vorhanden
-        if self.model is None:
-            self._auto_load_latest_session()
-
         # Pruefen ob Daten vorhanden
         if self.data is None:
             QMessageBox.warning(self, 'Fehler', 'Bitte zuerst Daten laden')
@@ -1983,17 +1956,31 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, 'Info', 'Web Dashboard kommt in einer spaeteren Version')
 
     def _open_session_manager(self):
-        """Oeffnet den Session Manager."""
+        """Oeffnet den Session Manager und laedt ausgewaehlte Session."""
         try:
             from .session_manager_window import SessionManagerWindow
+
+            # Aktuelle Session ermitteln (falls vorhanden)
+            current_session = None
+            if hasattr(self, '_current_session_name'):
+                current_session = self._current_session_name
 
             dialog = SessionManagerWindow(
                 data_dir=self.config.paths.data_dir,
                 log_dir=self.config.paths.log_dir,
-                parent=self
+                parent=self,
+                current_session=current_session
             )
-            dialog.exec()
-            self._log('Session Manager geschlossen', 'DEBUG')
+
+            if dialog.exec() == dialog.DialogCode.Accepted:
+                # Session wurde ausgewaehlt
+                session_path = dialog.get_selected_session()
+                if session_path:
+                    self._log(f'Lade Session: {Path(session_path).name}', 'INFO')
+                    self._load_session_from_dir(Path(session_path))
+            else:
+                self._log('Session Manager geschlossen', 'DEBUG')
+
         except Exception as e:
             import traceback
             self._log(f'Session Manager Fehler: {e}', 'ERROR')

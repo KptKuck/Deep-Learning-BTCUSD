@@ -2,23 +2,27 @@
 SessionManagerWindow - Fenster zur Verwaltung aller Sessions.
 
 Bietet eine Uebersicht aller Sessions mit:
+- Laden von Sessions
 - Filterung nach Status (trained/prepared)
 - Sortierung nach verschiedenen Kriterien
 - Loeschen von Sessions
 - Statistiken
 - Manuelle Migration
+- Ordner im Explorer oeffnen
 """
 
+import os
+import subprocess
 from pathlib import Path
 from typing import Optional
-import shutil
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QComboBox, QGroupBox, QMessageBox, QCheckBox, QFrame
+    QComboBox, QGroupBox, QMessageBox, QWidget, QSplitter,
+    QTextEdit
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
 
 from ..core.session_database import SessionDatabase
@@ -28,11 +32,16 @@ from ..core.session_manager import SessionManager
 class SessionManagerWindow(QDialog):
     """Fenster zur Verwaltung aller Sessions."""
 
-    def __init__(self, data_dir: Path, log_dir: Path, parent=None):
+    # Signal wenn eine Session geladen werden soll
+    session_load_requested = pyqtSignal(str)  # session_path
+
+    def __init__(self, data_dir: Path, log_dir: Path, parent=None, current_session: str = None):
         super().__init__(parent)
         self.data_dir = Path(data_dir)
         self.log_dir = Path(log_dir)
         self.db = SessionDatabase(self.data_dir)
+        self.current_session = current_session  # Aktuell geladene Session
+        self.selected_session_path: Optional[str] = None  # Fuer Rueckgabe
 
         self._init_ui()
         self._load_sessions()
@@ -41,7 +50,7 @@ class SessionManagerWindow(QDialog):
     def _init_ui(self):
         """Initialisiert die UI."""
         self.setWindowTitle('Session Manager')
-        self.setMinimumSize(900, 600)
+        self.setMinimumSize(1000, 650)
         self.setStyleSheet('''
             QDialog {
                 background-color: #262626;
@@ -107,12 +116,12 @@ class SessionManagerWindow(QDialog):
                 color: #cccccc;
                 selection-background-color: #3a5a8a;
             }
-            QCheckBox {
+            QTextEdit {
+                background-color: #1a1a1a;
                 color: #cccccc;
-            }
-            QCheckBox::indicator {
-                width: 16px;
-                height: 16px;
+                border: 1px solid #333;
+                font-family: Consolas, monospace;
+                font-size: 11px;
             }
         ''')
 
@@ -168,11 +177,18 @@ class SessionManagerWindow(QDialog):
 
         layout.addLayout(filter_layout)
 
-        # Tabelle
+        # Splitter fuer Tabelle und Details
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Tabelle (links)
+        table_widget = QWidget()
+        table_layout = QVBoxLayout(table_widget)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+
         self.table = QTableWidget()
-        self.table.setColumnCount(7)
+        self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels([
-            'Session', 'Status', 'Features', 'Samples', 'Accuracy', 'Erstellt', 'Aktionen'
+            'Session', 'Status', 'Features', 'Samples', 'Accuracy', 'Erstellt'
         ])
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -182,35 +198,89 @@ class SessionManagerWindow(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
-        layout.addWidget(self.table)
+        self.table.doubleClicked.connect(self._on_double_click)
+        self.table.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        table_layout.addWidget(self.table)
+
+        splitter.addWidget(table_widget)
+
+        # Details Panel (rechts)
+        details_widget = QWidget()
+        details_layout = QVBoxLayout(details_widget)
+        details_layout.setContentsMargins(5, 0, 0, 0)
+
+        details_label = QLabel('Session Details')
+        details_label.setFont(QFont('Segoe UI', 11, QFont.Weight.Bold))
+        details_label.setStyleSheet('color: #4de6ff;')
+        details_layout.addWidget(details_label)
+
+        self.details_text = QTextEdit()
+        self.details_text.setReadOnly(True)
+        self.details_text.setPlaceholderText('Session auswaehlen um Details anzuzeigen...')
+        details_layout.addWidget(self.details_text)
+
+        # Aktions-Buttons im Details-Panel
+        detail_btn_layout = QHBoxLayout()
+
+        self.open_folder_btn = QPushButton('Ordner oeffnen')
+        self.open_folder_btn.setToolTip('Oeffnet den Session-Ordner im Explorer')
+        self.open_folder_btn.clicked.connect(self._open_folder)
+        self.open_folder_btn.setEnabled(False)
+        detail_btn_layout.addWidget(self.open_folder_btn)
+
+        self.delete_btn = QPushButton('Loeschen')
+        self.delete_btn.setStyleSheet('''
+            QPushButton {
+                background-color: #5c2a2a;
+            }
+            QPushButton:hover {
+                background-color: #7c3a3a;
+            }
+        ''')
+        self.delete_btn.clicked.connect(self._delete_selected)
+        self.delete_btn.setEnabled(False)
+        detail_btn_layout.addWidget(self.delete_btn)
+
+        details_layout.addLayout(detail_btn_layout)
+
+        splitter.addWidget(details_widget)
+
+        # Splitter-Groessen setzen (70% Tabelle, 30% Details)
+        splitter.setSizes([700, 300])
+
+        layout.addWidget(splitter)
 
         # Buttons unten
         btn_layout = QHBoxLayout()
 
-        self.migrate_btn = QPushButton('Migration ausfuehren')
-        self.migrate_btn.setToolTip('Scannt log/-Ordner nach neuen Sessions und fuegt sie zur DB hinzu')
+        self.migrate_btn = QPushButton('Migration')
+        self.migrate_btn.setToolTip('Scannt log/-Ordner nach neuen Sessions')
         self.migrate_btn.clicked.connect(self._run_migration)
         btn_layout.addWidget(self.migrate_btn)
 
-        self.delete_selected_btn = QPushButton('Ausgewaehlte loeschen')
-        self.delete_selected_btn.setStyleSheet('''
-            QPushButton {
-                background-color: #742a2a;
-            }
-            QPushButton:hover {
-                background-color: #943a3a;
-            }
-        ''')
-        self.delete_selected_btn.clicked.connect(self._delete_selected)
-        btn_layout.addWidget(self.delete_selected_btn)
-
         btn_layout.addStretch()
 
+        self.load_btn = QPushButton('Session laden')
+        self.load_btn.setStyleSheet('''
+            QPushButton {
+                background-color: #3a7a5a;
+                padding: 8px 20px;
+            }
+            QPushButton:hover {
+                background-color: #4a9a6a;
+            }
+            QPushButton:disabled {
+                background-color: #333;
+            }
+        ''')
+        self.load_btn.clicked.connect(self._load_selected_session)
+        self.load_btn.setEnabled(False)
+        btn_layout.addWidget(self.load_btn)
+
         self.close_btn = QPushButton('Schliessen')
-        self.close_btn.clicked.connect(self.accept)
+        self.close_btn.clicked.connect(self.reject)
         btn_layout.addWidget(self.close_btn)
 
         layout.addLayout(btn_layout)
@@ -241,9 +311,18 @@ class SessionManagerWindow(QDialog):
         self._sessions = sessions
 
         for row, session in enumerate(sessions):
-            # Session-Name
-            name_item = QTableWidgetItem(session.get('id', '-'))
+            session_id = session.get('id', '-')
+            is_current = (session_id == self.current_session)
+
+            # Session-Name (mit Markierung fuer aktive Session)
+            name_text = session_id
+            if is_current:
+                name_text = f"* {session_id}"
+            name_item = QTableWidgetItem(name_text)
             name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            if is_current:
+                name_item.setForeground(QColor('#4de6ff'))
+                name_item.setToolTip('Aktuell geladene Session')
             self.table.setItem(row, 0, name_item)
 
             # Status
@@ -286,27 +365,11 @@ class SessionManagerWindow(QDialog):
             # Erstellt
             created = session.get('created_at', '')
             if created:
-                # ISO-Format kuerzen
                 created = created.replace('T', ' ')[:16]
             created_item = QTableWidgetItem(created)
             created_item.setFlags(created_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             created_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(row, 5, created_item)
-
-            # Aktionen-Button
-            delete_btn = QPushButton('Loeschen')
-            delete_btn.setStyleSheet('''
-                QPushButton {
-                    background-color: #5c2a2a;
-                    padding: 3px 8px;
-                    font-size: 11px;
-                }
-                QPushButton:hover {
-                    background-color: #7c3a3a;
-                }
-            ''')
-            delete_btn.clicked.connect(lambda checked, r=row: self._delete_session(r))
-            self.table.setCellWidget(row, 6, delete_btn)
 
         if not sessions:
             self.table.setRowCount(1)
@@ -314,6 +377,10 @@ class SessionManagerWindow(QDialog):
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             item.setForeground(Qt.GlobalColor.gray)
             self.table.setItem(0, 0, item)
+
+        # Details zuruecksetzen
+        self.details_text.clear()
+        self._update_button_states()
 
     def _update_statistics(self):
         """Aktualisiert die Statistik-Anzeige."""
@@ -341,6 +408,75 @@ class SessionManagerWindow(QDialog):
         """Wird aufgerufen wenn Filter geaendert wird."""
         self._load_sessions()
 
+    def _on_selection_changed(self):
+        """Wird aufgerufen wenn Auswahl sich aendert."""
+        self._update_button_states()
+        self._update_details()
+
+    def _update_button_states(self):
+        """Aktualisiert den Zustand der Buttons."""
+        row = self.table.currentRow()
+        has_selection = row >= 0 and row < len(self._sessions) if hasattr(self, '_sessions') else False
+
+        self.load_btn.setEnabled(has_selection)
+        self.delete_btn.setEnabled(has_selection)
+        self.open_folder_btn.setEnabled(has_selection)
+
+    def _update_details(self):
+        """Aktualisiert das Details-Panel."""
+        row = self.table.currentRow()
+        if row < 0 or not hasattr(self, '_sessions') or row >= len(self._sessions):
+            self.details_text.clear()
+            return
+
+        session = self._sessions[row]
+
+        # Details formatieren
+        details = []
+        details.append(f"<b style='color: #4de6ff;'>Session:</b> {session.get('id', '-')}")
+        details.append(f"<b>Status:</b> {session.get('status', '-').capitalize()}")
+        details.append(f"<b>Pfad:</b> {session.get('path', '-')}")
+        details.append("")
+
+        # Features
+        features = session.get('features', [])
+        if features:
+            details.append(f"<b style='color: #4de6ff;'>Features ({len(features)}):</b>")
+            for f in features:
+                details.append(f"  - {f}")
+        else:
+            details.append(f"<b>Features:</b> {session.get('num_features', 0)}")
+
+        details.append("")
+        details.append(f"<b>Samples:</b> {session.get('num_samples', 0):,}")
+
+        # Modell-Info
+        acc = session.get('model_accuracy', 0)
+        if acc > 0:
+            details.append("")
+            details.append(f"<b style='color: #4de6ff;'>Modell:</b>")
+            details.append(f"  Accuracy: <span style='color: #33b34d;'>{acc:.2f}%</span>")
+            details.append(f"  Version: {session.get('model_version', '-')}")
+            details.append(f"  Typ: {session.get('model_type', '-')}")
+
+        # Daten-Status
+        details.append("")
+        details.append(f"<b style='color: #4de6ff;'>Daten:</b>")
+        details.append(f"  Training-Daten: {'Ja' if session.get('has_training_data') else 'Nein'}")
+        details.append(f"  Backtest-Daten: {'Ja' if session.get('has_backtest_data') else 'Nein'}")
+        details.append(f"  Modell: {'Ja' if session.get('has_model') else 'Nein'}")
+
+        # Zeitstempel
+        details.append("")
+        created = session.get('created_at', '')
+        updated = session.get('updated_at', '')
+        if created:
+            details.append(f"<b>Erstellt:</b> {created.replace('T', ' ')[:19]}")
+        if updated and updated != created:
+            details.append(f"<b>Aktualisiert:</b> {updated.replace('T', ' ')[:19]}")
+
+        self.details_text.setHtml('<br>'.join(details))
+
     def _refresh(self):
         """Aktualisiert die Anzeige."""
         self._load_sessions()
@@ -363,14 +499,51 @@ class SessionManagerWindow(QDialog):
 
         self._refresh()
 
-    def _delete_session(self, row: int):
-        """Loescht eine einzelne Session."""
+    def _on_double_click(self):
+        """Doppelklick laedt die Session."""
+        self._load_selected_session()
+
+    def _load_selected_session(self):
+        """Laedt die ausgewaehlte Session."""
+        row = self.table.currentRow()
         if row < 0 or row >= len(self._sessions):
             return
 
         session = self._sessions[row]
-        session_id = session.get('id', '')
         session_path = session.get('path', '')
+
+        if not session_path:
+            QMessageBox.warning(self, 'Fehler', 'Session-Pfad nicht gefunden.')
+            return
+
+        # Pfad speichern und Dialog schliessen
+        self.selected_session_path = session_path
+        self.accept()
+
+    def _open_folder(self):
+        """Oeffnet den Session-Ordner im Explorer."""
+        row = self.table.currentRow()
+        if row < 0 or row >= len(self._sessions):
+            return
+
+        session = self._sessions[row]
+        session_path = session.get('path', '')
+
+        if session_path and Path(session_path).exists():
+            # Windows Explorer oeffnen
+            subprocess.Popen(['explorer', session_path])
+        else:
+            QMessageBox.warning(self, 'Fehler', f'Ordner existiert nicht:\n{session_path}')
+
+    def _delete_selected(self):
+        """Loescht die ausgewaehlte Session."""
+        row = self.table.currentRow()
+        if row < 0 or row >= len(self._sessions):
+            QMessageBox.warning(self, 'Hinweis', 'Bitte zuerst eine Session auswaehlen.')
+            return
+
+        session = self._sessions[row]
+        session_id = session.get('id', '')
 
         # Bestaetigung
         reply = QMessageBox.question(
@@ -386,10 +559,6 @@ class SessionManagerWindow(QDialog):
             self.db.delete_session(session_id)
             self._refresh()
 
-    def _delete_selected(self):
-        """Loescht die ausgewaehlte Session."""
-        row = self.table.currentRow()
-        if row >= 0:
-            self._delete_session(row)
-        else:
-            QMessageBox.warning(self, 'Hinweis', 'Bitte zuerst eine Session auswaehlen.')
+    def get_selected_session(self) -> Optional[str]:
+        """Gibt den Pfad der ausgewaehlten Session zurueck."""
+        return self.selected_session_path
