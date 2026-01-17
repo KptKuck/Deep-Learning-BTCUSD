@@ -588,3 +588,130 @@ class SessionManager:
                         sessions.append(summary)
 
             return sessions
+
+    # =========================================================================
+    # Session-Validierung
+    # =========================================================================
+
+    def validate_session(self, status: str = None) -> Dict[str, Any]:
+        """
+        Validiert die Vollstaendigkeit der Session fuer ein erneutes Laden.
+
+        Prueft ob alle notwendigen Dateien fuer den gegebenen Status vorhanden sind:
+        - 'prepared': training_data.npz, session_config.json (mit features)
+        - 'trained': zusaetzlich *.pt Modell
+
+        Args:
+            status: Erwarteter Status ('prepared' oder 'trained').
+                   Falls None, wird der Status aus der Config gelesen.
+
+        Returns:
+            Dict mit:
+                - valid: bool - Ob Session vollstaendig ist
+                - status: str - Aktueller/erwarteter Status
+                - missing: List[str] - Fehlende Komponenten
+                - warnings: List[str] - Warnungen (nicht kritisch)
+        """
+        self._logger.debug(f"[SessionManager] === VALIDATE SESSION ===")
+
+        result = {
+            'valid': True,
+            'status': status,
+            'missing': [],
+            'warnings': [],
+        }
+
+        # Status aus Config lesen falls nicht angegeben
+        if status is None:
+            config = self.load_config()
+            status = config.get('status', 'unknown') if config else 'unknown'
+            result['status'] = status
+
+        # Basis-Pruefungen (fuer alle Status)
+        # 1. Config mit Features
+        if not self.config_file.exists():
+            result['missing'].append('session_config.json')
+        else:
+            config = self.load_config()
+            if not config:
+                result['missing'].append('session_config.json (unlesbar)')
+            else:
+                features = config.get('features', [])
+                if not features:
+                    result['warnings'].append('Keine Features in Config')
+                training_info = config.get('training_info', {})
+                if not training_info:
+                    result['warnings'].append('Keine training_info in Config')
+
+        # 2. Training-Daten
+        if not self.training_data_file.exists():
+            result['missing'].append('training_data.npz')
+        else:
+            # Schnelle Validierung der NPZ-Datei
+            try:
+                with np.load(self.training_data_file, allow_pickle=True) as data:
+                    if 'sequences' not in data or 'labels' not in data:
+                        result['missing'].append('training_data.npz (unvollstaendig)')
+            except Exception as e:
+                result['missing'].append(f'training_data.npz (korrupt: {e})')
+
+        # Zusaetzliche Pruefungen fuer 'trained' Status
+        if status == 'trained':
+            models = list(self.session_dir.glob('*.pt'))
+            if not models:
+                result['missing'].append('Modell (*.pt)')
+            else:
+                # Pruefe ob Modell ladbar ist
+                model_path = max(models, key=lambda p: p.stat().st_mtime)
+                try:
+                    import torch
+                    checkpoint = torch.load(model_path, map_location='cpu', weights_only=False)
+                    if 'model_state_dict' not in checkpoint:
+                        result['warnings'].append('Modell ohne model_state_dict')
+                    if 'model_info' not in checkpoint:
+                        result['warnings'].append('Modell ohne model_info')
+                except Exception as e:
+                    result['missing'].append(f'Modell (korrupt: {e})')
+
+        # Backtest-Daten sind optional, aber nuetzlich
+        if not self.backtest_data_file.exists():
+            result['warnings'].append('Keine Backtest-Daten')
+
+        # Ergebnis
+        result['valid'] = len(result['missing']) == 0
+
+        # Logging
+        if result['valid']:
+            if result['warnings']:
+                self._logger.debug(f"[SessionManager] Session OK mit Warnungen: {result['warnings']}")
+            else:
+                self._logger.debug(f"[SessionManager] Session vollstaendig validiert")
+        else:
+            self._logger.warning(f"[SessionManager] Session unvollstaendig: {result['missing']}")
+
+        self._logger.debug(f"[SessionManager] === VALIDATE DONE: valid={result['valid']} ===")
+        return result
+
+    def ensure_loadable(self) -> bool:
+        """
+        Stellt sicher, dass die Session erneut geladen werden kann.
+
+        Validiert und loggt das Ergebnis. Gibt True zurueck wenn ladbar.
+
+        Returns:
+            True wenn Session vollstaendig, False wenn Dateien fehlen
+        """
+        result = self.validate_session()
+
+        if not result['valid']:
+            self._logger.error(
+                f"[SessionManager] Session nicht ladbar! Fehlend: {', '.join(result['missing'])}"
+            )
+            return False
+
+        if result['warnings']:
+            self._logger.warning(
+                f"[SessionManager] Session ladbar mit Warnungen: {', '.join(result['warnings'])}"
+            )
+
+        return True

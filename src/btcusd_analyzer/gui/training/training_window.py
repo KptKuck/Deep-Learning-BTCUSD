@@ -551,6 +551,17 @@ class TrainingWindow(QMainWindow):
                     if num_samples:
                         update_data['num_samples'] = num_samples
                 manager._update_session_db(update_data)
+
+                # Session-Validierung: Pruefen ob erneutes Laden moeglich ist
+                self._log("--- Validiere Session ---", 'DEBUG')
+                validation = manager.validate_session(status='trained')
+                if validation['valid']:
+                    if validation['warnings']:
+                        self._log(f"Session OK mit Warnungen: {validation['warnings']}", 'DEBUG')
+                    else:
+                        self._log("Session vollstaendig - erneutes Laden moeglich", 'DEBUG')
+                else:
+                    self._log(f"Session unvollstaendig! Fehlend: {validation['missing']}", 'WARNING')
             else:
                 self._log("Keine Session-Dir verfuegbar!", 'WARNING')
         except Exception as e:
