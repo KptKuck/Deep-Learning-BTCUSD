@@ -66,6 +66,27 @@ Alle GUI-Fenster muessen einen numerischen Index im Titel haben:
 
 Format: `setWindowTitle("X.X - Fenstername")`
 
+### Relative Groessenangaben (WICHTIG)
+Alle GUI-Groessenangaben muessen relativ zur Bildschirmgroesse sein (in %):
+- GUIs sollen sich unabhaengig von der Bildschirmaufloesung skalieren
+- Feste Pixelwerte nur fuer Minimum-Groessen verwenden
+
+**Beispiel-Pattern:**
+```python
+from PyQt6.QtWidgets import QApplication
+
+screen = QApplication.primaryScreen()
+if screen:
+    screen_rect = screen.availableGeometry()
+    window_width = int(screen_rect.width() * 0.80)   # 80% der Breite
+    window_height = int(screen_rect.height() * 0.95) # 95% der Hoehe
+else:
+    window_width, window_height = 1100, 900  # Fallback
+
+self.setMinimumSize(800, 600)  # Absolute Minimum-Werte
+self.resize(window_width, window_height)
+```
+
 ## Git
 - Commit-Messages auf Englisch
 - Co-Authored-By Tag bei Commits
