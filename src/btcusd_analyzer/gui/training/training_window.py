@@ -219,7 +219,7 @@ class TrainingWindow(QMainWindow):
                 **{k: v for k, v in model_config.items() if k not in ['model_name', 'num_classes']}
             )
 
-            self._log(f"Modell erstellt: {self.model.name}")
+            self._log(f"Neues Modell erstellt: {self.model.name} (zufaellige Gewichte)")
             self._log(f"Parameter: {sum(p.numel() for p in self.model.parameters()):,}")
 
         except Exception as e:
