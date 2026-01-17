@@ -64,6 +64,10 @@ cd "c:\Work\MatLab\btc_analyzer_python" && git status
 cd /d c:\Work\MatLab\btc_analyzer_python && git status
 ```
 
+## Edit-Befehle (WICHTIG)
+Vor jedem `Edit` immer zuerst `Read` ausfuehren (nicht nur `Grep`),
+da die Datei durch Linter/IDE zwischenzeitlich modifiziert werden kann.
+
 ## Wichtige Pfade
 - **Log-Verzeichnis:** `C:\Work\MatLab\btc_analyzer_python\log`
   - Bei Aufforderung "Log pruefen" immer zuerst hier nachschauen
