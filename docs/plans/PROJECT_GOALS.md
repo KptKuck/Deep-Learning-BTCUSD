@@ -2,14 +2,15 @@
 
 ## Vision
 
-Eine Desktop-Anwendung fuer automatisiertes BTC-Trading mit zwei Haupt-Workflows:
+Eine Desktop-Anwendung fuer automatisiertes BTC-Trading mit drei Haupt-Workflows:
 
 1. **Einzeltest-Workflow** - Manuelles Training und Evaluation eines Modells
-2. **Automatik-Workflow** - Vollautomatisches Live-Trading mit rollierendem Retraining
+2. **Session-Management** - Speichern/Laden von Zwischenstaenden fuer weitere Tests
+3. **Automatik-Workflow** - Vollautomatisches Live-Trading mit rollierendem Retraining
 
 ---
 
-## Die zwei Hauptziele
+## Die drei Hauptziele
 
 ### Hauptziel 1: Backtester zur Modell-Evaluation
 
@@ -85,7 +86,88 @@ Automatisierte Evaluation ueber mehrere Zeitfenster:
 
 ---
 
-### Hauptziel 2: Vollautomatik-Modus (Live Trading)
+### Hauptziel 2: Session-Management (Speichern/Laden)
+
+Speichern von Zwischenstaenden aus dem Einzeltest-Workflow, um spaeter weiterzuarbeiten:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    SESSION-MANAGEMENT                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  SPEICHERN nach jedem Abschnitt:                                │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                                                          │   │
+│  │  Schritt 1: Daten geladen                                │   │
+│  │  └── [Speichern] → raw_data.csv, data_config.json       │   │
+│  │                                                          │   │
+│  │  Schritt 2: Features berechnet                           │   │
+│  │  └── [Speichern] → features.npz, feature_config.json    │   │
+│  │                                                          │   │
+│  │  Schritt 3: Labels generiert                             │   │
+│  │  └── [Speichern] → labels.npz, sequences.npz            │   │
+│  │                                                          │   │
+│  │  Schritt 4: Modell trainiert                             │   │
+│  │  └── [Speichern] → model.pt, training_history.json      │   │
+│  │                                                          │   │
+│  │  Schritt 5: Backtest durchgefuehrt                       │   │
+│  │  └── [Speichern] → backtest_results.json, trades.csv    │   │
+│  │                                                          │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                 │
+│  LADEN eines alten Speicherstands:                              │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                                                          │   │
+│  │  Session-Manager:                                        │   │
+│  │  ├── Liste aller gespeicherten Sessions                  │   │
+│  │  ├── Metadaten anzeigen (Datum, Schritt, Metriken)       │   │
+│  │  └── Session laden → Weiterarbeiten ab diesem Punkt      │   │
+│  │                                                          │   │
+│  │  Anwendungsfaelle:                                       │   │
+│  │  ├── Modell laden → Neuer Backtest mit anderen Daten     │   │
+│  │  ├── Features laden → Anderes Modell trainieren          │   │
+│  │  ├── Labels laden → Andere Hyperparameter testen         │   │
+│  │  └── Daten laden → Andere Features ausprobieren          │   │
+│  │                                                          │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Session-Struktur
+
+```
+sessions/
+├── session-2026-01-18_14h30m/
+│   ├── session_config.json      # Metadaten, Status, Parameter
+│   ├── raw_data.csv             # Originaldaten (optional, gross)
+│   ├── features.npz             # Berechnete Features
+│   ├── labels.npz               # Generierte Labels
+│   ├── sequences.npz            # Training-Sequenzen
+│   ├── model.pt                 # Trainiertes Modell
+│   ├── model.json               # Modell-Metadaten
+│   ├── normalizer.pkl           # Gespeicherter Normalizer
+│   ├── training_history.json    # Loss/Accuracy pro Epoche
+│   ├── backtest_results.json    # Backtest-Metriken
+│   ├── trades.csv               # Einzelne Trades
+│   └── validation_config.json   # Pipeline-Hash fuer Konsistenz
+│
+└── sessions.json                # Index aller Sessions
+```
+
+#### Speicherpunkte im Einzeltest
+
+| Nach Schritt | Was wird gespeichert | Wiederverwendbar fuer |
+|--------------|---------------------|----------------------|
+| 1. Daten laden | raw_data, data_config | Andere Features testen |
+| 2. Features | features.npz, normalizer | Andere Labels/Modelle |
+| 3. Labels | labels.npz, sequences.npz | Andere Hyperparameter |
+| 4. Training | model.pt, history | Andere Backtests |
+| 5. Backtest | results, trades | Analyse, Vergleich |
+
+---
+
+### Hauptziel 3: Vollautomatik-Modus (Live Trading)
 
 Langzeit-Betrieb mit rollierendem Retraining und Live-Trading:
 
@@ -198,14 +280,14 @@ Im Live-Modus liefert Binance pro Zeiteinheit **eine einzelne OHLCV-Candle**:
 
 ## Workflow-Vergleich
 
-| Aspekt | Einzeltest | Walk-Forward | Vollautomatik |
-|--------|------------|--------------|---------------|
-| **Zweck** | Modell entwickeln | Modell evaluieren | Produktiv handeln |
-| **Benutzer-Eingriff** | Manuell pro Schritt | Start, dann automatisch | Vollautomatisch |
-| **Datenquelle** | Historisch (einmalig) | Historisch (Fenster) | Live + Puffer |
-| **Training** | Einmal | Pro Fold | Rollierend |
-| **Ergebnis** | Ein Modell | Stabilitaets-Analyse | Trades + Profit |
-| **GUI-Fenster** | 2, 3, 4 | 4.2 | 6 |
+| Aspekt | Einzeltest | Session-Mgmt | Walk-Forward | Vollautomatik |
+|--------|------------|--------------|--------------|---------------|
+| **Zweck** | Modell entwickeln | Staende speichern/laden | Modell evaluieren | Produktiv handeln |
+| **Benutzer-Eingriff** | Manuell pro Schritt | Manuell | Start, dann automatisch | Vollautomatisch |
+| **Datenquelle** | Historisch (einmalig) | Gespeicherte Session | Historisch (Fenster) | Live + Puffer |
+| **Training** | Einmal | Wiederverwendbar | Pro Fold | Rollierend |
+| **Ergebnis** | Ein Modell | Wiederherstellbarer Stand | Stabilitaets-Analyse | Trades + Profit |
+| **GUI-Fenster** | 2, 3, 4 | 1.1 | 4.2 | 6 |
 
 ---
 
@@ -221,6 +303,15 @@ Im Live-Modus liefert Binance pro Zeiteinheit **eine einzelne OHLCV-Candle**:
 | Sequenzen erstellen | Fertig |
 | Modell trainieren | Fertig |
 | Backtest | Fertig |
+
+### Session-Management-Workflow
+| Schritt | Status |
+|---------|--------|
+| Session speichern (manuell) | Teilweise |
+| Session laden | Teilweise |
+| Session-Manager GUI (1.1) | Fertig |
+| Speichern nach jedem Schritt | Geplant (SaveManager) |
+| Nachfrage bei Ueberschreiben | Geplant |
 
 ### Walk-Forward-Workflow
 | Schritt | Status |
@@ -244,7 +335,7 @@ Im Live-Modus liefert Binance pro Zeiteinheit **eine einzelne OHLCV-Candle**:
 
 ## Architektur-Ziele (Infrastruktur)
 
-Diese Module unterstuetzen beide Hauptziele:
+Diese Module unterstuetzen alle drei Hauptziele:
 
 | Modul | Zweck | Status |
 |-------|-------|--------|
@@ -289,7 +380,10 @@ Hauptziel 1: Backtester
 ├── 4 - Backtest         (Einzeltest: Schritt 5)
 └── 4.2 - Walk-Forward   (Kompletter Run)
 
-Hauptziel 2: Vollautomatik
+Hauptziel 2: Session-Management
+└── 1.1 - SessionManager (Speichern/Laden)
+
+Hauptziel 3: Vollautomatik
 └── 6 - Trading          (Live + Simuliert)
 ```
 
@@ -303,7 +397,14 @@ Hauptziel 2: Vollautomatik
 - [ ] Keine Daten-Inkonsistenzen (Validator)
 - [ ] Reproduzierbare Ergebnisse
 
-### Hauptziel 2: Vollautomatik
+### Hauptziel 2: Session-Management
+- [ ] Speichern nach jedem Schritt moeglich
+- [ ] Session laden und ab beliebigem Punkt weiterarbeiten
+- [ ] Nachfrage bei Ueberschreiben existierender Daten
+- [ ] Session-Metadaten (Datum, Schritt, Metriken) anzeigen
+- [ ] Alte Sessions loeschen/archivieren
+
+### Hauptziel 3: Vollautomatik
 - [ ] Simulierter Live-Modus mit CSV-Puffer funktioniert
 - [ ] Rollierendes Retraining ohne Absturz
 - [ ] Binance Orders werden korrekt ausgefuehrt
