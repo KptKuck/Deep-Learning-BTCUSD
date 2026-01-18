@@ -26,7 +26,8 @@ Schrittweise Durchfuehrung durch den Benutzer:
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  1. DATEN LADEN                                                 │
-│     └── Historische Daten von Binance laden                     │
+│     └── Historische OHLCV-Daten von Binance laden               │
+│         (Alle verfuegbaren Kurse: BTCUSDT, ETHUSDT, etc.)       │
 │                                                                 │
 │  2. VERARBEITEN / VORBEREITEN                                   │
 │     ├── Features berechnen (Indikatoren)                        │
@@ -349,11 +350,11 @@ Diese Module unterstuetzen alle drei Hauptziele:
 
 | Non-Goal | Begruendung |
 |----------|-------------|
-| Multi-Asset Trading | Fokus auf BTCUSD |
+| Multi-Asset gleichzeitig | Ein Asset pro Session/Modell |
 | HFT (High Frequency) | Stunden-Candles, kein Millisekunden-Trading |
 | Web-App | Desktop-fokussiert (PyQt6) |
 | Cloud-Deployment | Lokale Ausfuehrung |
-| Portfolio-Management | Einzelnes Asset |
+| Portfolio-Management | Einzelnes Asset pro Session |
 
 ---
 
@@ -366,8 +367,8 @@ Diese Module unterstuetzen alle drei Hauptziele:
 | ML Framework | PyTorch |
 | Haupt-Modell | BILSTM |
 | Datenquelle | Binance API / CSV |
-| Zeitrahmen | 1h Candles (primaer) |
-| Asset | BTCUSD |
+| Zeitrahmen | 1H / 1M (waehlbar) |
+| Assets | Alle Binance-Kurse (BTCUSDT, ETHUSDT, etc.)
 
 ---
 
