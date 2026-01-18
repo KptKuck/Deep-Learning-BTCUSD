@@ -89,45 +89,110 @@ Automatisierte Evaluation ueber mehrere Zeitfenster:
 
 Langzeit-Betrieb mit rollierendem Retraining und Live-Trading:
 
+#### Dateneingang: Live vs Simuliert
+
+Im Live-Modus liefert Binance pro Zeiteinheit **eine einzelne OHLCV-Candle**:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    DATENEINGANG                                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  LIVE-MODUS (Binance API):                                      │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  Timeframe: 1H oder 1M (waehlbar)                        │   │
+│  │                                                          │   │
+│  │  Pro Candle-Abschluss:                                   │   │
+│  │  → Open, High, Low, Close, Volume                        │   │
+│  │  → 1 Zeile alle 1H (oder 1M)                             │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                            │                                    │
+│                            ▼                                    │
+│  SIMULIERTER MODUS (CSV-Puffer):                                │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  CSV mit historischen Daten                              │   │
+│  │                                                          │   │
+│  │  Schrittweise Einspeisung:                               │   │
+│  │  → 1 Zeile pro Tick (simuliert Live-Eingang)             │   │
+│  │  → Exakt gleiches Format wie Live                        │   │
+│  │  → Zeitverzoegerung optional (Echtzeit-Simulation)       │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                 │
+│  WICHTIG: Beide Modi liefern identisches Datenformat!           │
+│  → DateTime, Open, High, Low, Close, Volume                     │
+│  → 1 Zeile pro Timeframe-Einheit                                │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Vollautomatik-Workflow
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                   VOLLAUTOMATIK WORKFLOW                        │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  ┌──────────────────────────────────────────────────────────┐  │
-│  │                    DATEN-PUFFER                           │  │
-│  │  CSV-Daten werden schrittweise gefuettert                 │  │
-│  │  (Simuliert Live-Dateneingang)                            │  │
+│  │                    CANDLE-EINGANG                         │  │
+│  │                                                           │  │
+│  │  Live:      Binance WebSocket/REST → 1 OHLCV pro Tick    │  │
+│  │  Simuliert: CSV-Puffer → 1 Zeile pro Tick                │  │
+│  │                                                           │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │                            │                                    │
 │                            ▼                                    │
 │  ┌──────────────────────────────────────────────────────────┐  │
-│  │                 ROLLIERENDER ZYKLUS                       │  │
+│  │                 VERARBEITUNGS-ZYKLUS                      │  │
+│  │                 (Pro neue Candle)                         │  │
 │  │                                                           │  │
 │  │   ┌─────────┐    ┌─────────┐    ┌─────────┐              │  │
-│  │   │ TRAIN   │ →  │ PREDICT │ →  │ TRADE   │              │  │
-│  │   │ Modell  │    │ Signal  │    │ Execute │              │  │
+│  │   │FEATURE  │ →  │PREDICT  │ →  │ TRADE   │              │  │
+│  │   │berechnen│    │Signal   │    │ausfuehren│             │  │
 │  │   └─────────┘    └─────────┘    └─────────┘              │  │
-│  │        ↑                              │                   │  │
-│  │        └──────────────────────────────┘                   │  │
-│  │              Nach X Candles: Retrain                      │  │
+│  │                                                           │  │
+│  │   Lookback-Fenster: Letzte N Candles fuer Features        │  │
 │  │                                                           │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │                            │                                    │
 │                            ▼                                    │
 │  ┌──────────────────────────────────────────────────────────┐  │
-│  │                    LIVE TRADING                           │  │
-│  │  ├── Binance API Orders                                   │  │
-│  │  ├── Risk Management (Stop-Loss, Position Size)           │  │
-│  │  └── Monitoring / Logging                                 │  │
+│  │                 ROLLIERENDES RETRAINING                   │  │
+│  │                 (Nach X Candles)                          │  │
+│  │                                                           │  │
+│  │   Trigger: Alle X Stunden/Tage oder bei Performance-Drop │  │
+│  │   → Neue Labels aus echten Ergebnissen                    │  │
+│  │   → Modell mit aktuellen Daten nachtrainieren             │  │
+│  │                                                           │  │
 │  └──────────────────────────────────────────────────────────┘  │
-│                                                                 │
-│  Simulierter Live-Modus:                                        │
-│  └── CSV-Daten aus Puffer schrittweise einspeisen              │
-│      (Fuer Tests ohne echtes Geld)                              │
+│                            │                                    │
+│                            ▼                                    │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │                    ORDER EXECUTION                        │  │
+│  │                                                           │  │
+│  │   Live:      Binance API → Echte Orders                   │  │
+│  │   Simuliert: Paper Trading → Virtuelle Orders             │  │
+│  │                                                           │  │
+│  │   Risk Management:                                        │  │
+│  │   ├── Position Sizing                                     │  │
+│  │   ├── Stop-Loss                                           │  │
+│  │   └── Max Drawdown Limit                                  │  │
+│  │                                                           │  │
+│  └──────────────────────────────────────────────────────────┘  │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+#### Simulierter vs Live Modus - Vergleich
+
+| Aspekt | Simuliert | Live |
+|--------|-----------|------|
+| **Datenquelle** | CSV-Datei | Binance API |
+| **Einspeisung** | 1 Zeile pro Tick aus Puffer | 1 Candle pro Timeframe |
+| **Format** | OHLCV (identisch) | OHLCV (identisch) |
+| **Timeframe** | 1H / 1M (waehlbar) | 1H / 1M (waehlbar) |
+| **Geschwindigkeit** | Schnell (kein Warten) | Echtzeit |
+| **Orders** | Paper Trading (virtuell) | Echte Binance Orders |
+| **Zweck** | Testen ohne Risiko | Produktiv handeln |
 
 ---
 
